@@ -1,0 +1,14 @@
+sqlalchemy
+psycopg2-binary
+asyncpg
+python-gitlab
+GitPython
+mypy
+black
+flake8
+isort
+pytest
+pytest-asyncio
+requests
+pydantic
+alembic

@@ -1,24 +1,36 @@
+import os
+import uuid
+from datetime import datetime
+from git import Repo as GitRepo
 from sqlalchemy import (
-    Column,
-    String,
-    Text,
-    Integer,
-    Boolean,
-    DateTime,
     JSON,
+    Boolean,
+    Column,
+    DateTime,
     ForeignKey,
-    UniqueConstraint,
+    Integer,
+    Text,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import declarative_base, relationship
-from datetime import datetime
-import uuid
 
 Base = declarative_base()
 
 
-class Repo(Base):
+class Repo(Base, GitRepo):
     __tablename__ = "repos"
+
+    def __init__(self, repo_path: str = None, **kwargs):
+        """
+        Initialize the Repo class with the given repository path.
+
+        :param repo_path: Path to the git repository (optional).
+        :param kwargs: Additional keyword arguments for SQLAlchemy ORM.
+        """
+        super().__init__(**kwargs)  # Initialize SQLAlchemy ORM
+        if repo_path:
+            GitRepo.__init__(self, repo_path)  # Initialize GitPython Repo
+
     id = Column(
         UUID(as_uuid=True),
         primary_key=True,
@@ -39,16 +51,16 @@ class Repo(Base):
     tags = Column(
         JSON, nullable=False, default=list, comment="array of tags for the repo"
     )
-    repo_import_id = Column(
-        UUID(as_uuid=True),
-        ForeignKey("mergestat.repo_imports.id", ondelete="CASCADE"),
-        comment="foreign key for mergestat.repo_imports.id",
-    )
-    provider = Column(
-        UUID(as_uuid=True),
-        ForeignKey("mergestat.providers.id", ondelete="CASCADE"),
-        nullable=False,
-    )
+    # repo_import_id = Column(
+    #     UUID(as_uuid=True),
+    #     ForeignKey("mergestat.repo_imports.id", ondelete="CASCADE"),
+    #     comment="foreign key for mergestat.repo_imports.id",
+    # )
+    # provider = Column(
+    #     UUID(as_uuid=True),
+    #     ForeignKey("mergestat.providers.id", ondelete="CASCADE"),
+    #     nullable=False,
+    # )
 
     # Relationships
     git_refs = relationship("GitRef", back_populates="repo")
@@ -196,7 +208,46 @@ class GitCommitStat(Base):
     repo = relationship("Repo", back_populates="git_commit_stats")
 
 
-class GitBlame(Base):
+class GitBlameMixin:
+    """
+    Mixin to provide functionality for fetching blame data using gitpython.
+    """
+
+    @staticmethod
+    def fetch_blame(repo_path, filepath, repo_uuid):
+        """
+        Fetch blame data for a given file using gitpython.
+
+        :param repo_path: Path to the git repository.
+        :param filepath: Path to the file to fetch blame data for.
+        :param repo_uuid: UUID of the repository.
+        :return: List of blame data tuples.
+        """
+        blame_data = []
+        repo = Repo(repo_path)
+        rel_path = os.path.relpath(filepath, repo_path)
+        try:
+            blame_info = repo.blame("HEAD", rel_path)
+            line_no = 1
+            for commit, lines in blame_info:
+                for line in lines:
+                    blame_data.append((
+                        repo_uuid,
+                        commit.author.email,
+                        commit.author.name,
+                        commit.committed_datetime,
+                        commit.hexsha,
+                        line_no,
+                        line.rstrip("\n"),
+                        rel_path,
+                    ))
+                    line_no += 1
+        except Exception as e:
+            print(f"Error processing {rel_path}: {e}")
+        return blame_data
+
+
+class GitBlame(Base, GitBlameMixin):
     __tablename__ = "git_blame"
     repo_id = Column(
         UUID(as_uuid=True),
@@ -229,3 +280,28 @@ class GitBlame(Base):
 
     # Relationships
     repo = relationship("Repo", back_populates="git_blames")
+
+    @classmethod
+    def process_file(cls, repo_path, filepath, repo_uuid):
+        """
+        Process a file to fetch blame data and return it as a list of GitBlame objects.
+
+        :param repo_path: Path to the git repository.
+        :param filepath: Path to the file to process.
+        :param repo_uuid: UUID of the repository.
+        :return: List of GitBlame objects.
+        """
+        blame_data = cls.fetch_blame(repo_path, filepath, repo_uuid)
+        return [
+            cls(
+                repo_id=row[0],
+                author_email=row[1],
+                author_name=row[2],
+                author_when=row[3],
+                commit_hash=row[4],
+                line_no=row[5],
+                line=row[6],
+                path=row[7],
+            )
+            for row in blame_data
+        ]

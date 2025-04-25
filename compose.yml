@@ -1,0 +1,28 @@
+volumes:
+    postgres_data:
+        driver: local
+        driver_opts:
+            type: none
+            device: ./data/postgres
+            o: bind
+services:
+    postgres:
+        image: postgres:latest
+        container_name: postgres
+        restart: always
+        environment:
+            POSTGRES_USER: postgres
+            POSTGRES_PASSWORD: postgres
+            POSTGRES_DB: postgres
+        ports:
+            - "5333:5432"
+        volumes:
+            - postgres_data:/var/lib/postgresql/data
+    stats:
+        image: python:alpine
+        environment:
+            PG_URL: postgres://postgres:postgres@postgres:5432/postgres
+        volumes:
+            - ./:/app
+        working_dir: /app
+        command: python3 -m git-blame-filter-files.py
