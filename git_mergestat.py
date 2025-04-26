@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import argparse
 import asyncio
 import mimetypes
 import os
@@ -109,30 +110,12 @@ async def insert_repo_data(session: AsyncSession, repo: Repo) -> None:
         await session.commit()
 
 
-# Added a file filter to exclude certain files based on extensions or mime types
+# Expanded SKIP_EXTENSIONS to include more binary and package-like file types
 SKIP_EXTENSIONS = {
-    ".png",
-    ".jpg",
-    ".jpeg",
-    ".gif",
-    ".bmp",
-    ".pdf",
-    ".ttf",
-    ".otf",
-    ".woff",
-    ".woff2",
-    ".ico",
-    ".mp4",
-    ".mp3",
-    ".mov",
-    ".avi",
-    ".exe",
-    ".dll",
-    ".zip",
-    ".tar",
-    ".gz",
-    ".7z",
-    ".eot",
+    ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".pdf", ".ttf", ".otf", ".woff", ".woff2", ".ico",
+    ".mp4", ".mp3", ".mov", ".avi", ".exe", ".dll", ".zip", ".tar", ".gz", ".7z", ".eot",
+    ".rar", ".iso", ".dmg", ".pkg", ".deb", ".rpm", ".msi", ".class", ".jar", ".war", ".pyc",
+    ".pyo", ".so", ".o", ".a", ".lib", ".bin", ".dat", ".swp", ".lock", ".bak", ".tmp"
 }
 
 
@@ -164,6 +147,10 @@ def is_skippable(path: str) -> bool:
         "audio/",
         "application/pdf",
         "font/",
+        "application/x-executable",
+        "application/x-sharedlib",
+        "application/x-object",
+        "application/x-archive",
     ))
 
 
@@ -245,10 +232,34 @@ async def process_git_commit_stats(repo: Repo, session: AsyncSession) -> None:
         await insert_git_commit_stats(session, commit_stats_batch)
 
 
+def parse_args():
+    """
+    Parse command-line arguments.
+    """
+    parser = argparse.ArgumentParser(description="Process git repository data.")
+    parser.add_argument("--db", required=False, help="Database connection string.")
+    parser.add_argument("--repo-path", required=False, help="Path to the git repository.")
+    parser.add_argument("--start-date", required=False, help="Start date for filtering commits (YYYY-MM-DD).")
+    parser.add_argument("--end-date", required=False, help="End date for filtering commits (YYYY-MM-DD).")
+    return parser.parse_args()
+
+
 async def main() -> None:
     """
     Main entry point for the script.
     """
+    args = parse_args()
+
+    # Override environment variables with command-line arguments if provided
+    global DB_CONN_STRING, REPO_PATH
+    if args.db:
+        DB_CONN_STRING = args.db
+    if args.repo_path:
+        REPO_PATH = args.repo_path
+
+    start_date = args.start_date
+    end_date = args.end_date
+
     repo: Repo = Repo(REPO_PATH)
 
     async with AsyncSessionFactory() as session:
