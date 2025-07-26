@@ -3,8 +3,7 @@
 The purpose of this is to recreate, in a more simplistic form, the ability to sync git data (starting with gitlab) and mimic mergestat's functionality.
 
 # Git Metrics
-
-Using Mergestat's database format, this set of syncs will use any git repository locally, or from gitlab (github ones already exist) too allow you to more quickly add data without the complicated setup that mergestate and entail.
+Using Mergestat's database schema, this set of syncs will use any git repository locally, or from gitlab (github ones already exist) to allow you to more quickly add data without the complicated setup that mergestat and entails.
 
 ## Why?
 
