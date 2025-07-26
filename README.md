@@ -1,5 +1,6 @@
 # Git Metrics
-Using Mergestat's database format, this set of syncs will use any git repository locally, or from gitlab (github ones already exist) too allow you to more quickly add data without the complicated setup that mergestate and entail.
+Using Mergestat's database schema, this set of syncs will use any git repository locally, or from gitlab (github ones already exist) to allow you to more quickly add data without the complicated setup that mergestat and entails.
 
 ## Why?
 Mostly because using mergestat's syncs are great but take a lot of time to understand. The goal of this was for a personal project to understand how my teams are doing, and with a limited budget.
+
