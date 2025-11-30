@@ -6,7 +6,6 @@ import os
 from pathlib import Path
 from typing import List
 
-from git import Repo as GitRepo
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -195,18 +194,19 @@ async def process_git_commits(repo: Repo, session: AsyncSession) -> None:
         await insert_git_commit_data(session, commit_batch)
 
 
-async def process_git_blame(all_files: List[Path], session: AsyncSession) -> None:
+async def process_git_blame(
+    all_files: List[Path], session: AsyncSession, repo: Repo
+) -> None:
     """
     Process and insert GitBlame data into the database.
 
     :param all_files: List of file paths in the repository.
     :param session: SQLAlchemy AsyncSession.
+    :param repo: Repo instance to use for git operations.
     """
     blame_batch: List[GitBlame] = []
-    # Create a single GitRepo instance for all files to avoid expensive re-initialization
-    git_repo = GitRepo(REPO_PATH)
     for filepath in all_files:
-        blame_objects = GitBlame.process_file(REPO_PATH, filepath, REPO_UUID, repo=git_repo)
+        blame_objects = GitBlame.process_file(REPO_PATH, filepath, REPO_UUID, repo=repo)
         blame_batch.extend(blame_objects)
 
         if len(blame_batch) >= BATCH_SIZE:
@@ -285,7 +285,7 @@ async def main() -> None:
         # Process other data asynchronously
         await asyncio.gather(
             process_git_commits(repo, session),
-            process_git_blame(all_files, session),
+            process_git_blame(all_files, session, repo),
             process_git_commit_stats(repo, session),
         )
 
