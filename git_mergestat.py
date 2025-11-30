@@ -3,10 +3,10 @@ import argparse
 import asyncio
 import mimetypes
 import os
-from datetime import datetime
 from pathlib import Path
-from typing import List, Tuple
+from typing import List
 
+from git import Repo as GitRepo
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -203,8 +203,10 @@ async def process_git_blame(all_files: List[Path], session: AsyncSession) -> Non
     :param session: SQLAlchemy AsyncSession.
     """
     blame_batch: List[GitBlame] = []
+    # Create a single GitRepo instance for all files to avoid expensive re-initialization
+    git_repo = GitRepo(REPO_PATH)
     for filepath in all_files:
-        blame_objects = GitBlame.process_file(REPO_PATH, filepath, REPO_UUID)
+        blame_objects = GitBlame.process_file(REPO_PATH, filepath, REPO_UUID, repo=git_repo)
         blame_batch.extend(blame_objects)
 
         if len(blame_batch) >= BATCH_SIZE:
@@ -257,8 +259,9 @@ async def main() -> None:
     if args.repo_path:
         REPO_PATH = args.repo_path
 
-    start_date = args.start_date
-    end_date = args.end_date
+    # TODO: Implement date filtering for commits
+    # start_date = args.start_date
+    # end_date = args.end_date
 
     repo: Repo = Repo(REPO_PATH)
 

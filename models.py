@@ -214,17 +214,19 @@ class GitBlameMixin:
     """
 
     @staticmethod
-    def fetch_blame(repo_path, filepath, repo_uuid):
+    def fetch_blame(repo_path, filepath, repo_uuid, repo=None):
         """
         Fetch blame data for a given file using gitpython.
 
         :param repo_path: Path to the git repository.
         :param filepath: Path to the file to fetch blame data for.
         :param repo_uuid: UUID of the repository.
+        :param repo: Optional existing Repo instance to reuse (improves performance).
         :return: List of blame data tuples.
         """
         blame_data = []
-        repo = Repo(repo_path)
+        if repo is None:
+            repo = Repo(repo_path)
         rel_path = os.path.relpath(filepath, repo_path)
         try:
             blame_info = repo.blame("HEAD", rel_path)
@@ -282,16 +284,17 @@ class GitBlame(Base, GitBlameMixin):
     repo = relationship("Repo", back_populates="git_blames")
 
     @classmethod
-    def process_file(cls, repo_path, filepath, repo_uuid):
+    def process_file(cls, repo_path, filepath, repo_uuid, repo=None):
         """
         Process a file to fetch blame data and return it as a list of GitBlame objects.
 
         :param repo_path: Path to the git repository.
         :param filepath: Path to the file to process.
         :param repo_uuid: UUID of the repository.
+        :param repo: Optional existing Repo instance to reuse (improves performance).
         :return: List of GitBlame objects.
         """
-        blame_data = cls.fetch_blame(repo_path, filepath, repo_uuid)
+        blame_data = cls.fetch_blame(repo_path, filepath, repo_uuid, repo=repo)
         return [
             cls(
                 repo_id=row[0],
