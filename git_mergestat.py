@@ -9,7 +9,7 @@ from typing import List
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
-from models import GitBlame, Repo, GitCommit, GitCommitStat, GitFile
+from models.git import GitBlame, Repo, GitCommit, GitCommitStat, GitFile
 
 # === CONFIGURATION ===# The line `REPO_PATH = os.getenv("REPO_PATH", ".")` is retrieving the value of
 # an environment variable named "REPO_PATH". If the environment variable is not
@@ -111,10 +111,50 @@ async def insert_repo_data(session: AsyncSession, repo: Repo) -> None:
 
 # Expanded SKIP_EXTENSIONS to include more binary and package-like file types
 SKIP_EXTENSIONS = {
-    ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".pdf", ".ttf", ".otf", ".woff", ".woff2", ".ico",
-    ".mp4", ".mp3", ".mov", ".avi", ".exe", ".dll", ".zip", ".tar", ".gz", ".7z", ".eot",
-    ".rar", ".iso", ".dmg", ".pkg", ".deb", ".rpm", ".msi", ".class", ".jar", ".war", ".pyc",
-    ".pyo", ".so", ".o", ".a", ".lib", ".bin", ".dat", ".swp", ".lock", ".bak", ".tmp"
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".bmp",
+    ".pdf",
+    ".ttf",
+    ".otf",
+    ".woff",
+    ".woff2",
+    ".ico",
+    ".mp4",
+    ".mp3",
+    ".mov",
+    ".avi",
+    ".exe",
+    ".dll",
+    ".zip",
+    ".tar",
+    ".gz",
+    ".7z",
+    ".eot",
+    ".rar",
+    ".iso",
+    ".dmg",
+    ".pkg",
+    ".deb",
+    ".rpm",
+    ".msi",
+    ".class",
+    ".jar",
+    ".war",
+    ".pyc",
+    ".pyo",
+    ".so",
+    ".o",
+    ".a",
+    ".lib",
+    ".bin",
+    ".dat",
+    ".swp",
+    ".lock",
+    ".bak",
+    ".tmp",
 }
 
 
@@ -240,9 +280,19 @@ def parse_args():
     """
     parser = argparse.ArgumentParser(description="Process git repository data.")
     parser.add_argument("--db", required=False, help="Database connection string.")
-    parser.add_argument("--repo-path", required=False, help="Path to the git repository.")
-    parser.add_argument("--start-date", required=False, help="Start date for filtering commits (YYYY-MM-DD).")
-    parser.add_argument("--end-date", required=False, help="End date for filtering commits (YYYY-MM-DD).")
+    parser.add_argument(
+        "--repo-path", required=False, help="Path to the git repository."
+    )
+    parser.add_argument(
+        "--start-date",
+        required=False,
+        help="Start date for filtering commits (YYYY-MM-DD).",
+    )
+    parser.add_argument(
+        "--end-date",
+        required=False,
+        help="End date for filtering commits (YYYY-MM-DD).",
+    )
     return parser.parse_args()
 
 
