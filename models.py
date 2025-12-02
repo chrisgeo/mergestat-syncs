@@ -1,6 +1,7 @@
 import os
 import uuid
 from datetime import datetime
+from importlib import import_module
 from git import Repo as GitRepo
 from sqlalchemy import (
     JSON,
@@ -226,7 +227,8 @@ class GitBlameMixin:
         """
         blame_data = []
         if repo is None:
-            repo = Repo(repo_path)
+            repo_cls = import_module("models").Repo
+            repo = repo_cls(repo_path)
         rel_path = os.path.relpath(filepath, repo_path)
         try:
             blame_info = repo.blame("HEAD", rel_path)

@@ -12,3 +12,4 @@ pytest-asyncio
 requests
 pydantic
 alembic
+motor

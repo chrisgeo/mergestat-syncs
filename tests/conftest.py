@@ -4,6 +4,7 @@ import uuid
 from pathlib import Path
 
 import pytest
+import mimetypes
 from git import Repo as GitRepo
 
 
@@ -29,3 +30,7 @@ def git_repo(repo_path):
 def test_file(repo_path):
     """Return a path to an existing file in the repository."""
     return os.path.join(repo_path, "README.md")
+
+
+# Ensure TypeScript files are treated as text, not video/mp2t.
+mimetypes.add_type("text/x-typescript", ".ts")
