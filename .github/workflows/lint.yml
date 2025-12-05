@@ -32,7 +32,7 @@ jobs:
         black --check .
 
     - name: Run isort (import sort check)
-      continue_on_error: true
+      continue-on-error: true
       run: |
         isort --check-only .
 
