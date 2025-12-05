@@ -1,6 +1,6 @@
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from importlib import import_module
 from git import Repo as GitRepo
 from sqlalchemy import (
@@ -43,7 +43,7 @@ class Repo(Base, GitRepo):
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=datetime.utcnow,
+        default=lambda: datetime.now(timezone.utc),
         comment="timestamp of when the MergeStat repo entry was created",
     )
     settings = Column(
@@ -91,7 +91,7 @@ class GitRef(Base):
     _mergestat_synced_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=datetime.utcnow,
+        default=lambda: datetime.now(timezone.utc),
         comment="timestamp when record was synced into the MergeStat database",
     )
 
@@ -117,7 +117,7 @@ class GitFile(Base):
     _mergestat_synced_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=datetime.utcnow,
+        default=lambda: datetime.now(timezone.utc),
         comment="timestamp when record was synced into the MergeStat database",
     )
 
@@ -159,7 +159,7 @@ class GitCommit(Base):
     _mergestat_synced_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=datetime.utcnow,
+        default=lambda: datetime.now(timezone.utc),
         comment="timestamp when record was synced into the MergeStat database",
     )
 
@@ -201,7 +201,7 @@ class GitCommitStat(Base):
     _mergestat_synced_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=datetime.utcnow,
+        default=lambda: datetime.now(timezone.utc),
         comment="timestamp when record was synced into the MergeStat database",
     )
 
@@ -227,23 +227,26 @@ class GitBlameMixin:
         """
         blame_data = []
         if repo is None:
-            repo = Repo(repo_path)
+            repo_cls = import_module("models").Repo
+            repo = repo_cls(repo_path)
         rel_path = os.path.relpath(filepath, repo_path)
         try:
             blame_info = repo.blame("HEAD", rel_path)
             line_no = 1
             for commit, lines in blame_info:
                 for line in lines:
-                    blame_data.append((
-                        repo_uuid,
-                        commit.author.email,
-                        commit.author.name,
-                        commit.committed_datetime,
-                        commit.hexsha,
-                        line_no,
-                        line.rstrip("\n"),
-                        rel_path,
-                    ))
+                    blame_data.append(
+                        (
+                            repo_uuid,
+                            commit.author.email,
+                            commit.author.name,
+                            commit.committed_datetime,
+                            commit.hexsha,
+                            line_no,
+                            line.rstrip("\n"),
+                            rel_path,
+                        )
+                    )
                     line_no += 1
         except Exception as e:
             print(f"Error processing {rel_path}: {e}")
@@ -277,7 +280,7 @@ class GitBlame(Base, GitBlameMixin):
     _mergestat_synced_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=datetime.utcnow,
+        default=lambda: datetime.now(timezone.utc),
         comment="timestamp when record was synced into the MergeStat database",
     )
 

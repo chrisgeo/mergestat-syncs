@@ -1,6 +1,7 @@
 sqlalchemy
 psycopg2-binary
 asyncpg
+aiosqlite
 python-gitlab
 GitPython
 mypy
@@ -9,6 +10,8 @@ flake8
 isort
 pytest
 pytest-asyncio
+pytest-cov
 requests
 pydantic
 alembic
+motor
