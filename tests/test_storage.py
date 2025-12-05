@@ -1,17 +1,14 @@
 import uuid
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
-
+import importlib.util
 import pytest
 import pytest_asyncio
 from sqlalchemy import select
 
 # Optional dependency: aiosqlite for async SQLAlchemy tests
-try:
-    import aiosqlite  # noqa: F401
-    AIOSQLITE_AVAILABLE = True
-except ImportError:  # pragma: no cover - optional dependency
-    AIOSQLITE_AVAILABLE = False
+AIOSQLITE_AVAILABLE = importlib.util.find_spec("aiosqlite") is not None
+
 
 # Optional dependency: pymongo
 try:
