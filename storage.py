@@ -1,6 +1,6 @@
 import uuid
 from collections.abc import Iterable
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import UpdateOne
@@ -67,9 +67,7 @@ class SQLAlchemyStore:
         self.session.add_all(commit_data)
         await self.session.commit()
 
-    async def insert_git_commit_stats(
-        self, commit_stats: List[GitCommitStat]
-    ) -> None:
+    async def insert_git_commit_stats(self, commit_stats: List[GitCommitStat]) -> None:
         if not commit_stats:
             return
         assert self.session is not None
@@ -108,7 +106,9 @@ class MongoStore:
     async def insert_repo(self, repo: Repo) -> None:
         doc = model_to_dict(repo)
         doc["_id"] = doc["id"]
-        await self.db["repos"].update_one({"_id": doc["_id"]}, {"$set": doc}, upsert=True)
+        await self.db["repos"].update_one(
+            {"_id": doc["_id"]}, {"$set": doc}, upsert=True
+        )
 
     async def insert_git_file_data(self, file_data: List[GitFile]) -> None:
         await self._upsert_many(
@@ -124,9 +124,7 @@ class MongoStore:
             lambda obj: f"{getattr(obj, 'repo_id')}:{getattr(obj, 'hash')}",
         )
 
-    async def insert_git_commit_stats(
-        self, commit_stats: List[GitCommitStat]
-    ) -> None:
+    async def insert_git_commit_stats(self, commit_stats: List[GitCommitStat]) -> None:
         await self._upsert_many(
             "git_commit_stats",
             commit_stats,
@@ -141,7 +139,10 @@ class MongoStore:
         )
 
     async def _upsert_many(
-        self, collection: str, payload: Iterable[Any], id_builder
+        self,
+        collection: str,
+        payload: Iterable[Any],
+        id_builder: Callable[[Any], str],
     ) -> None:
         docs = []
         for item in payload:
