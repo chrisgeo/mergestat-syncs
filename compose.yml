@@ -39,4 +39,4 @@ services:
     volumes:
       - ./:/app
     working_dir: /app
-    command: python3 -m git-blame-filter-files.py
+    command: python3 git_mergestat.py

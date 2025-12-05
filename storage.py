@@ -45,7 +45,7 @@ class SQLAlchemyStore:
     async def __aexit__(self, exc_type, exc, tb) -> None:
         if self.session is not None:
             await self.session.close()
-        await self.engine.dispose()
+
 
     async def insert_repo(self, repo: Repo) -> None:
         assert self.session is not None
