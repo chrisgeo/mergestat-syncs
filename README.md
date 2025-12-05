@@ -33,7 +33,7 @@ Example usage:
 python git_mergestat.py --db-type postgres --db "postgresql+asyncpg://user:pass@localhost:5432/mergestat"
 
 # Using MongoDB
-python git_mergestat.py --db-type mongo --db "mongodb://localhost:27017" 
+python git_mergestat.py --db-type mongo --db "mongodb://localhost:27017"
 ```
 
 ### MongoDB Connection String Format
