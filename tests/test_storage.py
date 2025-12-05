@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import pytest_asyncio
+from pymongo import UpdateOne
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -498,7 +499,6 @@ async def mongo_store():
         
         # Manually set the db since we're not using the context manager
         store.db = mock_db
-        store._collections = mock_collections  # Store reference for tests
         
         yield store
 
@@ -926,7 +926,6 @@ async def test_mongo_store_upsert_id_builder_functionality(mongo_store):
     operations = call_args[0][0]
     
     # Verify that bulk_write was called with UpdateOne operations
-    from pymongo import UpdateOne
     assert isinstance(operations[0], UpdateOne)
     # The UpdateOne should have been created with the composite key
     # We verify this indirectly by checking that bulk_write was called with one operation
