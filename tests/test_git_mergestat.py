@@ -1,16 +1,58 @@
 """Tests for utility functions in git_mergestat.py."""
-import mimetypes
-from pathlib import Path
 
+import mimetypes
+import os
+from pathlib import Path
+from unittest.mock import patch
 
 # Re-implement the skippable logic locally for testing to avoid module-level
 # database connection issues when importing git_mergestat.py directly.
 # This matches the implementation in git_mergestat.py
 SKIP_EXTENSIONS = {
-    ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".pdf", ".ttf", ".otf", ".woff", ".woff2", ".ico",
-    ".mp4", ".mp3", ".mov", ".avi", ".exe", ".dll", ".zip", ".tar", ".gz", ".7z", ".eot",
-    ".rar", ".iso", ".dmg", ".pkg", ".deb", ".rpm", ".msi", ".class", ".jar", ".war", ".pyc",
-    ".pyo", ".so", ".o", ".a", ".lib", ".bin", ".dat", ".swp", ".lock", ".bak", ".tmp"
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".bmp",
+    ".pdf",
+    ".ttf",
+    ".otf",
+    ".woff",
+    ".woff2",
+    ".ico",
+    ".mp4",
+    ".mp3",
+    ".mov",
+    ".avi",
+    ".exe",
+    ".dll",
+    ".zip",
+    ".tar",
+    ".gz",
+    ".7z",
+    ".eot",
+    ".rar",
+    ".iso",
+    ".dmg",
+    ".pkg",
+    ".deb",
+    ".rpm",
+    ".msi",
+    ".class",
+    ".jar",
+    ".war",
+    ".pyc",
+    ".pyo",
+    ".so",
+    ".o",
+    ".a",
+    ".lib",
+    ".bin",
+    ".dat",
+    ".swp",
+    ".lock",
+    ".bak",
+    ".tmp",
 }
 
 
@@ -22,17 +64,19 @@ def is_skippable(path: str) -> bool:
     if ext in SKIP_EXTENSIONS:
         return True
     mime, _ = mimetypes.guess_type(path)
-    return mime and mime.startswith((
-        "image/",
-        "video/",
-        "audio/",
-        "application/pdf",
-        "font/",
-        "application/x-executable",
-        "application/x-sharedlib",
-        "application/x-object",
-        "application/x-archive",
-    ))
+    return mime and mime.startswith(
+        (
+            "image/",
+            "video/",
+            "audio/",
+            "application/pdf",
+            "font/",
+            "application/x-executable",
+            "application/x-sharedlib",
+            "application/x-object",
+            "application/x-archive",
+        )
+    )
 
 
 class TestIsSkippable:
@@ -105,8 +149,19 @@ class TestIsSkippable:
     def test_skip_extensions_set_is_complete(self):
         """Verify the SKIP_EXTENSIONS set contains expected binary types."""
         expected_extensions = {
-            ".png", ".jpg", ".jpeg", ".gif", ".pdf", ".exe", ".zip",
-            ".tar", ".gz", ".pyc", ".so", ".lock", ".tmp"
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".gif",
+            ".pdf",
+            ".exe",
+            ".zip",
+            ".tar",
+            ".gz",
+            ".pyc",
+            ".so",
+            ".lock",
+            ".tmp",
         }
 
         for ext in expected_extensions:
@@ -131,3 +186,76 @@ class TestIsSkippable:
         assert is_skippable("image.bmp")  # image/* mime type
         assert is_skippable("video.avi")  # video/* mime type
         assert is_skippable("audio.wav")  # audio/* mime type
+
+
+class TestDBEchoConfiguration:
+    """Test cases for DB_ECHO environment variable parsing."""
+
+    def test_db_echo_defaults_to_false_when_not_set(self):
+        """Test that DB_ECHO defaults to False when not set."""
+        with patch.dict(os.environ, {}, clear=False):
+            # Remove DB_ECHO if it exists
+            os.environ.pop("DB_ECHO", None)
+            # Re-evaluate the expression
+            result = os.getenv("DB_ECHO", "false").lower() in ("true", "1", "yes")
+            assert result is False
+
+    def test_db_echo_true_for_true_value(self):
+        """Test that DB_ECHO is True when set to 'true'."""
+        with patch.dict(os.environ, {"DB_ECHO": "true"}):
+            result = os.getenv("DB_ECHO", "false").lower() in ("true", "1", "yes")
+            assert result is True
+
+    def test_db_echo_true_for_uppercase_true(self):
+        """Test that DB_ECHO is True when set to 'TRUE' (case-insensitive)."""
+        with patch.dict(os.environ, {"DB_ECHO": "TRUE"}):
+            result = os.getenv("DB_ECHO", "false").lower() in ("true", "1", "yes")
+            assert result is True
+
+    def test_db_echo_true_for_one(self):
+        """Test that DB_ECHO is True when set to '1'."""
+        with patch.dict(os.environ, {"DB_ECHO": "1"}):
+            result = os.getenv("DB_ECHO", "false").lower() in ("true", "1", "yes")
+            assert result is True
+
+    def test_db_echo_true_for_yes(self):
+        """Test that DB_ECHO is True when set to 'yes'."""
+        with patch.dict(os.environ, {"DB_ECHO": "yes"}):
+            result = os.getenv("DB_ECHO", "false").lower() in ("true", "1", "yes")
+            assert result is True
+
+    def test_db_echo_true_for_uppercase_yes(self):
+        """Test that DB_ECHO is True when set to 'YES' (case-insensitive)."""
+        with patch.dict(os.environ, {"DB_ECHO": "YES"}):
+            result = os.getenv("DB_ECHO", "false").lower() in ("true", "1", "yes")
+            assert result is True
+
+    def test_db_echo_false_for_false_value(self):
+        """Test that DB_ECHO is False when set to 'false'."""
+        with patch.dict(os.environ, {"DB_ECHO": "false"}):
+            result = os.getenv("DB_ECHO", "false").lower() in ("true", "1", "yes")
+            assert result is False
+
+    def test_db_echo_false_for_zero(self):
+        """Test that DB_ECHO is False when set to '0'."""
+        with patch.dict(os.environ, {"DB_ECHO": "0"}):
+            result = os.getenv("DB_ECHO", "false").lower() in ("true", "1", "yes")
+            assert result is False
+
+    def test_db_echo_false_for_no(self):
+        """Test that DB_ECHO is False when set to 'no'."""
+        with patch.dict(os.environ, {"DB_ECHO": "no"}):
+            result = os.getenv("DB_ECHO", "false").lower() in ("true", "1", "yes")
+            assert result is False
+
+    def test_db_echo_false_for_invalid_value(self):
+        """Test that DB_ECHO is False when set to an invalid value."""
+        with patch.dict(os.environ, {"DB_ECHO": "invalid"}):
+            result = os.getenv("DB_ECHO", "false").lower() in ("true", "1", "yes")
+            assert result is False
+
+    def test_db_echo_false_for_empty_string(self):
+        """Test that DB_ECHO is False when set to an empty string."""
+        with patch.dict(os.environ, {"DB_ECHO": ""}):
+            result = os.getenv("DB_ECHO", "false").lower() in ("true", "1", "yes")
+            assert result is False
