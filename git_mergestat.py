@@ -19,6 +19,7 @@ from storage import MongoStore, SQLAlchemyStore
 REPO_PATH = os.getenv("REPO_PATH", ".")
 DB_CONN_STRING = os.getenv("DB_CONN_STRING")
 DB_TYPE = os.getenv("DB_TYPE", "postgres").lower()
+DB_ECHO = os.getenv("DB_ECHO", "false").lower() in ("true", "1", "yes")
 MONGO_DB_NAME = os.getenv("MONGO_DB_NAME")
 BATCH_SIZE = 10  # Insert every n files
 REPO_UUID = os.getenv("REPO_UUID")
@@ -102,10 +103,50 @@ async def insert_repo_data(store: DataStore, repo: Repo) -> None:
 
 # Expanded SKIP_EXTENSIONS to include more binary and package-like file types
 SKIP_EXTENSIONS = {
-    ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".pdf", ".ttf", ".otf", ".woff", ".woff2", ".ico",
-    ".mp4", ".mp3", ".mov", ".avi", ".exe", ".dll", ".zip", ".tar", ".gz", ".7z", ".eot",
-    ".rar", ".iso", ".dmg", ".pkg", ".deb", ".rpm", ".msi", ".class", ".jar", ".war", ".pyc",
-    ".pyo", ".so", ".o", ".a", ".lib", ".bin", ".dat", ".swp", ".lock", ".bak", ".tmp"
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".bmp",
+    ".pdf",
+    ".ttf",
+    ".otf",
+    ".woff",
+    ".woff2",
+    ".ico",
+    ".mp4",
+    ".mp3",
+    ".mov",
+    ".avi",
+    ".exe",
+    ".dll",
+    ".zip",
+    ".tar",
+    ".gz",
+    ".7z",
+    ".eot",
+    ".rar",
+    ".iso",
+    ".dmg",
+    ".pkg",
+    ".deb",
+    ".rpm",
+    ".msi",
+    ".class",
+    ".jar",
+    ".war",
+    ".pyc",
+    ".pyo",
+    ".so",
+    ".o",
+    ".a",
+    ".lib",
+    ".bin",
+    ".dat",
+    ".swp",
+    ".lock",
+    ".bak",
+    ".tmp",
 }
 NON_BINARY_OVERRIDES = {".ts"}  # TypeScript mime may be misdetected as video/mp2t
 
@@ -134,17 +175,19 @@ def is_skippable(path: str) -> bool:
     if ext in NON_BINARY_OVERRIDES:
         return False
     mime, _ = mimetypes.guess_type(path)
-    return mime and mime.startswith((
-        "image/",
-        "video/",
-        "audio/",
-        "application/pdf",
-        "font/",
-        "application/x-executable",
-        "application/x-sharedlib",
-        "application/x-object",
-        "application/x-archive",
-    ))
+    return mime and mime.startswith(
+        (
+            "image/",
+            "video/",
+            "audio/",
+            "application/pdf",
+            "font/",
+            "application/x-executable",
+            "application/x-sharedlib",
+            "application/x-object",
+            "application/x-archive",
+        )
+    )
 
 
 async def process_git_files(
@@ -276,7 +319,9 @@ async def main() -> None:
     if DB_TYPE not in {"postgres", "mongo"}:
         raise ValueError("DB_TYPE must be either 'postgres' or 'mongo'")
     if not DB_CONN_STRING:
-        raise ValueError("Database connection string is required (set DB_CONN_STRING or use --db)")
+        raise ValueError(
+            "Database connection string is required (set DB_CONN_STRING or use --db)"
+        )
 
     # TODO: Implement date filtering for commits
     # start_date = args.start_date
@@ -287,7 +332,7 @@ async def main() -> None:
     if DB_TYPE == "mongo":
         store: DataStore = MongoStore(DB_CONN_STRING, db_name=MONGO_DB_NAME)
     else:
-        store = SQLAlchemyStore(DB_CONN_STRING, echo=True)
+        store = SQLAlchemyStore(DB_CONN_STRING, echo=DB_ECHO)
 
     async with store as storage:
         # Ensure the repository is inserted first
