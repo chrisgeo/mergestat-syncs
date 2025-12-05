@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 import argparse
 import asyncio
+import functools
 import mimetypes
 import os
+import uuid
 from pathlib import Path
-from typing import List, Union
+from typing import AsyncIterator, Callable, Iterable, List, Optional, Tuple, Union
 
 from models.git import GitBlame, GitCommit, GitCommitStat, GitFile, Repo
 from storage import MongoStore, SQLAlchemyStore
@@ -21,10 +23,136 @@ DB_CONN_STRING = os.getenv("DB_CONN_STRING")
 DB_TYPE = os.getenv("DB_TYPE", "postgres").lower()
 DB_ECHO = os.getenv("DB_ECHO", "false").lower() in ("true", "1", "yes")
 MONGO_DB_NAME = os.getenv("MONGO_DB_NAME")
-BATCH_SIZE = 10  # Insert every n files
 REPO_UUID = os.getenv("REPO_UUID")
+DEFAULT_WORKERS = max(4, (os.cpu_count() or 4))
 
 DataStore = Union[SQLAlchemyStore, MongoStore]
+
+
+def _parse_positive_int(value: str, default: int) -> int:
+    try:
+        parsed = int(value)
+        return parsed if parsed > 0 else default
+    except (TypeError, ValueError):
+        return default
+
+
+FILE_CONTENT_MAX_BYTES = _parse_positive_int(
+    os.getenv("FILE_CONTENT_MAX_BYTES"), 1_000_000
+)
+BLAME_MAX_FILE_SIZE = _parse_positive_int(os.getenv("BLAME_MAX_FILE_SIZE"), 5_000_000)
+BATCH_SIZE = _parse_positive_int(os.getenv("BATCH_SIZE"), 50)
+MAX_IO_WORKERS = _parse_positive_int(
+    os.getenv("GIT_IO_WORKERS"), min(32, DEFAULT_WORKERS)
+)
+
+
+def resolve_repo_id(repo: Repo) -> uuid.UUID:
+    """
+    Determine the UUID to use for a repository and ensure the Repo object has it set.
+    """
+    if REPO_UUID:
+        try:
+            repo_id = uuid.UUID(REPO_UUID)
+        except ValueError as exc:
+            raise ValueError("REPO_UUID must be a valid UUID") from exc
+    else:
+        repo_id = getattr(repo, "id", None) or uuid.uuid4()
+    repo.id = repo_id
+    return repo_id
+
+
+async def _bounded_to_thread_map(
+    items: Iterable,
+    func: Callable,
+    *,
+    concurrency: int = MAX_IO_WORKERS,
+    buffer_factor: int = 4,
+) -> AsyncIterator:
+    """
+    Run blocking work in a thread pool with bounded concurrency and yield results
+    as soon as they are ready.
+    """
+    concurrency = max(1, concurrency)
+    buffer_size = max(1, concurrency * buffer_factor)
+    semaphore = asyncio.Semaphore(concurrency)
+    tasks: List[asyncio.Task] = []
+
+    async def runner(item):
+        async with semaphore:
+            return await asyncio.to_thread(func, item)
+
+    for item in items:
+        tasks.append(asyncio.create_task(runner(item)))
+        if len(tasks) >= buffer_size:
+            done, pending = await asyncio.wait(
+                tasks, return_when=asyncio.FIRST_COMPLETED
+            )
+            tasks = list(pending)
+            for task in done:
+                yield task.result()
+
+    for task in asyncio.as_completed(tasks):
+        yield await task
+
+
+def _build_git_file(filepath: Path, repo_id: uuid.UUID) -> Optional[GitFile]:
+    """
+    Build a GitFile instance from a path, skipping unreadable files.
+    """
+    rel_path = os.path.relpath(filepath, REPO_PATH)
+    try:
+        stat = filepath.stat()
+        executable = bool(stat.st_mode & 0o111)
+        contents = None
+        # Avoid loading very large files into memory
+        if stat.st_size < FILE_CONTENT_MAX_BYTES:
+            contents = filepath.read_text(errors="ignore")
+    except (OSError, UnicodeDecodeError):
+        return None
+
+    return GitFile(
+        repo_id=repo_id,
+        path=rel_path,
+        executable=executable,
+        contents=contents,
+    )
+
+
+def _build_commit_and_stats(
+    commit, repo_id: uuid.UUID
+) -> Tuple[GitCommit, List[GitCommitStat]]:
+    """
+    Build GitCommit and related GitCommitStat rows from a commit object.
+    """
+    commit_obj = GitCommit(
+        repo_id=repo_id,
+        hash=commit.hexsha,
+        message=commit.message,
+        author_name=getattr(commit.author, "name", None),
+        author_email=getattr(commit.author, "email", None),
+        author_when=commit.authored_datetime,
+        committer_name=getattr(commit.committer, "name", None),
+        committer_email=getattr(commit.committer, "email", None),
+        committer_when=commit.committed_datetime,
+        parents=len(commit.parents),
+    )
+
+    stats_objects: List[GitCommitStat] = []
+    for file_path, summary in commit.stats.files.items():
+        stats_objects.append(
+            GitCommitStat(
+                repo_id=repo_id,
+                commit_hash=commit.hexsha,
+                file_path=file_path,
+                additions=summary.get("insertions", 0),
+                deletions=summary.get("deletions", 0),
+                old_file_mode="unknown",
+                new_file_mode="unknown",
+            )
+        )
+
+    return commit_obj, stats_objects
 
 
 async def insert_blame_data(store: DataStore, data_batch: List[GitBlame]) -> None:
@@ -151,6 +279,17 @@ SKIP_EXTENSIONS = {
 NON_BINARY_OVERRIDES = {".ts"}  # TypeScript mime may be misdetected as video/mp2t
 
 
+@functools.lru_cache(maxsize=256)
+def _cached_mime_for_extension(ext: str) -> Optional[str]:
+    """
+    Cache mime lookups per extension to avoid repeated mimetypes parsing.
+    """
+    dummy_name = f"file{ext}" if ext else "file"
+    mime, _ = mimetypes.guess_type(dummy_name)
+    return mime
+
+
+@functools.lru_cache(maxsize=2048)
 def is_skippable(path: str) -> bool:
     """
     Return True if the file is skippable (i.e. should not be processed for git blame).
@@ -174,7 +313,7 @@ def is_skippable(path: str) -> bool:
         return True
     if ext in NON_BINARY_OVERRIDES:
         return False
-    mime, _ = mimetypes.guess_type(path)
+    mime = _cached_mime_for_extension(ext)
     return mime and mime.startswith(
         (
             "image/",
@@ -191,7 +330,7 @@ def is_skippable(path: str) -> bool:
 
 
 async def process_git_files(
-    repo: Repo, all_files: List[Path], store: DataStore
+    repo: Repo, all_files: List[Path], store: DataStore, repo_id: uuid.UUID
 ) -> None:
     """
     Process and insert GitFile data into the database.
@@ -199,12 +338,15 @@ async def process_git_files(
     :param repo: Git repository object.
     :param all_files: List of file paths in the repository.
     :param store: Storage backend (SQLAlchemy or MongoDB).
+    :param repo_id: UUID for the repository.
     """
     file_batch: List[GitFile] = []
-    for filepath in all_files:
-        # Process file data (example logic, replace with actual implementation)
-        file_objects = []  # Replace with logic to fetch GitFile objects
-        file_batch.extend(file_objects)
+    async for git_file in _bounded_to_thread_map(
+        all_files, lambda path: _build_git_file(path, repo_id)
+    ):
+        if git_file is None:
+            continue
+        file_batch.append(git_file)
 
         if len(file_batch) >= BATCH_SIZE:
             await insert_git_file_data(store, file_batch)
@@ -215,24 +357,43 @@ async def process_git_files(
         await insert_git_file_data(store, file_batch)
 
 
-async def process_git_commits(repo: Repo, store: DataStore) -> None:
+async def process_git_commits_and_stats(
+    repo: Repo, store: DataStore, repo_id: uuid.UUID
+) -> None:
     """
-    Process and insert GitCommit data into the database.
-
-    :param repo: Git repository object.
-    :param store: Storage backend (SQLAlchemy or MongoDB).
+    Process commits and commit stats with bounded concurrency.
     """
     commit_batch: List[GitCommit] = []
-    # Process commit data (example logic, replace with actual implementation)
-    commit_objects = []  # Replace with logic to fetch GitCommit objects
-    commit_batch.extend(commit_objects)
+    commit_stats_batch: List[GitCommitStat] = []
+
+    commits = list(repo.iter_commits("HEAD"))
+    if not commits:
+        return
+
+    async for commit_obj, stats_objects in _bounded_to_thread_map(
+        commits,
+        lambda commit: _build_commit_and_stats(commit, repo_id),
+        concurrency=MAX_IO_WORKERS,
+    ):
+        commit_batch.append(commit_obj)
+        commit_stats_batch.extend(stats_objects)
+
+        if len(commit_batch) >= BATCH_SIZE:
+            await insert_git_commit_data(store, commit_batch)
+            commit_batch.clear()
+
+        if len(commit_stats_batch) >= BATCH_SIZE:
+            await insert_git_commit_stats(store, commit_stats_batch)
+            commit_stats_batch.clear()
 
     if commit_batch:
         await insert_git_commit_data(store, commit_batch)
+    if commit_stats_batch:
+        await insert_git_commit_stats(store, commit_stats_batch)
 
 
 async def process_git_blame(
-    all_files: List[Path], store: DataStore, repo: Repo
+    all_files: List[Path], store: DataStore, repo: Repo, repo_id: uuid.UUID
 ) -> None:
     """
     Process and insert GitBlame data into the database.
@@ -240,12 +401,26 @@ async def process_git_blame(
     :param all_files: List of file paths in the repository.
     :param store: Storage backend (SQLAlchemy or MongoDB).
     :param repo: Repo instance to use for git operations.
+    :param repo_id: UUID for the repository.
     """
     blame_batch: List[GitBlame] = []
-    # Create a single GitRepo instance for all files to avoid expensive re-initialization
+    eligible_files: List[Path] = []
 
     for filepath in all_files:
-        blame_objects = GitBlame.process_file(REPO_PATH, filepath, REPO_UUID, repo=repo)
+        try:
+            if BLAME_MAX_FILE_SIZE and filepath.stat().st_size > BLAME_MAX_FILE_SIZE:
+                continue
+        except OSError:
+            continue
+        eligible_files.append(filepath)
+
+    build_blame = lambda f: GitBlame.process_file(REPO_PATH, f, repo_id, repo=repo)
+
+    async for blame_objects in _bounded_to_thread_map(
+        eligible_files, build_blame, concurrency=MAX_IO_WORKERS
+    ):
+        if not blame_objects:
+            continue
         blame_batch.extend(blame_objects)
 
         if len(blame_batch) >= BATCH_SIZE:
@@ -328,6 +503,7 @@ async def main() -> None:
     # end_date = args.end_date
 
     repo: Repo = Repo(REPO_PATH)
+    repo_id = resolve_repo_id(repo)
 
     if DB_TYPE == "mongo":
         store: DataStore = MongoStore(DB_CONN_STRING, db_name=MONGO_DB_NAME)
@@ -349,13 +525,12 @@ async def main() -> None:
         print(f"Found {len(all_files)} files to process.")
 
         # Process GitFile data first
-        await process_git_files(repo, all_files, storage)
+        await process_git_files(repo, all_files, storage, repo_id)
 
         # Process other data asynchronously
         await asyncio.gather(
-            process_git_commits(repo, storage),
-            process_git_blame(all_files, storage, repo),
-            process_git_commit_stats(repo, storage),
+            process_git_blame(all_files, storage, repo, repo_id),
+            process_git_commits_and_stats(repo, storage, repo_id),
         )
 
 

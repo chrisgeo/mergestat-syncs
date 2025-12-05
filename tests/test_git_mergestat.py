@@ -1,9 +1,23 @@
 """Tests for utility functions in git_mergestat.py."""
 
+import asyncio
 import mimetypes
 import os
+import threading
+import time
+import uuid
 from pathlib import Path
 from unittest.mock import patch
+
+import pytest
+
+from git_mergestat import (
+    _bounded_to_thread_map,
+    _build_commit_and_stats,
+    _build_git_file,
+    resolve_repo_id,
+)
+from models.git import GitFile, Repo
 
 # Re-implement the skippable logic locally for testing to avoid module-level
 # database connection issues when importing git_mergestat.py directly.
@@ -259,3 +273,78 @@ class TestDBEchoConfiguration:
         with patch.dict(os.environ, {"DB_ECHO": ""}):
             result = os.getenv("DB_ECHO", "false").lower() in ("true", "1", "yes")
             assert result is False
+
+
+class TestBoundedToThreadMap:
+    """Tests for the bounded thread pool helper."""
+
+    @pytest.mark.asyncio
+    async def test_bounded_to_thread_map_respects_concurrency(self):
+        concurrency = 2
+        in_flight = 0
+        peak = 0
+        lock = threading.Lock()
+
+        def slow_double(x):
+            nonlocal in_flight, peak
+            with lock:
+                in_flight += 1
+                peak = max(peak, in_flight)
+            time.sleep(0.05)
+            with lock:
+                in_flight -= 1
+            return x * 2
+
+        items = list(range(5))
+        results = []
+        async for value in _bounded_to_thread_map(
+            items, slow_double, concurrency=concurrency, buffer_factor=1
+        ):
+            results.append(value)
+
+        assert sorted(results) == [x * 2 for x in items]
+        assert peak <= concurrency
+
+
+class TestResolveRepoIdAndFiles:
+    """Tests for repo id resolution and GitFile construction."""
+
+    def test_resolve_repo_id_uses_env_uuid(self, repo_path):
+        test_uuid = uuid.uuid4()
+        repo = Repo(repo_path)
+        # Force the module-level REPO_UUID to a known value
+        from git_mergestat import REPO_UUID as module_uuid
+        # mypy: ignore
+        import git_mergestat as gm
+
+        gm.REPO_UUID = str(test_uuid)
+        resolved = resolve_repo_id(repo)
+
+        assert resolved == test_uuid
+        assert repo.id == test_uuid
+        # restore original value
+        gm.REPO_UUID = module_uuid
+
+    def test_build_git_file_reads_contents(self, tmp_path):
+        repo_id = uuid.uuid4()
+        test_file = tmp_path / "file.txt"
+        test_file.write_text("hello")
+
+        git_file = _build_git_file(test_file, repo_id)
+
+        assert isinstance(git_file, GitFile)
+        assert git_file.repo_id == repo_id
+        assert git_file.path.endswith("file.txt")
+        assert git_file.contents == "hello"
+
+    def test_build_commit_and_stats(self, git_repo, repo_uuid):
+        commit = git_repo.head.commit
+
+        commit_obj, stats = _build_commit_and_stats(commit, repo_uuid)
+
+        assert commit_obj.repo_id == repo_uuid
+        assert commit_obj.hash == commit.hexsha
+        assert commit_obj.parents == len(commit.parents)
+        for stat in stats:
+            assert stat.repo_id == repo_uuid
+            assert stat.commit_hash == commit.hexsha

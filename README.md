@@ -20,6 +20,10 @@ This project supports both PostgreSQL and MongoDB as storage backends. You can c
 - **`MONGO_DB_NAME`** (optional): The name of the MongoDB database to use. If not specified, the script will use the database specified in the connection string, or default to `mergestat`.
 - **`REPO_PATH`** (optional): Path to the git repository to analyze. Default: `.` (current directory)
 - **`REPO_UUID`** (optional): UUID for the repository. If not provided, one will be generated.
+- **`GIT_IO_WORKERS`** (optional): Max worker threads for file/blame processing. Defaults to `max(4, cpu_count)` and capped at 32.
+- **`BATCH_SIZE`** (optional): Insert batch size for files, commits, commit stats, and blame rows. Default: `50`.
+- **`FILE_CONTENT_MAX_BYTES`** (optional): Max file size (bytes) to load into memory when storing contents. Larger files will skip content read. Default: `1_000_000`.
+- **`BLAME_MAX_FILE_SIZE`** (optional): Max file size (bytes) to include in blame processing. Files above this size are skipped. Default: `5_000_000`.
 
 ### Command-Line Arguments
 

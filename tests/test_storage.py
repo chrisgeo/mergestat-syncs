@@ -4,13 +4,33 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import pytest_asyncio
-from pymongo import UpdateOne
 from sqlalchemy import select
+
+# Optional dependency: aiosqlite for async SQLAlchemy tests
+try:
+    import aiosqlite  # noqa: F401
+    AIOSQLITE_AVAILABLE = True
+except ImportError:  # pragma: no cover - optional dependency
+    AIOSQLITE_AVAILABLE = False
+
+# Optional dependency: pymongo
+try:
+    from pymongo import UpdateOne
+except ImportError:  # pragma: no cover - optional dependency
+    UpdateOne = None
 
 
 from models import GitBlame, GitCommit, GitCommitStat, GitFile, Repo
 from models.git import Base
 from storage import MongoStore, SQLAlchemyStore, model_to_dict
+
+sqlalchemy_skip = pytest.mark.skipif(
+    not AIOSQLITE_AVAILABLE, reason="aiosqlite not installed"
+)
+PYMONGO_AVAILABLE = UpdateOne is not None
+mongo_skip = pytest.mark.skipif(
+    not PYMONGO_AVAILABLE, reason="pymongo not installed"
+)
 
 
 def test_model_to_dict_serializes_uuid_and_fields(repo_uuid):
@@ -56,6 +76,7 @@ async def sqlalchemy_store(test_db_url):
     await store.engine.dispose()
 
 
+@sqlalchemy_skip
 @pytest.mark.asyncio
 async def test_sqlalchemy_store_context_manager(test_db_url):
     """Test that SQLAlchemyStore can be used as an async context manager."""
@@ -74,6 +95,7 @@ async def test_sqlalchemy_store_context_manager(test_db_url):
     await store.engine.dispose()
 
 
+@sqlalchemy_skip
 @pytest.mark.asyncio
 async def test_sqlalchemy_store_insert_repo(sqlalchemy_store):
     """Test inserting a repository into the database."""
@@ -100,6 +122,7 @@ async def test_sqlalchemy_store_insert_repo(sqlalchemy_store):
         assert saved_repo.ref == "main"
 
 
+@sqlalchemy_skip
 @pytest.mark.asyncio
 async def test_sqlalchemy_store_insert_repo_duplicate(sqlalchemy_store):
     """Test that inserting a duplicate repo does not cause an error."""
@@ -125,6 +148,7 @@ async def test_sqlalchemy_store_insert_repo_duplicate(sqlalchemy_store):
         assert len(repos) == 1
 
 
+@sqlalchemy_skip
 @pytest.mark.asyncio
 async def test_sqlalchemy_store_insert_git_file_data(sqlalchemy_store):
     """Test inserting git file data into the database."""
@@ -167,6 +191,7 @@ async def test_sqlalchemy_store_insert_git_file_data(sqlalchemy_store):
         assert saved_files[1].path in ["file1.txt", "file2.txt"]
 
 
+@sqlalchemy_skip
 @pytest.mark.asyncio
 async def test_sqlalchemy_store_insert_git_file_data_empty_list(sqlalchemy_store):
     """Test that inserting an empty list does not cause an error."""
@@ -175,6 +200,7 @@ async def test_sqlalchemy_store_insert_git_file_data_empty_list(sqlalchemy_store
         # Should not raise any error
 
 
+@sqlalchemy_skip
 @pytest.mark.asyncio
 async def test_sqlalchemy_store_insert_git_commit_data(sqlalchemy_store):
     """Test inserting git commit data into the database."""
@@ -229,6 +255,7 @@ async def test_sqlalchemy_store_insert_git_commit_data(sqlalchemy_store):
         assert saved_commits[1].hash in ["abc123", "def456"]
 
 
+@sqlalchemy_skip
 @pytest.mark.asyncio
 async def test_sqlalchemy_store_insert_git_commit_data_empty_list(sqlalchemy_store):
     """Test that inserting an empty list does not cause an error."""
@@ -237,6 +264,7 @@ async def test_sqlalchemy_store_insert_git_commit_data_empty_list(sqlalchemy_sto
         # Should not raise any error
 
 
+@sqlalchemy_skip
 @pytest.mark.asyncio
 async def test_sqlalchemy_store_insert_git_commit_stats(sqlalchemy_store):
     """Test inserting git commit stats into the database."""
@@ -285,6 +313,7 @@ async def test_sqlalchemy_store_insert_git_commit_stats(sqlalchemy_store):
         assert saved_stats[1].file_path in ["file1.txt", "file2.txt"]
 
 
+@sqlalchemy_skip
 @pytest.mark.asyncio
 async def test_sqlalchemy_store_insert_git_commit_stats_empty_list(sqlalchemy_store):
     """Test that inserting an empty list does not cause an error."""
@@ -293,6 +322,7 @@ async def test_sqlalchemy_store_insert_git_commit_stats_empty_list(sqlalchemy_st
         # Should not raise any error
 
 
+@sqlalchemy_skip
 @pytest.mark.asyncio
 async def test_sqlalchemy_store_insert_blame_data(sqlalchemy_store):
     """Test inserting git blame data into the database."""
@@ -343,6 +373,7 @@ async def test_sqlalchemy_store_insert_blame_data(sqlalchemy_store):
         assert saved_blames[1].line_no in [1, 2]
 
 
+@sqlalchemy_skip
 @pytest.mark.asyncio
 async def test_sqlalchemy_store_insert_blame_data_empty_list(sqlalchemy_store):
     """Test that inserting an empty list does not cause an error."""
@@ -351,6 +382,7 @@ async def test_sqlalchemy_store_insert_blame_data_empty_list(sqlalchemy_store):
         # Should not raise any error
 
 
+@sqlalchemy_skip
 @pytest.mark.asyncio
 async def test_sqlalchemy_store_session_management(test_db_url):
     """Test session lifecycle management in SQLAlchemyStore."""
@@ -373,6 +405,7 @@ async def test_sqlalchemy_store_session_management(test_db_url):
     await store.engine.dispose()
 
 
+@sqlalchemy_skip
 @pytest.mark.asyncio
 async def test_sqlalchemy_store_transaction_commit(sqlalchemy_store):
     """Test that transactions are committed properly."""
@@ -398,6 +431,7 @@ async def test_sqlalchemy_store_transaction_commit(sqlalchemy_store):
             assert saved_repo.id == test_repo.id
 
 
+@sqlalchemy_skip
 @pytest.mark.asyncio
 async def test_sqlalchemy_store_multiple_operations(sqlalchemy_store):
     """Test performing multiple operations in a single session."""
@@ -502,6 +536,7 @@ async def mongo_store():
         yield store
 
 
+@mongo_skip
 @pytest.mark.asyncio
 async def test_mongo_store_init_with_empty_connection_string():
     """Test that MongoStore raises error with empty connection string."""
@@ -509,6 +544,7 @@ async def test_mongo_store_init_with_empty_connection_string():
         MongoStore("")
 
 
+@mongo_skip
 @pytest.mark.asyncio
 async def test_mongo_store_init_with_connection_string():
     """Test that MongoStore initializes properly with a connection string."""
@@ -518,6 +554,7 @@ async def test_mongo_store_init_with_connection_string():
         assert store.db is None
 
 
+@mongo_skip
 @pytest.mark.asyncio
 async def test_mongo_store_init_with_db_name():
     """Test that MongoStore initializes properly with explicit db_name."""
@@ -527,6 +564,7 @@ async def test_mongo_store_init_with_db_name():
         assert store.db is None
 
 
+@mongo_skip
 @pytest.mark.asyncio
 async def test_mongo_store_context_manager_with_db_name():
     """Test that MongoStore can be used as an async context manager with explicit db_name."""
@@ -545,6 +583,7 @@ async def test_mongo_store_context_manager_with_db_name():
             mock_client.__getitem__.assert_called_once_with("my_database")
 
 
+@mongo_skip
 @pytest.mark.asyncio
 async def test_mongo_store_context_manager_with_connection_string_db():
     """Test MongoStore context manager with database in connection string."""
@@ -562,6 +601,7 @@ async def test_mongo_store_context_manager_with_connection_string_db():
             assert s == store
 
 
+@mongo_skip
 @pytest.mark.asyncio
 async def test_mongo_store_context_manager_without_db_raises_error():
     """Test that MongoStore raises error when no database is specified."""
@@ -579,6 +619,7 @@ async def test_mongo_store_context_manager_without_db_raises_error():
                 pass
 
 
+@mongo_skip
 @pytest.mark.asyncio
 async def test_mongo_store_insert_repo(mongo_store):
     """Test inserting a repository into MongoDB."""
@@ -602,6 +643,7 @@ async def test_mongo_store_insert_repo(mongo_store):
     assert call_args[1]["upsert"] is True
 
 
+@mongo_skip
 @pytest.mark.asyncio
 async def test_mongo_store_insert_repo_upsert(mongo_store):
     """Test that inserting a duplicate repo updates instead of creating duplicate."""
@@ -622,6 +664,7 @@ async def test_mongo_store_insert_repo_upsert(mongo_store):
     assert mongo_store.db["repos"].update_one.call_count == 2
 
 
+@mongo_skip
 @pytest.mark.asyncio
 async def test_mongo_store_insert_git_file_data(mongo_store):
     """Test inserting git file data into MongoDB."""
@@ -655,6 +698,7 @@ async def test_mongo_store_insert_git_file_data(mongo_store):
     assert call_args[1]["ordered"] is False
 
 
+@mongo_skip
 @pytest.mark.asyncio
 async def test_mongo_store_insert_git_file_data_empty_list(mongo_store):
     """Test that inserting an empty list does not cause an error."""
@@ -664,6 +708,7 @@ async def test_mongo_store_insert_git_file_data_empty_list(mongo_store):
     mongo_store.db["git_files"].bulk_write.assert_not_called()
 
 
+@mongo_skip
 @pytest.mark.asyncio
 async def test_mongo_store_insert_git_file_data_upsert(mongo_store):
     """Test that inserting duplicate file data updates instead of creating duplicates."""
@@ -688,6 +733,7 @@ async def test_mongo_store_insert_git_file_data_upsert(mongo_store):
     assert mongo_store.db["git_files"].bulk_write.call_count == 2
 
 
+@mongo_skip
 @pytest.mark.asyncio
 async def test_mongo_store_insert_git_commit_data(mongo_store):
     """Test inserting git commit data into MongoDB."""
@@ -731,6 +777,7 @@ async def test_mongo_store_insert_git_commit_data(mongo_store):
     assert len(operations) == 2
 
 
+@mongo_skip
 @pytest.mark.asyncio
 async def test_mongo_store_insert_git_commit_data_empty_list(mongo_store):
     """Test that inserting an empty list does not cause an error."""
@@ -740,6 +787,7 @@ async def test_mongo_store_insert_git_commit_data_empty_list(mongo_store):
     mongo_store.db["git_commits"].bulk_write.assert_not_called()
 
 
+@mongo_skip
 @pytest.mark.asyncio
 async def test_mongo_store_insert_git_commit_stats(mongo_store):
     """Test inserting git commit stats into MongoDB."""
@@ -777,6 +825,7 @@ async def test_mongo_store_insert_git_commit_stats(mongo_store):
     assert len(operations) == 2
 
 
+@mongo_skip
 @pytest.mark.asyncio
 async def test_mongo_store_insert_git_commit_stats_empty_list(mongo_store):
     """Test that inserting an empty list does not cause an error."""
@@ -786,6 +835,7 @@ async def test_mongo_store_insert_git_commit_stats_empty_list(mongo_store):
     mongo_store.db["git_commit_stats"].bulk_write.assert_not_called()
 
 
+@mongo_skip
 @pytest.mark.asyncio
 async def test_mongo_store_insert_blame_data(mongo_store):
     """Test inserting git blame data into MongoDB."""
@@ -825,6 +875,7 @@ async def test_mongo_store_insert_blame_data(mongo_store):
     assert len(operations) == 2
 
 
+@mongo_skip
 @pytest.mark.asyncio
 async def test_mongo_store_insert_blame_data_empty_list(mongo_store):
     """Test that inserting an empty list does not cause an error."""
@@ -834,6 +885,7 @@ async def test_mongo_store_insert_blame_data_empty_list(mongo_store):
     mongo_store.db["git_blame"].bulk_write.assert_not_called()
 
 
+@mongo_skip
 @pytest.mark.asyncio
 async def test_mongo_store_upsert_many_with_dict_payload(mongo_store):
     """Test _upsert_many with dict payload instead of model instances."""
@@ -857,6 +909,7 @@ async def test_mongo_store_upsert_many_with_dict_payload(mongo_store):
     assert len(operations) == 2
 
 
+@mongo_skip
 @pytest.mark.asyncio
 async def test_mongo_store_bulk_operations_unordered(mongo_store):
     """Test that bulk operations are performed unordered (continue on error)."""
@@ -885,6 +938,7 @@ async def test_mongo_store_bulk_operations_unordered(mongo_store):
     assert len(operations) == 100
 
 
+@mongo_skip
 @pytest.mark.asyncio
 async def test_mongo_store_connection_cleanup():
     """Test that MongoStore properly closes connection on exit."""
@@ -904,6 +958,7 @@ async def test_mongo_store_connection_cleanup():
         mock_client.close.assert_called_once()
 
 
+@mongo_skip
 @pytest.mark.asyncio
 async def test_mongo_store_upsert_id_builder_functionality(mongo_store):
     """Test that _upsert_many correctly uses id_builder to create composite keys."""

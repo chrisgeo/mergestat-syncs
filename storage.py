@@ -2,9 +2,17 @@ import uuid
 from collections.abc import Iterable
 from typing import Any, Callable, Dict, List, Optional
 
-from motor.motor_asyncio import AsyncIOMotorClient
-from pymongo import UpdateOne
-from pymongo.errors import ConfigurationError
+try:
+    from motor.motor_asyncio import AsyncIOMotorClient
+except ImportError:  # pragma: no cover - optional dependency
+    AsyncIOMotorClient = None
+
+try:
+    from pymongo import UpdateOne
+    from pymongo.errors import ConfigurationError
+except ImportError:  # pragma: no cover - optional dependency
+    UpdateOne = None
+    ConfigurationError = None
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.inspection import inspect
 from sqlalchemy.orm import sessionmaker
@@ -89,6 +97,11 @@ class MongoStore:
     def __init__(self, conn_string: str, db_name: Optional[str] = None) -> None:
         if not conn_string:
             raise ValueError("MongoDB connection string is required")
+        if AsyncIOMotorClient is None:
+            raise ImportError(
+                "MongoDB support requires the 'motor' package. "
+                "Install it with 'pip install motor pymongo'."
+            )
         self.client = AsyncIOMotorClient(conn_string)
         self.db_name = db_name
         self.db = None
@@ -163,6 +176,11 @@ class MongoStore:
         if not docs:
             return
 
+        if UpdateOne is None:
+            raise ImportError(
+                "MongoDB support requires the 'pymongo' package. "
+                "Install it with 'pip install pymongo'."
+            )
         operations = [
             UpdateOne({"_id": doc["_id"]}, {"$set": doc}, upsert=True) for doc in docs
         ]
