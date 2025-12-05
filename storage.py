@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import UpdateOne
+from pymongo.errors import ConfigurationError
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.inspection import inspect
 from sqlalchemy.orm import sessionmaker
@@ -67,9 +68,7 @@ class SQLAlchemyStore:
         self.session.add_all(commit_data)
         await self.session.commit()
 
-    async def insert_git_commit_stats(
-        self, commit_stats: List[GitCommitStat]
-    ) -> None:
+    async def insert_git_commit_stats(self, commit_stats: List[GitCommitStat]) -> None:
         if not commit_stats:
             return
         assert self.session is not None
@@ -98,8 +97,17 @@ class MongoStore:
         if self.db_name:
             self.db = self.client[self.db_name]
         else:
-            default_db = self.client.get_default_database()
-            self.db = default_db if default_db is not None else self.client["mergestat"]
+            try:
+                default_db = self.client.get_default_database()
+                self.db = (
+                    default_db if default_db is not None else self.client["mergestat"]
+                )
+            except ConfigurationError:
+                raise ValueError(
+                    "No default database specified. Please provide a database name "
+                    "either via the MONGO_DB_NAME environment variable or include it "
+                    "in your MongoDB connection string (e.g., 'mongodb://localhost:27017/mydb')"
+                )
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
@@ -108,7 +116,9 @@ class MongoStore:
     async def insert_repo(self, repo: Repo) -> None:
         doc = model_to_dict(repo)
         doc["_id"] = doc["id"]
-        await self.db["repos"].update_one({"_id": doc["_id"]}, {"$set": doc}, upsert=True)
+        await self.db["repos"].update_one(
+            {"_id": doc["_id"]}, {"$set": doc}, upsert=True
+        )
 
     async def insert_git_file_data(self, file_data: List[GitFile]) -> None:
         await self._upsert_many(
@@ -124,9 +134,7 @@ class MongoStore:
             lambda obj: f"{getattr(obj, 'repo_id')}:{getattr(obj, 'hash')}",
         )
 
-    async def insert_git_commit_stats(
-        self, commit_stats: List[GitCommitStat]
-    ) -> None:
+    async def insert_git_commit_stats(self, commit_stats: List[GitCommitStat]) -> None:
         await self._upsert_many(
             "git_commit_stats",
             commit_stats,
