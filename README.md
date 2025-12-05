@@ -15,6 +15,7 @@ This project supports both PostgreSQL and MongoDB as storage backends. You can c
 - **`DB_CONN_STRING`** (required): The connection string for your database.
   - For PostgreSQL: `postgresql+asyncpg://user:password@host:port/database`
   - For MongoDB: `mongodb://host:port` or `mongodb://user:password@host:port`
+- **`DB_ECHO`** (optional): Enable SQL query logging for PostgreSQL. Valid values are `true`, `1`, `yes` (case-insensitive) to enable, or `false`, `0`, `no` to disable. Default: `false`. Note: Enabling this in production can expose sensitive data and impact performance.
 - **`MONGO_DB_NAME`** (optional): The name of the MongoDB database to use. If not specified, the script will use the database specified in the connection string, or default to `mergestat`.
 - **`REPO_PATH`** (optional): Path to the git repository to analyze. Default: `.` (current directory)
 - **`REPO_UUID`** (optional): UUID for the repository. If not provided, one will be generated.
