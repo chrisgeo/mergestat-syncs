@@ -32,5 +32,7 @@ def test_file(repo_path):
     return os.path.join(repo_path, "README.md")
 
 
-# Ensure TypeScript files are treated as text, not video/mp2t.
-mimetypes.add_type("text/x-typescript", ".ts")
+
+def pytest_configure(config):
+    # Ensure TypeScript files are treated as text, not video/mp2t.
+    mimetypes.add_type("text/x-typescript", ".ts")
