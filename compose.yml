@@ -9,7 +9,7 @@ volumes:
     driver: local
     driver_opts:
       type: none
-      drevice: ./data/mongo
+      device: ./data/mongo
       o: bind
 services:
   mongo:
