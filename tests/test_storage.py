@@ -6,12 +6,6 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import select
 
-# Optional dependency: aiosqlite for async SQLAlchemy tests
-try:
-    import aiosqlite  # noqa: F401
-    AIOSQLITE_AVAILABLE = True
-except ImportError:  # pragma: no cover - optional dependency
-    AIOSQLITE_AVAILABLE = False
 
 # Optional dependency: pymongo
 try:

@@ -1,6 +1,6 @@
 """Tests for utility functions in git_mergestat.py."""
 
-import asyncio
+
 import mimetypes
 import os
 import threading
@@ -314,7 +314,7 @@ class TestResolveRepoIdAndFiles:
         repo = Repo(repo_path)
         # Force the module-level REPO_UUID to a known value
         from git_mergestat import REPO_UUID as module_uuid
-        # mypy: ignore
+        # type: ignore
         import git_mergestat as gm
 
         gm.REPO_UUID = str(test_uuid)

@@ -100,7 +100,7 @@ class MongoStore:
         if AsyncIOMotorClient is None:
             raise ImportError(
                 "MongoDB support requires the 'motor' package. "
-                "Install it with 'pip install motor pymongo'."
+                "Install it with 'pip install motor'."
             )
         self.client = AsyncIOMotorClient(conn_string)
         self.db_name = db_name
@@ -176,11 +176,7 @@ class MongoStore:
         if not docs:
             return
 
-        if UpdateOne is None:
-            raise ImportError(
-                "MongoDB support requires the 'pymongo' package. "
-                "Install it with 'pip install pymongo'."
-            )
+
         operations = [
             UpdateOne({"_id": doc["_id"]}, {"$set": doc}, upsert=True) for doc in docs
         ]
