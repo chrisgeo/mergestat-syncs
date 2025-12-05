@@ -35,11 +35,15 @@ class TestMongoStore:
     async def test_init_with_valid_connection_string(self):
         """Test MongoStore initialization with valid connection string."""
         conn_string = "mongodb://localhost:27017"
-        store = MongoStore(conn_string, db_name="test_db")
         
-        assert store.db_name == "test_db"
-        assert store.db is None  # db is None until __aenter__ is called
-        store.client.close()
+        with patch("storage.AsyncIOMotorClient") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client_class.return_value = mock_client
+            
+            store = MongoStore(conn_string, db_name="test_db")
+            
+            assert store.db_name == "test_db"
+            assert store.db is None  # db is None until __aenter__ is called
 
     def test_init_with_empty_connection_string(self):
         """Test MongoStore raises ValueError for empty connection string."""
