@@ -1,6 +1,6 @@
 import uuid
 from collections.abc import Iterable
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import UpdateOne
@@ -149,7 +149,10 @@ class MongoStore:
         )
 
     async def _upsert_many(
-        self, collection: str, payload: Iterable[Any], id_builder
+        self,
+        collection: str,
+        payload: Iterable[Any],
+        id_builder: Callable[[Any], str],
     ) -> None:
         docs = []
         for item in payload:
