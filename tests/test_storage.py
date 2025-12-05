@@ -6,7 +6,7 @@ import pytest
 import pytest_asyncio
 from pymongo import UpdateOne
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import create_async_engine
+
 
 from models import GitBlame, GitCommit, GitCommitStat, GitFile, Repo
 from models.git import Base
