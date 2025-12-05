@@ -39,6 +39,8 @@ jobs:
     - name: Run flake8 (linting)
       run: |
         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        # The following flake8 command is intended to be informational only.
+        # It provides broader linting feedback (complexity, line length, etc.) but does not fail the job due to --exit-zero.
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
     - name: Run mypy (type checking)
