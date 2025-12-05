@@ -366,7 +366,6 @@ async def test_sqlalchemy_store_session_management(test_db_url):
     async with store as s:
         # Inside context, session should be available
         assert s.session is not None
-        session_ref = s.session
     
     # After exiting context, the session reference still exists but is closed
     # We can't easily test if it's closed, but we can verify engine is disposed
