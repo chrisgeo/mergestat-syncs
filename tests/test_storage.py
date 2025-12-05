@@ -72,7 +72,6 @@ async def sqlalchemy_store(test_db_url):
     await store.engine.dispose()
 
 
-@sqlalchemy_skip
 @pytest.mark.asyncio
 async def test_sqlalchemy_store_context_manager(test_db_url):
     """Test that SQLAlchemyStore can be used as an async context manager."""
@@ -91,7 +90,6 @@ async def test_sqlalchemy_store_context_manager(test_db_url):
     await store.engine.dispose()
 
 
-@sqlalchemy_skip
 @pytest.mark.asyncio
 async def test_sqlalchemy_store_insert_repo(sqlalchemy_store):
     """Test inserting a repository into the database."""
@@ -118,7 +116,6 @@ async def test_sqlalchemy_store_insert_repo(sqlalchemy_store):
         assert saved_repo.ref == "main"
 
 
-@sqlalchemy_skip
 @pytest.mark.asyncio
 async def test_sqlalchemy_store_insert_repo_duplicate(sqlalchemy_store):
     """Test that inserting a duplicate repo does not cause an error."""
@@ -144,7 +141,6 @@ async def test_sqlalchemy_store_insert_repo_duplicate(sqlalchemy_store):
         assert len(repos) == 1
 
 
-@sqlalchemy_skip
 @pytest.mark.asyncio
 async def test_sqlalchemy_store_insert_git_file_data(sqlalchemy_store):
     """Test inserting git file data into the database."""
@@ -187,7 +183,6 @@ async def test_sqlalchemy_store_insert_git_file_data(sqlalchemy_store):
         assert saved_files[1].path in ["file1.txt", "file2.txt"]
 
 
-@sqlalchemy_skip
 @pytest.mark.asyncio
 async def test_sqlalchemy_store_insert_git_file_data_empty_list(sqlalchemy_store):
     """Test that inserting an empty list does not cause an error."""
@@ -196,7 +191,6 @@ async def test_sqlalchemy_store_insert_git_file_data_empty_list(sqlalchemy_store
         # Should not raise any error
 
 
-@sqlalchemy_skip
 @pytest.mark.asyncio
 async def test_sqlalchemy_store_insert_git_commit_data(sqlalchemy_store):
     """Test inserting git commit data into the database."""
@@ -251,7 +245,6 @@ async def test_sqlalchemy_store_insert_git_commit_data(sqlalchemy_store):
         assert saved_commits[1].hash in ["abc123", "def456"]
 
 
-@sqlalchemy_skip
 @pytest.mark.asyncio
 async def test_sqlalchemy_store_insert_git_commit_data_empty_list(sqlalchemy_store):
     """Test that inserting an empty list does not cause an error."""
@@ -260,7 +253,6 @@ async def test_sqlalchemy_store_insert_git_commit_data_empty_list(sqlalchemy_sto
         # Should not raise any error
 
 
-@sqlalchemy_skip
 @pytest.mark.asyncio
 async def test_sqlalchemy_store_insert_git_commit_stats(sqlalchemy_store):
     """Test inserting git commit stats into the database."""
@@ -309,7 +301,6 @@ async def test_sqlalchemy_store_insert_git_commit_stats(sqlalchemy_store):
         assert saved_stats[1].file_path in ["file1.txt", "file2.txt"]
 
 
-@sqlalchemy_skip
 @pytest.mark.asyncio
 async def test_sqlalchemy_store_insert_git_commit_stats_empty_list(sqlalchemy_store):
     """Test that inserting an empty list does not cause an error."""
@@ -318,7 +309,6 @@ async def test_sqlalchemy_store_insert_git_commit_stats_empty_list(sqlalchemy_st
         # Should not raise any error
 
 
-@sqlalchemy_skip
 @pytest.mark.asyncio
 async def test_sqlalchemy_store_insert_blame_data(sqlalchemy_store):
     """Test inserting git blame data into the database."""
@@ -369,7 +359,6 @@ async def test_sqlalchemy_store_insert_blame_data(sqlalchemy_store):
         assert saved_blames[1].line_no in [1, 2]
 
 
-@sqlalchemy_skip
 @pytest.mark.asyncio
 async def test_sqlalchemy_store_insert_blame_data_empty_list(sqlalchemy_store):
     """Test that inserting an empty list does not cause an error."""
@@ -378,7 +367,6 @@ async def test_sqlalchemy_store_insert_blame_data_empty_list(sqlalchemy_store):
         # Should not raise any error
 
 
-@sqlalchemy_skip
 @pytest.mark.asyncio
 async def test_sqlalchemy_store_session_management(test_db_url):
     """Test session lifecycle management in SQLAlchemyStore."""
@@ -401,7 +389,6 @@ async def test_sqlalchemy_store_session_management(test_db_url):
     await store.engine.dispose()
 
 
-@sqlalchemy_skip
 @pytest.mark.asyncio
 async def test_sqlalchemy_store_transaction_commit(sqlalchemy_store):
     """Test that transactions are committed properly."""
@@ -427,7 +414,6 @@ async def test_sqlalchemy_store_transaction_commit(sqlalchemy_store):
             assert saved_repo.id == test_repo.id
 
 
-@sqlalchemy_skip
 @pytest.mark.asyncio
 async def test_sqlalchemy_store_multiple_operations(sqlalchemy_store):
     """Test performing multiple operations in a single session."""
