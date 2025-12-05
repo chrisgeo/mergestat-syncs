@@ -1,6 +1,7 @@
 sqlalchemy
 psycopg2-binary
 asyncpg
+aiosqlite
 python-gitlab
 GitPython
 mypy
