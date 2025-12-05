@@ -52,7 +52,7 @@ class TestGitBlameMixin:
 
     def test_fetch_blame_creates_repo_when_none_provided(self, repo_path, repo_uuid):
         """Test that fetch_blame creates a Repo when none is provided."""
-        with patch("models.Repo") as mock_repo:
+        with patch("models.git.Repo") as mock_repo:
             mock_repo_instance = MagicMock()
             mock_repo_instance.blame.return_value = []
             mock_repo.return_value = mock_repo_instance
