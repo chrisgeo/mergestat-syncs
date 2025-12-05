@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import pytest_asyncio
@@ -8,7 +9,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from models import GitBlame, GitCommit, GitCommitStat, GitFile, Repo
 from models.git import Base
-from storage import SQLAlchemyStore, model_to_dict
+from storage import MongoStore, SQLAlchemyStore, model_to_dict
 
 
 def test_model_to_dict_serializes_uuid_and_fields(repo_uuid):
@@ -453,3 +454,473 @@ async def test_sqlalchemy_store_multiple_operations(sqlalchemy_store):
             select(GitCommit).where(GitCommit.repo_id == test_repo_id)
         )
         assert len(commit_result.scalars().all()) == 1
+
+
+
+# MongoDB Tests
+
+
+@pytest_asyncio.fixture
+async def mongo_store():
+    """Create a MongoStore instance with mocked MongoDB client for testing."""
+    # Create a mock MongoDB client and database
+    store = MongoStore.__new__(MongoStore)
+    store.client = MagicMock()
+    store.db_name = "test_db"
+    store.db = None
+    
+    # Mock the database and collections
+    mock_db = MagicMock()
+    mock_collections = {}
+    
+    def get_collection(self_arg, name):
+        if name not in mock_collections:
+            mock_collection = MagicMock()
+            # Mock async methods
+            mock_collection.update_one = AsyncMock(return_value=MagicMock(upserted_id=None))
+            mock_collection.bulk_write = AsyncMock(return_value=MagicMock())
+            mock_collection.find_one = AsyncMock(return_value=None)
+            mock_collection.find = MagicMock(return_value=MagicMock(to_list=AsyncMock(return_value=[])))
+            mock_collection.count_documents = AsyncMock(return_value=0)
+            mock_collections[name] = mock_collection
+        return mock_collections[name]
+    
+    mock_db.__getitem__ = get_collection
+    mock_db.name = "test_db"
+    store.db = mock_db
+    store._collections = mock_collections  # Store reference for tests
+    
+    yield store
+    
+    # Cleanup
+    store.client.close = MagicMock()
+
+
+@pytest.mark.asyncio
+async def test_mongo_store_init_with_empty_connection_string():
+    """Test that MongoStore raises error with empty connection string."""
+    with pytest.raises(ValueError, match="MongoDB connection string is required"):
+        MongoStore("")
+
+
+@pytest.mark.asyncio
+async def test_mongo_store_init_with_connection_string():
+    """Test that MongoStore initializes properly with a connection string."""
+    with patch('storage.AsyncIOMotorClient'):
+        store = MongoStore("mongodb://localhost:27017/test_db")
+        assert store.db_name is None
+        assert store.db is None
+
+
+@pytest.mark.asyncio
+async def test_mongo_store_init_with_db_name():
+    """Test that MongoStore initializes properly with explicit db_name."""
+    with patch('storage.AsyncIOMotorClient'):
+        store = MongoStore("mongodb://localhost:27017", db_name="my_database")
+        assert store.db_name == "my_database"
+        assert store.db is None
+
+
+@pytest.mark.asyncio
+async def test_mongo_store_context_manager_with_db_name():
+    """Test that MongoStore can be used as an async context manager with explicit db_name."""
+    with patch('storage.AsyncIOMotorClient') as mock_client_class:
+        mock_client = MagicMock()
+        mock_db = MagicMock()
+        mock_db.name = "my_database"
+        mock_client.__getitem__ = MagicMock(return_value=mock_db)
+        mock_client_class.return_value = mock_client
+        
+        store = MongoStore("mongodb://localhost:27017", db_name="my_database")
+        
+        async with store as s:
+            assert s.db is not None
+            assert s == store
+            mock_client.__getitem__.assert_called_once_with("my_database")
+
+
+@pytest.mark.asyncio
+async def test_mongo_store_context_manager_with_connection_string_db():
+    """Test MongoStore context manager with database in connection string."""
+    with patch('storage.AsyncIOMotorClient') as mock_client_class:
+        mock_client = MagicMock()
+        mock_db = MagicMock()
+        mock_db.name = "mydb"
+        mock_client.get_default_database = MagicMock(return_value=mock_db)
+        mock_client_class.return_value = mock_client
+        
+        store = MongoStore("mongodb://localhost:27017/mydb")
+        
+        async with store as s:
+            assert s.db is not None
+            assert s == store
+
+
+@pytest.mark.asyncio
+async def test_mongo_store_context_manager_without_db_raises_error():
+    """Test that MongoStore raises error when no database is specified."""
+    from pymongo.errors import ConfigurationError
+    
+    with patch('storage.AsyncIOMotorClient') as mock_client_class:
+        mock_client = MagicMock()
+        mock_client.get_default_database = MagicMock(side_effect=ConfigurationError("No default database"))
+        mock_client_class.return_value = mock_client
+        
+        store = MongoStore("mongodb://localhost:27017")
+        
+        with pytest.raises(ValueError, match="No default database specified"):
+            async with store:
+                pass
+
+
+@pytest.mark.asyncio
+async def test_mongo_store_insert_repo(mongo_store):
+    """Test inserting a repository into MongoDB."""
+    test_repo = Repo(
+        id=uuid.uuid4(),
+        repo="https://github.com/test/repo.git",
+        ref="main",
+        settings={},
+        tags=[],
+    )
+    
+    await mongo_store.insert_repo(test_repo)
+    
+    # Verify the repo was inserted (update_one was called)
+    mongo_store.db["repos"].update_one.assert_called_once()
+    call_args = mongo_store.db["repos"].update_one.call_args
+    
+    # Verify the filter includes the repo id
+    assert call_args[0][0]["_id"] == str(test_repo.id)
+    # Verify upsert is True
+    assert call_args[1]["upsert"] is True
+
+
+@pytest.mark.asyncio
+async def test_mongo_store_insert_repo_upsert(mongo_store):
+    """Test that inserting a duplicate repo updates instead of creating duplicate."""
+    test_repo = Repo(
+        id=uuid.uuid4(),
+        repo="https://github.com/test/repo.git",
+        ref="main",
+        settings={},
+        tags=[],
+    )
+    
+    # Insert the repo twice with different refs
+    await mongo_store.insert_repo(test_repo)
+    test_repo.ref = "develop"
+    await mongo_store.insert_repo(test_repo)
+    
+    # Verify update_one was called twice
+    assert mongo_store.db["repos"].update_one.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_mongo_store_insert_git_file_data(mongo_store):
+    """Test inserting git file data into MongoDB."""
+    test_repo_id = uuid.uuid4()
+    
+    file_data = [
+        GitFile(
+            repo_id=test_repo_id,
+            path="file1.txt",
+            executable=False,
+            contents="content1",
+        ),
+        GitFile(
+            repo_id=test_repo_id,
+            path="file2.txt",
+            executable=True,
+            contents="content2",
+        ),
+    ]
+    
+    await mongo_store.insert_git_file_data(file_data)
+    
+    # Verify bulk_write was called
+    mongo_store.db["git_files"].bulk_write.assert_called_once()
+    call_args = mongo_store.db["git_files"].bulk_write.call_args
+    
+    # Verify operations list has 2 items
+    operations = call_args[0][0]
+    assert len(operations) == 2
+    # Verify ordered=False
+    assert call_args[1]["ordered"] is False
+
+
+@pytest.mark.asyncio
+async def test_mongo_store_insert_git_file_data_empty_list(mongo_store):
+    """Test that inserting an empty list does not cause an error."""
+    await mongo_store.insert_git_file_data([])
+    
+    # Verify bulk_write was not called
+    mongo_store.db["git_files"].bulk_write.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_mongo_store_insert_git_file_data_upsert(mongo_store):
+    """Test that inserting duplicate file data updates instead of creating duplicates."""
+    test_repo_id = uuid.uuid4()
+    
+    file_data = [
+        GitFile(
+            repo_id=test_repo_id,
+            path="file.txt",
+            executable=False,
+            contents="original content",
+        ),
+    ]
+    
+    await mongo_store.insert_git_file_data(file_data)
+    
+    # Update the same file with new content
+    file_data[0].contents = "updated content"
+    await mongo_store.insert_git_file_data(file_data)
+    
+    # Verify bulk_write was called twice (upsert behavior)
+    assert mongo_store.db["git_files"].bulk_write.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_mongo_store_insert_git_commit_data(mongo_store):
+    """Test inserting git commit data into MongoDB."""
+    test_repo_id = uuid.uuid4()
+    
+    commit_data = [
+        GitCommit(
+            repo_id=test_repo_id,
+            hash="abc123",
+            message="Initial commit",
+            author_name="Test Author",
+            author_email="test@example.com",
+            author_when=datetime(2024, 1, 1, tzinfo=timezone.utc),
+            committer_name="Test Committer",
+            committer_email="committer@example.com",
+            committer_when=datetime(2024, 1, 1, tzinfo=timezone.utc),
+            parents=0,
+        ),
+        GitCommit(
+            repo_id=test_repo_id,
+            hash="def456",
+            message="Second commit",
+            author_name="Test Author",
+            author_email="test@example.com",
+            author_when=datetime(2024, 1, 2, tzinfo=timezone.utc),
+            committer_name="Test Committer",
+            committer_email="committer@example.com",
+            committer_when=datetime(2024, 1, 2, tzinfo=timezone.utc),
+            parents=1,
+        ),
+    ]
+    
+    await mongo_store.insert_git_commit_data(commit_data)
+    
+    # Verify bulk_write was called
+    mongo_store.db["git_commits"].bulk_write.assert_called_once()
+    call_args = mongo_store.db["git_commits"].bulk_write.call_args
+    
+    # Verify operations list has 2 items
+    operations = call_args[0][0]
+    assert len(operations) == 2
+
+
+@pytest.mark.asyncio
+async def test_mongo_store_insert_git_commit_data_empty_list(mongo_store):
+    """Test that inserting an empty list does not cause an error."""
+    await mongo_store.insert_git_commit_data([])
+    
+    # Verify bulk_write was not called
+    mongo_store.db["git_commits"].bulk_write.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_mongo_store_insert_git_commit_stats(mongo_store):
+    """Test inserting git commit stats into MongoDB."""
+    test_repo_id = uuid.uuid4()
+    
+    commit_stats = [
+        GitCommitStat(
+            repo_id=test_repo_id,
+            commit_hash="abc123",
+            file_path="file1.txt",
+            additions=10,
+            deletions=5,
+            old_file_mode="100644",
+            new_file_mode="100644",
+        ),
+        GitCommitStat(
+            repo_id=test_repo_id,
+            commit_hash="abc123",
+            file_path="file2.txt",
+            additions=20,
+            deletions=3,
+            old_file_mode="100644",
+            new_file_mode="100755",
+        ),
+    ]
+    
+    await mongo_store.insert_git_commit_stats(commit_stats)
+    
+    # Verify bulk_write was called
+    mongo_store.db["git_commit_stats"].bulk_write.assert_called_once()
+    call_args = mongo_store.db["git_commit_stats"].bulk_write.call_args
+    
+    # Verify operations list has 2 items
+    operations = call_args[0][0]
+    assert len(operations) == 2
+
+
+@pytest.mark.asyncio
+async def test_mongo_store_insert_git_commit_stats_empty_list(mongo_store):
+    """Test that inserting an empty list does not cause an error."""
+    await mongo_store.insert_git_commit_stats([])
+    
+    # Verify bulk_write was not called
+    mongo_store.db["git_commit_stats"].bulk_write.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_mongo_store_insert_blame_data(mongo_store):
+    """Test inserting git blame data into MongoDB."""
+    test_repo_id = uuid.uuid4()
+    
+    blame_data = [
+        GitBlame(
+            repo_id=test_repo_id,
+            path="file.txt",
+            line_no=1,
+            author_email="author@example.com",
+            author_name="Test Author",
+            author_when=datetime(2024, 1, 1, tzinfo=timezone.utc),
+            commit_hash="abc123",
+            line="line 1 content",
+        ),
+        GitBlame(
+            repo_id=test_repo_id,
+            path="file.txt",
+            line_no=2,
+            author_email="author@example.com",
+            author_name="Test Author",
+            author_when=datetime(2024, 1, 1, tzinfo=timezone.utc),
+            commit_hash="abc123",
+            line="line 2 content",
+        ),
+    ]
+    
+    await mongo_store.insert_blame_data(blame_data)
+    
+    # Verify bulk_write was called
+    mongo_store.db["git_blame"].bulk_write.assert_called_once()
+    call_args = mongo_store.db["git_blame"].bulk_write.call_args
+    
+    # Verify operations list has 2 items
+    operations = call_args[0][0]
+    assert len(operations) == 2
+
+
+@pytest.mark.asyncio
+async def test_mongo_store_insert_blame_data_empty_list(mongo_store):
+    """Test that inserting an empty list does not cause an error."""
+    await mongo_store.insert_blame_data([])
+    
+    # Verify bulk_write was not called
+    mongo_store.db["git_blame"].bulk_write.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_mongo_store_upsert_many_with_dict_payload(mongo_store):
+    """Test _upsert_many with dict payload instead of model instances."""
+    test_data = [
+        {"repo_id": "test-repo", "path": "file1.txt", "contents": "content1"},
+        {"repo_id": "test-repo", "path": "file2.txt", "contents": "content2"},
+    ]
+    
+    await mongo_store._upsert_many(
+        "test_collection",
+        test_data,
+        lambda obj: f"{obj['repo_id']}:{obj['path']}",
+    )
+    
+    # Verify bulk_write was called on test_collection
+    mongo_store.db["test_collection"].bulk_write.assert_called_once()
+    call_args = mongo_store.db["test_collection"].bulk_write.call_args
+    
+    # Verify operations list has 2 items
+    operations = call_args[0][0]
+    assert len(operations) == 2
+
+
+@pytest.mark.asyncio
+async def test_mongo_store_bulk_operations_unordered(mongo_store):
+    """Test that bulk operations are performed unordered (continue on error)."""
+    test_repo_id = uuid.uuid4()
+    
+    # Create a large batch to test bulk operations
+    file_data = [
+        GitFile(
+            repo_id=test_repo_id,
+            path=f"file{i}.txt",
+            executable=False,
+            contents=f"content{i}",
+        )
+        for i in range(100)
+    ]
+    
+    await mongo_store.insert_git_file_data(file_data)
+    
+    # Verify bulk_write was called with ordered=False
+    mongo_store.db["git_files"].bulk_write.assert_called_once()
+    call_args = mongo_store.db["git_files"].bulk_write.call_args
+    assert call_args[1]["ordered"] is False
+    
+    # Verify 100 operations
+    operations = call_args[0][0]
+    assert len(operations) == 100
+
+
+@pytest.mark.asyncio
+async def test_mongo_store_connection_cleanup():
+    """Test that MongoStore properly closes connection on exit."""
+    with patch('storage.AsyncIOMotorClient') as mock_client_class:
+        mock_client = MagicMock()
+        mock_db = MagicMock()
+        mock_client.__getitem__ = MagicMock(return_value=mock_db)
+        mock_client.close = MagicMock()
+        mock_client_class.return_value = mock_client
+        
+        store = MongoStore("mongodb://localhost:27017", db_name="test_db")
+        
+        async with store:
+            assert store.db is not None
+        
+        # Verify client.close() was called
+        mock_client.close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_mongo_store_upsert_id_builder_functionality(mongo_store):
+    """Test that _upsert_many correctly uses id_builder to create composite keys."""
+    test_repo_id = uuid.uuid4()
+    
+    file_data = [
+        GitFile(
+            repo_id=test_repo_id,
+            path="dir/file.txt",
+            executable=False,
+            contents="content",
+        ),
+    ]
+    
+    await mongo_store.insert_git_file_data(file_data)
+    
+    # Verify the id_builder created correct composite key
+    call_args = mongo_store.db["git_files"].bulk_write.call_args
+    operations = call_args[0][0]
+    
+    # The _id should be repo_id:path
+    from pymongo import UpdateOne
+    assert isinstance(operations[0], UpdateOne)
+    # Check the operation has the correct _id format
+    operation = operations[0]
+    assert operation._filter["_id"] == f"{test_repo_id}:dir/file.txt"
