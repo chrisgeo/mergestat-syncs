@@ -16,7 +16,7 @@ export GITLAB_TOKEN=<token>
 # retrieve all groups
 glab api groups --paginate
 # retrieve all repos
-glab repo ls -g  <group>--include-subgroups --output json
+glab repo ls -g  <group> --include-subgroups --output json
 # use groups to get mr lists
 glab mr list --output json
 

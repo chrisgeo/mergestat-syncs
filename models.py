@@ -227,8 +227,7 @@ class GitBlameMixin:
         """
         blame_data = []
         if repo is None:
-            repo_cls = import_module("models").Repo
-            repo = repo_cls(repo_path)
+            repo = Repo(repo_path)
         rel_path = os.path.relpath(filepath, repo_path)
         try:
             blame_info = repo.blame("HEAD", rel_path)

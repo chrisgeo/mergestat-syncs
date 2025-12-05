@@ -13,7 +13,7 @@ volumes:
       o: bind
 services:
   mongo:
-    image: mongodb:latest
+    image: mongo:latest
     container_name: mongo
     restart: always
     ports:

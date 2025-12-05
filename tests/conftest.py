@@ -2,9 +2,9 @@
 import os
 import uuid
 from pathlib import Path
+import mimetypes
 
 import pytest
-import mimetypes
 from git import Repo as GitRepo
 
 

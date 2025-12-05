@@ -200,7 +200,7 @@ async def process_git_blame(
     """
     blame_batch: List[GitBlame] = []
     # Create a single GitRepo instance for all files to avoid expensive re-initialization
-    git_repo = Repo(REPO_PATH)
+
     for filepath in all_files:
         blame_objects = GitBlame.process_file(REPO_PATH, filepath, REPO_UUID, repo=repo)
         blame_batch.extend(blame_objects)
