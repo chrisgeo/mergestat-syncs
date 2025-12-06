@@ -14,10 +14,8 @@ from git import Repo as GitRepo
 from models.git import GitBlame, GitCommit, GitCommitStat, GitFile, Repo
 from storage import MongoStore, SQLAlchemyStore
 
-# Configure logging (add this near the top of file)
-logging.basicConfig(
-    level=logging.WARNING, format="%(asctime)s %(levelname)s: %(message)s"
-)
+# Configure logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
 
 # === CONFIGURATION ===# The line `REPO_PATH = os.getenv("REPO_PATH", ".")` is retrieving the value of
 # an environment variable named "REPO_PATH". If the environment variable is not
@@ -273,7 +271,7 @@ async def process_git_files(
     :param all_files: List of file paths in the repository.
     :param store: Storage backend (SQLAlchemy or MongoDB).
     """
-    print(f"Processing {len(all_files)} git files...")
+    logging.info(f"Processing {len(all_files)} git files...")
     file_batch: List[GitFile] = []
     failed_files: List[Tuple[Path, str]] = []  # Track failed files
     successfully_processed = 0
@@ -305,30 +303,30 @@ async def process_git_files(
 
             if len(file_batch) >= BATCH_SIZE:
                 await insert_git_file_data(store, file_batch)
-                print(f"Inserted {len(file_batch)} files")
+                logging.info(f"Inserted {len(file_batch)} files")
                 file_batch.clear()
         except Exception as e:
             error_msg = str(e)
             failed_files.append((filepath, error_msg))
-            print(f"Error processing file {filepath}: {error_msg}")
+            logging.error(f"Error processing file {filepath}: {error_msg}")
 
     # Insert remaining files
     if file_batch:
         await insert_git_file_data(store, file_batch)
-        print(f"Inserted final {len(file_batch)} files")
+        logging.info(f"Inserted final {len(file_batch)} files")
 
     # Report summary
     total_failed = len(failed_files)
-    print(f"\nGit file processing complete:")
-    print(f"  Successfully processed: {successfully_processed} files")
-    print(f"  Failed: {total_failed} files")
+    logging.info(f"\nGit file processing complete:")
+    logging.info(f"  Successfully processed: {successfully_processed} files")
+    logging.info(f"  Failed: {total_failed} files")
 
     if failed_files:
-        print(f"\nFailed files:")
+        logging.warning(f"\nFailed files:")
         for filepath, error in failed_files[:10]:  # Show first 10
-            print(f"  - {filepath}: {error}")
+            logging.warning(f"  - {filepath}: {error}")
         if total_failed > 10:
-            print(f"  ... and {total_failed - 10} more")
+            logging.warning(f"  ... and {total_failed - 10} more")
 
 
 async def process_git_commits(repo: Repo, store: DataStore) -> None:
@@ -338,7 +336,7 @@ async def process_git_commits(repo: Repo, store: DataStore) -> None:
     :param repo: Git repository object.
     :param store: Storage backend (SQLAlchemy or MongoDB).
     """
-    print("Processing git commits...")
+    logging.info("Processing git commits...")
     commit_batch: List[GitCommit] = []
 
     # Process commits using gitpython
@@ -362,15 +360,19 @@ async def process_git_commits(repo: Repo, store: DataStore) -> None:
 
             if len(commit_batch) >= BATCH_SIZE:
                 await insert_git_commit_data(store, commit_batch)
-                print(f"Inserted {len(commit_batch)} commits ({commit_count} total)")
+                logging.info(
+                    f"Inserted {len(commit_batch)} commits ({commit_count} total)"
+                )
                 commit_batch.clear()
 
         # Insert remaining commits
         if commit_batch:
             await insert_git_commit_data(store, commit_batch)
-            print(f"Inserted final {len(commit_batch)} commits ({commit_count} total)")
+            logging.info(
+                f"Inserted final {len(commit_batch)} commits ({commit_count} total)"
+            )
     except Exception as e:
-        print(f"Error processing commits: {e}")
+        logging.error(f"Error processing commits: {e}")
 
 
 async def process_single_file_blame(
@@ -412,7 +414,7 @@ async def process_git_blame(
     if not all_files:
         return
 
-    print(
+    logging.info(
         f"Processing git blame for {len(all_files)} files with {MAX_WORKERS} workers..."
     )
 
@@ -442,7 +444,7 @@ async def process_git_blame(
                 filepath = chunk[idx]
                 error_msg = str(result)
                 failed_files.append((filepath, error_msg))
-                print(f"Error processing {filepath}: {error_msg}")
+                logging.error(f"Error processing {filepath}: {error_msg}")
             elif result:
                 blame_batch.extend(result)
                 successfully_processed += 1
@@ -450,23 +452,23 @@ async def process_git_blame(
         # Insert batch if we have data
         if blame_batch:
             await insert_blame_data(store, blame_batch)
-            print(
+            logging.info(
                 f"Inserted blame data for {len(blame_batch)} lines ({i + len(chunk)}/{len(all_files)} files)"
             )
             blame_batch.clear()
 
     # Report summary
     total_failed = len(failed_files)
-    print(f"\nGit blame processing complete:")
-    print(f"  Successfully processed: {successfully_processed} files")
-    print(f"  Failed: {total_failed} files")
+    logging.info(f"\nGit blame processing complete:")
+    logging.info(f"  Successfully processed: {successfully_processed} files")
+    logging.info(f"  Failed: {total_failed} files")
 
     if failed_files:
-        print(f"\nFailed files:")
+        logging.warning(f"\nFailed files:")
         for filepath, error in failed_files[:10]:  # Show first 10
-            print(f"  - {filepath}: {error}")
+            logging.warning(f"  - {filepath}: {error}")
         if total_failed > 10:
-            print(f"  ... and {total_failed - 10} more")
+            logging.warning(f"  ... and {total_failed - 10} more")
 
 
 async def process_git_commit_stats(repo: Repo, store: DataStore) -> None:
@@ -476,7 +478,7 @@ async def process_git_commit_stats(repo: Repo, store: DataStore) -> None:
     :param repo: Git repository object.
     :param store: Storage backend (SQLAlchemy or MongoDB).
     """
-    print("Processing git commit stats...")
+    logging.info("Processing git commit stats...")
     commit_stats_batch: List[GitCommitStat] = []
 
     try:
@@ -536,7 +538,7 @@ async def process_git_commit_stats(repo: Repo, store: DataStore) -> None:
 
             if len(commit_stats_batch) >= BATCH_SIZE:
                 await insert_git_commit_stats(store, commit_stats_batch)
-                print(
+                logging.info(
                     f"Inserted {len(commit_stats_batch)} commit stats ({commit_count} commits)"
                 )
                 commit_stats_batch.clear()
@@ -544,11 +546,11 @@ async def process_git_commit_stats(repo: Repo, store: DataStore) -> None:
         # Insert remaining stats
         if commit_stats_batch:
             await insert_git_commit_stats(store, commit_stats_batch)
-            print(
+            logging.info(
                 f"Inserted final {len(commit_stats_batch)} commit stats ({commit_count} commits)"
             )
     except Exception as e:
-        print(f"Error processing commit stats: {e}")
+        logging.error(f"Error processing commit stats: {e}")
 
 
 def parse_args():
@@ -604,9 +606,9 @@ async def main() -> None:
     # Derive REPO_UUID from git repository data (remote URL or path)
     REPO_UUID = get_repo_uuid(REPO_PATH)
     if os.getenv("REPO_UUID"):
-        print(f"Using REPO_UUID from environment: {REPO_UUID}")
+        logging.info(f"Using REPO_UUID from environment: {REPO_UUID}")
     else:
-        print(f"Derived REPO_UUID from git repository: {REPO_UUID}")
+        logging.info(f"Derived REPO_UUID from git repository: {REPO_UUID}")
 
     # TODO: Implement date filtering for commits
     # start_date = args.start_date
@@ -629,9 +631,9 @@ async def main() -> None:
             if not is_skippable(f)
         ]
         if not all_files:
-            print("No files to process.")
+            logging.info("No files to process.")
             return
-        print(f"Found {len(all_files)} files to process.")
+        logging.info(f"Found {len(all_files)} files to process.")
 
         # Process GitFile data first
         await process_git_files(repo, all_files, storage)
