@@ -4,7 +4,6 @@ Tests for connector data models.
 
 from datetime import datetime, timezone
 
-import pytest
 
 from connectors.models import (
     Author,
