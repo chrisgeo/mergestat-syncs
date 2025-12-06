@@ -96,7 +96,7 @@ async def _bounded_to_thread_map(
         yield await task
 
 
-def _build_git_file(filepath: Path, repo_id: uuid.UUID, repo_path: str = None) -> Optional[GitFile]:
+def _build_git_file(filepath: Path, repo_id: uuid.UUID, repo_path: Optional[str] = None) -> Optional[GitFile]:
     """
     Build a GitFile instance from a path, skipping unreadable files.
     
