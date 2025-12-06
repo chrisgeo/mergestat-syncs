@@ -78,7 +78,7 @@ class TestParallelBlameProcessing:
         test_files = [Path(f"/tmp/test{i}.py") for i in range(10)]
 
         with patch("git_mergestat.GitBlame.process_file", return_value=[]):
-            with patch("git_mergestat.insert_blame_data") as mock_insert:
+            with patch("git_mergestat.insert_blame_data"):
                 await process_git_blame(test_files, mock_store, mock_repo)
                 # With 10 files and no blame data returned, should have 0 insert calls
                 # The function should handle empty results gracefully
@@ -99,7 +99,7 @@ class TestParallelBlameProcessing:
             return []
 
         with patch("git_mergestat.GitBlame.process_file", side_effect=side_effect):
-            with patch("git_mergestat.insert_blame_data") as mock_insert:
+            with patch("git_mergestat.insert_blame_data"):
                 # Should not raise exception
                 await process_git_blame(test_files, mock_store, mock_repo)
 
