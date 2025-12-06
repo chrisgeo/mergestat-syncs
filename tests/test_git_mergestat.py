@@ -314,7 +314,7 @@ class TestResolveRepoIdAndFiles:
         repo = Repo(repo_path)
         # Force the module-level REPO_UUID to a known value
         from git_mergestat import REPO_UUID as module_uuid
-        # type: ignore
+
         import git_mergestat as gm
 
         gm.REPO_UUID = str(test_uuid)
