@@ -5,9 +5,13 @@ import mimetypes
 import os
 from pathlib import Path
 from typing import List, Union
+import logging
 
 from models.git import GitBlame, GitCommit, GitCommitStat, GitFile, Repo
 from storage import MongoStore, SQLAlchemyStore
+
+# Configure logging (add this near the top of file)
+logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s: %(message)s")
 
 # === CONFIGURATION ===# The line `REPO_PATH = os.getenv("REPO_PATH", ".")` is retrieving the value of
 # an environment variable named "REPO_PATH". If the environment variable is not
@@ -395,8 +399,10 @@ async def process_git_commit_stats(repo: Repo, store: DataStore) -> None:
                                 additions += 1
                             elif line.startswith("-") and not line.startswith("---"):
                                 deletions += 1
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logging.warning(
+                            f"Failed to decode diff or count lines for file '{file_path}' in commit '{getattr(commit, 'hexsha', None)}': {e}"
+                        )
 
                 # Determine file modes
                 old_mode = "unknown"
