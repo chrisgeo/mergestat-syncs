@@ -9,6 +9,8 @@ import uuid
 from pathlib import Path
 from typing import List, Tuple, Union
 
+from git import Repo as GitRepo
+
 from models.git import GitBlame, GitCommit, GitCommitStat, GitFile, Repo
 from storage import MongoStore, SQLAlchemyStore
 
@@ -59,8 +61,6 @@ def get_repo_uuid(repo_path: str) -> str:
 
     try:
         # Try to get repository information from git
-        from git import Repo as GitRepo
-
         git_repo = GitRepo(repo_path)
 
         # Try to get remote URL (most reliable identifier)

@@ -2,18 +2,15 @@
 
 import asyncio
 import os
+import uuid
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from git_mergestat import (
-    process_git_blame,
-    process_git_commit_stats,
-    process_git_commits,
-    process_git_files,
-    process_single_file_blame,
-)
+from git_mergestat import (process_git_blame, process_git_commit_stats,
+                           process_git_commits, process_git_files,
+                           process_single_file_blame)
 
 
 class TestBatchSizeConfiguration:
@@ -253,8 +250,6 @@ class TestRepoUUIDDerivation:
 
             assert uuid1 == uuid2
             # Should be a valid UUID format
-            import uuid
-
             uuid.UUID(uuid1)  # Will raise if not valid
 
     def test_get_repo_uuid_respects_env_var(self):
@@ -282,6 +277,4 @@ class TestRepoUUIDDerivation:
             result = get_repo_uuid(str(non_git_dir))
 
             # Should return a valid UUID (fallback to random)
-            import uuid
-
             uuid.UUID(result)  # Will raise if not valid
