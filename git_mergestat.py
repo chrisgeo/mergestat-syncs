@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 import argparse
 import asyncio
+import logging
 import mimetypes
 import os
 from pathlib import Path
 from typing import List, Union
-import logging
 
 from models.git import GitBlame, GitCommit, GitCommitStat, GitFile, Repo
 from storage import MongoStore, SQLAlchemyStore
 
 # Configure logging (add this near the top of file)
-logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s: %(message)s")
+logging.basicConfig(
+    level=logging.WARNING, format="%(asctime)s %(levelname)s: %(message)s"
+)
 
 # === CONFIGURATION ===# The line `REPO_PATH = os.getenv("REPO_PATH", ".")` is retrieving the value of
 # an environment variable named "REPO_PATH". If the environment variable is not
@@ -211,6 +213,8 @@ async def process_git_files(
     """
     print(f"Processing {len(all_files)} git files...")
     file_batch: List[GitFile] = []
+    failed_files: List[tuple[Path, str]] = []  # Track failed files
+    successfully_processed = 0
 
     for filepath in all_files:
         try:
@@ -235,18 +239,34 @@ async def process_git_files(
                 contents=contents,
             )
             file_batch.append(git_file)
+            successfully_processed += 1
 
             if len(file_batch) >= BATCH_SIZE:
                 await insert_git_file_data(store, file_batch)
                 print(f"Inserted {len(file_batch)} files")
                 file_batch.clear()
         except Exception as e:
-            print(f"Error processing file {filepath}: {e}")
+            error_msg = str(e)
+            failed_files.append((filepath, error_msg))
+            print(f"Error processing file {filepath}: {error_msg}")
 
     # Insert remaining files
     if file_batch:
         await insert_git_file_data(store, file_batch)
         print(f"Inserted final {len(file_batch)} files")
+
+    # Report summary
+    total_failed = len(failed_files)
+    print(f"\nGit file processing complete:")
+    print(f"  Successfully processed: {successfully_processed} files")
+    print(f"  Failed: {total_failed} files")
+
+    if failed_files:
+        print(f"\nFailed files:")
+        for filepath, error in failed_files[:10]:  # Show first 10
+            print(f"  - {filepath}: {error}")
+        if total_failed > 10:
+            print(f"  ... and {total_failed - 10} more")
 
 
 async def process_git_commits(repo: Repo, store: DataStore) -> None:
@@ -292,22 +312,28 @@ async def process_git_commits(repo: Repo, store: DataStore) -> None:
 
 
 async def process_single_file_blame(
-    filepath: Path, repo: Repo, semaphore: asyncio.Semaphore
+    filepath: Path, repo_path: str, semaphore: asyncio.Semaphore
 ) -> List[GitBlame]:
     """
     Process a single file for blame data with concurrency control.
 
     :param filepath: Path to the file.
-    :param repo: Repo instance to use for git operations.
+    :param repo_path: Path to the git repository (used to create thread-safe Repo instance).
     :param semaphore: Semaphore to control concurrent file processing.
     :return: List of GitBlame objects.
     """
     async with semaphore:
         # Run blame processing in executor to avoid blocking
+        # Note: Create a new Repo instance per worker for thread-safety
+        # GitPython's Repo object is not thread-safe for concurrent operations
         loop = asyncio.get_event_loop()
-        blame_objects = await loop.run_in_executor(
-            None, GitBlame.process_file, REPO_PATH, filepath, REPO_UUID, repo
-        )
+
+        def process_with_new_repo():
+            # Create a new Repo instance for this thread to avoid race conditions
+            thread_repo = Repo(repo_path)
+            return GitBlame.process_file(repo_path, filepath, REPO_UUID, thread_repo)
+
+        blame_objects = await loop.run_in_executor(None, process_with_new_repo)
         return blame_objects
 
 
@@ -319,7 +345,7 @@ async def process_git_blame(
 
     :param all_files: List of file paths in the repository.
     :param store: Storage backend (SQLAlchemy or MongoDB).
-    :param repo: Repo instance to use for git operations.
+    :param repo: Repo instance (only used for path reference, not shared across workers).
     """
     if not all_files:
         return
@@ -332,6 +358,8 @@ async def process_git_blame(
     semaphore = asyncio.Semaphore(MAX_WORKERS)
 
     blame_batch: List[GitBlame] = []
+    failed_files: List[tuple[Path, str]] = []  # Track failed files with error messages
+    successfully_processed = 0
 
     # Process files in chunks to manage memory
     chunk_size = BATCH_SIZE
@@ -339,17 +367,23 @@ async def process_git_blame(
         chunk = all_files[i : i + chunk_size]
 
         # Process chunk in parallel
+        # Note: Each worker creates its own Repo instance for thread-safety
         tasks = [
-            process_single_file_blame(filepath, repo, semaphore) for filepath in chunk
+            process_single_file_blame(filepath, REPO_PATH, semaphore)
+            for filepath in chunk
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         # Collect results and filter out errors
-        for result in results:
+        for idx, result in enumerate(results):
             if isinstance(result, Exception):
-                print(f"Error processing file: {result}")
+                filepath = chunk[idx]
+                error_msg = str(result)
+                failed_files.append((filepath, error_msg))
+                print(f"Error processing {filepath}: {error_msg}")
             elif result:
                 blame_batch.extend(result)
+                successfully_processed += 1
 
         # Insert batch if we have data
         if blame_batch:
@@ -358,6 +392,19 @@ async def process_git_blame(
                 f"Inserted blame data for {len(blame_batch)} lines ({i + len(chunk)}/{len(all_files)} files)"
             )
             blame_batch.clear()
+
+    # Report summary
+    total_failed = len(failed_files)
+    print(f"\nGit blame processing complete:")
+    print(f"  Successfully processed: {successfully_processed} files")
+    print(f"  Failed: {total_failed} files")
+
+    if failed_files:
+        print(f"\nFailed files:")
+        for filepath, error in failed_files[:10]:  # Show first 10
+            print(f"  - {filepath}: {error}")
+        if total_failed > 10:
+            print(f"  ... and {total_failed - 10} more")
 
 
 async def process_git_commit_stats(repo: Repo, store: DataStore) -> None:
