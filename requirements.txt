@@ -4,6 +4,7 @@ asyncpg
 aiosqlite
 python-gitlab
 GitPython
+PyGithub
 mypy
 black
 flake8
