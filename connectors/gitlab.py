@@ -461,6 +461,7 @@ class GitLabConnector:
                                 mr["created_at"].replace("Z", "+00:00")
                             )
                         except Exception:
+                            # Invalid date format, leave as None
                             pass
 
                     merged_at = None
@@ -470,6 +471,7 @@ class GitLabConnector:
                                 mr["merged_at"].replace("Z", "+00:00")
                             )
                         except Exception:
+                            # Invalid date format, leave as None
                             pass
 
                     closed_at = None
@@ -479,6 +481,7 @@ class GitLabConnector:
                                 mr["closed_at"].replace("Z", "+00:00")
                             )
                         except Exception:
+                            # Invalid date format, leave as None
                             pass
 
                     pr = PullRequest(
