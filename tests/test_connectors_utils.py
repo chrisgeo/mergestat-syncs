@@ -7,7 +7,6 @@ import time
 
 import pytest
 
-from connectors.exceptions import APIException, RateLimitException
 from connectors.utils.pagination import AsyncPaginationHandler, PaginationHandler
 from connectors.utils.retry import RateLimiter, retry_with_backoff
 
