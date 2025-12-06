@@ -4,7 +4,6 @@ Tests for connector utilities.
 
 import asyncio
 import time
-from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
