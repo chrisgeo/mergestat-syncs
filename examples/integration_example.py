@@ -100,9 +100,9 @@ async def github_to_storage_example():
                     parents=len(commit.parents),
                 )
                 commit_objects.append(git_commit)
-                print(
-                    f"  - {commit.sha[:8]}: {commit.commit.message.split('\n')[0][:50]}"
-                )
+                # Extract first line of commit message
+                first_line = commit.commit.message.split("\n")[0][:50]
+                print(f"  - {commit.sha[:8]}: {first_line}")
 
             await store.insert_git_commit_data(commit_objects)
             print(f"\nStored {len(commit_objects)} commits")
@@ -224,7 +224,9 @@ async def gitlab_to_storage_example():
                     ),
                 )
                 commit_objects.append(git_commit)
-                print(f"  - {commit.id[:8]}: {commit.message.split('\n')[0][:50]}")
+                # Extract first line of commit message
+                first_line = commit.message.split("\n")[0][:50]
+                print(f"  - {commit.id[:8]}: {first_line}")
 
             await store.insert_git_commit_data(commit_objects)
             print(f"\nStored {len(commit_objects)} commits")
