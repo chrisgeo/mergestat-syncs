@@ -66,7 +66,9 @@ def get_repo_uuid(repo_path: str) -> uuid.UUID:
     except Exception as e:
         # If anything fails, generate a random UUID
         logging.warning(
-            f"Could not derive UUID from git repository data: {e}. Generating random UUID."
+            "Could not derive UUID from git repository data: %s. "
+            "Generating random UUID.",
+            e,
         )
         return uuid.uuid4()
 
