@@ -21,12 +21,14 @@ class TestExceptions:
         """Test base ConnectorException."""
         with pytest.raises(ConnectorException) as exc_info:
             raise ConnectorException("Test error")
+        # Assertions outside with block to inspect captured exception
         assert "Test error" in str(exc_info.value)
 
     def test_rate_limit_exception(self):
         """Test RateLimitException."""
         with pytest.raises(RateLimitException) as exc_info:
             raise RateLimitException("Rate limit exceeded")
+        # Assertions outside with block to inspect captured exception
         assert "Rate limit exceeded" in str(exc_info.value)
         assert isinstance(exc_info.value, ConnectorException)
 
@@ -34,6 +36,7 @@ class TestExceptions:
         """Test AuthenticationException."""
         with pytest.raises(AuthenticationException) as exc_info:
             raise AuthenticationException("Auth failed")
+        # Assertions outside with block to inspect captured exception
         assert "Auth failed" in str(exc_info.value)
         assert isinstance(exc_info.value, ConnectorException)
 
@@ -41,6 +44,7 @@ class TestExceptions:
         """Test NotFoundException."""
         with pytest.raises(NotFoundException) as exc_info:
             raise NotFoundException("Resource not found")
+        # Assertions outside with block to inspect captured exception
         assert "Resource not found" in str(exc_info.value)
         assert isinstance(exc_info.value, ConnectorException)
 
@@ -48,6 +52,7 @@ class TestExceptions:
         """Test PaginationException."""
         with pytest.raises(PaginationException) as exc_info:
             raise PaginationException("Pagination error")
+        # Assertions outside with block to inspect captured exception
         assert "Pagination error" in str(exc_info.value)
         assert isinstance(exc_info.value, ConnectorException)
 
@@ -55,7 +60,7 @@ class TestExceptions:
         """Test APIException."""
         with pytest.raises(APIException) as exc_info:
             raise APIException("API error")
-        # moved assertions outside the with block
+        # Assertions outside with block to inspect captured exception
         assert "API error" in str(exc_info.value)
         assert isinstance(exc_info.value, ConnectorException)
 
