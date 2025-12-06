@@ -317,12 +317,12 @@ async def process_git_files(
 
     # Report summary
     total_failed = len(failed_files)
-    logging.info(f"\nGit file processing complete:")
+    logging.info("Git file processing complete:")
     logging.info(f"  Successfully processed: {successfully_processed} files")
     logging.info(f"  Failed: {total_failed} files")
 
     if failed_files:
-        logging.warning(f"\nFailed files:")
+        logging.warning("Failed files:")
         for filepath, error in failed_files[:10]:  # Show first 10
             logging.warning(f"  - {filepath}: {error}")
         if total_failed > 10:
@@ -459,12 +459,12 @@ async def process_git_blame(
 
     # Report summary
     total_failed = len(failed_files)
-    logging.info(f"\nGit blame processing complete:")
+    logging.info("Git blame processing complete:")
     logging.info(f"  Successfully processed: {successfully_processed} files")
     logging.info(f"  Failed: {total_failed} files")
 
     if failed_files:
-        logging.warning(f"\nFailed files:")
+        logging.warning("Failed files:")
         for filepath, error in failed_files[:10]:  # Show first 10
             logging.warning(f"  - {filepath}: {error}")
         if total_failed > 10:
