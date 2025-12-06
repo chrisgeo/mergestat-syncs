@@ -68,7 +68,9 @@ def main():
         prs = connector.get_pull_requests(owner, repo_name, state="open", max_prs=5)
         for pr in prs:
             print(f"  - PR #{pr.number}: {pr.title}")
-            print(f"    State: {pr.state}, Author: {pr.author.username if pr.author else 'Unknown'}")
+            print(
+                f"    State: {pr.state}, Author: {pr.author.username if pr.author else 'Unknown'}"
+            )
 
         # Example 6: Get file blame
         print("\n=== Example 6: Get File Blame ===")
@@ -80,7 +82,9 @@ def main():
         print(f"  Number of blame ranges: {len(blame.ranges)}")
         if blame.ranges:
             first_range = blame.ranges[0]
-            print(f"  First range: lines {first_range.starting_line}-{first_range.ending_line}")
+            print(
+                f"  First range: lines {first_range.starting_line}-{first_range.ending_line}"
+            )
             print(f"    Commit: {first_range.commit_sha[:8]}")
             print(f"    Author: {first_range.author}")
 
@@ -94,6 +98,7 @@ def main():
     except Exception as e:
         print(f"\nError: {e}")
         import traceback
+
         traceback.print_exc()
     finally:
         connector.close()

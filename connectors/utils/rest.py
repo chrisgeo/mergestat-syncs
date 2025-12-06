@@ -10,7 +10,11 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
-from connectors.exceptions import APIException, AuthenticationException, RateLimitException
+from connectors.exceptions import (
+    APIException,
+    AuthenticationException,
+    RateLimitException,
+)
 from connectors.utils.retry import retry_with_backoff
 
 logger = logging.getLogger(__name__)
@@ -182,7 +186,9 @@ class GitLabRESTClient(RESTClient):
             headers["PRIVATE-TOKEN"] = private_token
 
         # Don't pass token to parent as we're using custom header
-        super().__init__(base_url=base_url, token=None, timeout=timeout, headers=headers)
+        super().__init__(
+            base_url=base_url, token=None, timeout=timeout, headers=headers
+        )
 
     def get_file_blame(
         self,
@@ -206,7 +212,9 @@ class GitLabRESTClient(RESTClient):
         endpoint = f"projects/{project_id}/repository/files/{encoded_path}/blame"
         params = {"ref": ref}
 
-        logger.debug(f"Fetching blame for project {project_id}, file {file_path} at ref {ref}")
+        logger.debug(
+            f"Fetching blame for project {project_id}, file {file_path} at ref {ref}"
+        )
         return self.get_list(endpoint, params=params)
 
     def get_merge_requests(

@@ -68,7 +68,9 @@ def main():
         mrs = connector.get_merge_requests(project_id, state="opened", max_mrs=5)
         for mr in mrs:
             print(f"  - MR !{mr.number}: {mr.title}")
-            print(f"    State: {mr.state}, Author: {mr.author.username if mr.author else 'Unknown'}")
+            print(
+                f"    State: {mr.state}, Author: {mr.author.username if mr.author else 'Unknown'}"
+            )
 
         # Example 6: Get file blame
         print("\n=== Example 6: Get File Blame ===")
@@ -80,13 +82,16 @@ def main():
         print(f"  Number of blame ranges: {len(blame.ranges)}")
         if blame.ranges:
             first_range = blame.ranges[0]
-            print(f"  First range: lines {first_range.starting_line}-{first_range.ending_line}")
+            print(
+                f"  First range: lines {first_range.starting_line}-{first_range.ending_line}"
+            )
             print(f"    Commit: {first_range.commit_sha[:8]}")
             print(f"    Author: {first_range.author}")
 
     except Exception as e:
         print(f"\nError: {e}")
         import traceback
+
         traceback.print_exc()
     finally:
         connector.close()

@@ -6,7 +6,6 @@ contributors, statistics, merge requests, and blame information from GitLab.
 """
 
 import logging
-import urllib.parse
 from datetime import datetime, timezone
 from typing import List, Optional
 
@@ -28,7 +27,7 @@ from connectors.models import (
     RepoStats,
     Repository,
 )
-from connectors.utils import GitLabRESTClient, PaginationHandler, retry_with_backoff
+from connectors.utils import GitLabRESTClient, retry_with_backoff
 
 logger = logging.getLogger(__name__)
 
@@ -127,7 +126,11 @@ class GitLabConnector:
                 group = Organization(
                     id=gl_group.id,
                     name=gl_group.name,
-                    description=gl_group.description if hasattr(gl_group, "description") else None,
+                    description=(
+                        gl_group.description
+                        if hasattr(gl_group, "description")
+                        else None
+                    ),
                     url=gl_group.web_url if hasattr(gl_group, "web_url") else None,
                 )
                 groups.append(group)
@@ -163,7 +166,9 @@ class GitLabConnector:
                 group = self.gitlab.groups.get(group_id)
                 gl_projects = group.projects.list(per_page=self.per_page, get_all=False)
             else:
-                gl_projects = self.gitlab.projects.list(per_page=self.per_page, get_all=False)
+                gl_projects = self.gitlab.projects.list(
+                    per_page=self.per_page, get_all=False
+                )
 
             for gl_project in gl_projects:
                 if max_projects and len(projects) >= max_projects:
@@ -179,16 +184,49 @@ class GitLabConnector:
 
                 project = Repository(
                     id=gl_project.id,
-                    name=gl_project.name if hasattr(gl_project, "name") else str(gl_project.id),
+                    name=(
+                        gl_project.name
+                        if hasattr(gl_project, "name")
+                        else str(gl_project.id)
+                    ),
                     full_name=full_name,
-                    default_branch=gl_project.default_branch if hasattr(gl_project, "default_branch") else "main",
-                    description=gl_project.description if hasattr(gl_project, "description") else None,
+                    default_branch=(
+                        gl_project.default_branch
+                        if hasattr(gl_project, "default_branch")
+                        else "main"
+                    ),
+                    description=(
+                        gl_project.description
+                        if hasattr(gl_project, "description")
+                        else None
+                    ),
                     url=gl_project.web_url if hasattr(gl_project, "web_url") else None,
-                    created_at=datetime.fromisoformat(gl_project.created_at.replace("Z", "+00:00")) if hasattr(gl_project, "created_at") and gl_project.created_at else None,
-                    updated_at=datetime.fromisoformat(gl_project.last_activity_at.replace("Z", "+00:00")) if hasattr(gl_project, "last_activity_at") and gl_project.last_activity_at else None,
+                    created_at=(
+                        datetime.fromisoformat(
+                            gl_project.created_at.replace("Z", "+00:00")
+                        )
+                        if hasattr(gl_project, "created_at") and gl_project.created_at
+                        else None
+                    ),
+                    updated_at=(
+                        datetime.fromisoformat(
+                            gl_project.last_activity_at.replace("Z", "+00:00")
+                        )
+                        if hasattr(gl_project, "last_activity_at")
+                        and gl_project.last_activity_at
+                        else None
+                    ),
                     language=None,  # GitLab doesn't provide primary language in list
-                    stars=gl_project.star_count if hasattr(gl_project, "star_count") else 0,
-                    forks=gl_project.forks_count if hasattr(gl_project, "forks_count") else 0,
+                    stars=(
+                        gl_project.star_count
+                        if hasattr(gl_project, "star_count")
+                        else 0
+                    ),
+                    forks=(
+                        gl_project.forks_count
+                        if hasattr(gl_project, "forks_count")
+                        else 0
+                    ),
                 )
                 projects.append(project)
                 logger.debug(f"Retrieved project: {project.full_name}")
@@ -239,7 +277,9 @@ class GitLabConnector:
                 contributors.append(author)
                 logger.debug(f"Retrieved contributor: {author.username}")
 
-            logger.info(f"Retrieved {len(contributors)} contributors for project {project_id}")
+            logger.info(
+                f"Retrieved {len(contributors)} contributors for project {project_id}"
+            )
             return contributors
 
         except Exception as e:
@@ -267,8 +307,12 @@ class GitLabConnector:
             commit = project.commits.get(sha)
 
             return CommitStats(
-                additions=commit.stats.get("additions", 0) if hasattr(commit, "stats") else 0,
-                deletions=commit.stats.get("deletions", 0) if hasattr(commit, "stats") else 0,
+                additions=(
+                    commit.stats.get("additions", 0) if hasattr(commit, "stats") else 0
+                ),
+                deletions=(
+                    commit.stats.get("deletions", 0) if hasattr(commit, "stats") else 0
+                ),
                 commits=1,
             )
 
@@ -315,8 +359,12 @@ class GitLabConnector:
                     total_deletions += detailed_commit.stats.get("deletions", 0)
 
                 # Track unique authors
-                author_name = commit.author_name if hasattr(commit, "author_name") else "Unknown"
-                author_email = commit.author_email if hasattr(commit, "author_email") else ""
+                author_name = (
+                    commit.author_name if hasattr(commit, "author_name") else "Unknown"
+                )
+                author_email = (
+                    commit.author_email if hasattr(commit, "author_email") else ""
+                )
 
                 author_key = f"{author_name}:{author_email}"
                 if author_key not in authors_dict:
@@ -331,8 +379,10 @@ class GitLabConnector:
             # Calculate commits per week
             created_at = None
             if hasattr(project, "created_at") and project.created_at:
-                created_at = datetime.fromisoformat(project.created_at.replace("Z", "+00:00"))
-            
+                created_at = datetime.fromisoformat(
+                    project.created_at.replace("Z", "+00:00")
+                )
+
             if created_at:
                 age_days = (datetime.now(timezone.utc) - created_at).days
                 weeks = max(age_days / 7, 1)
@@ -450,7 +500,9 @@ class GitLabConnector:
 
                 page += 1
 
-            logger.info(f"Retrieved {len(merge_requests)} merge requests for project {project_id}")
+            logger.info(
+                f"Retrieved {len(merge_requests)} merge requests for project {project_id}"
+            )
             return merge_requests
 
         except Exception as e:
@@ -494,10 +546,14 @@ class GitLabConnector:
                             committed_date_str.replace("Z", "+00:00")
                         )
                         age_seconds = int(
-                            (datetime.now(timezone.utc) - committed_date).total_seconds()
+                            (
+                                datetime.now(timezone.utc) - committed_date
+                            ).total_seconds()
                         )
                     except Exception as e:
-                        logger.warning(f"Failed to parse date {committed_date_str}: {e}")
+                        logger.warning(
+                            f"Failed to parse date {committed_date_str}: {e}"
+                        )
 
                 num_lines = len(lines)
                 if num_lines > 0:
@@ -512,7 +568,9 @@ class GitLabConnector:
                     ranges.append(blame_range)
                     current_line += num_lines
 
-            logger.info(f"Retrieved blame for project {project_id}:{file_path} with {len(ranges)} ranges")
+            logger.info(
+                f"Retrieved blame for project {project_id}:{file_path} with {len(ranges)} ranges"
+            )
             return FileBlame(file_path=file_path, ranges=ranges)
 
         except Exception as e:

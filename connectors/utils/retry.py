@@ -6,9 +6,7 @@ import asyncio
 import logging
 import time
 from functools import wraps
-from typing import Any, Callable, Optional, TypeVar, Union
-
-from connectors.exceptions import RateLimitException
+from typing import Any, Callable, Optional, TypeVar
 
 logger = logging.getLogger(__name__)
 
@@ -109,9 +107,7 @@ def retry_with_backoff(
                         )
                         await rate_limiter.wait()
                     else:
-                        logger.error(
-                            f"All {max_retries} attempts failed. Giving up."
-                        )
+                        logger.error(f"All {max_retries} attempts failed. Giving up.")
 
             # If we get here, all retries failed
             raise last_exception or Exception("Max retries exceeded")
@@ -139,9 +135,7 @@ def retry_with_backoff(
                         )
                         rate_limiter.wait_sync()
                     else:
-                        logger.error(
-                            f"All {max_retries} attempts failed. Giving up."
-                        )
+                        logger.error(f"All {max_retries} attempts failed. Giving up.")
 
             # If we get here, all retries failed
             raise last_exception or Exception("Max retries exceeded")

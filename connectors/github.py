@@ -10,8 +10,6 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 from github import Github, GithubException, RateLimitExceededException
-from github.Organization import Organization as GHOrganization
-from github.Repository import Repository as GHRepository
 
 from connectors.exceptions import (
     APIException,
@@ -28,7 +26,7 @@ from connectors.models import (
     RepoStats,
     Repository,
 )
-from connectors.utils import GitHubGraphQLClient, PaginationHandler, retry_with_backoff
+from connectors.utils import GitHubGraphQLClient, retry_with_backoff
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +60,9 @@ class GitHubConnector:
 
         # Initialize PyGithub client
         if base_url:
-            self.github = Github(base_url=base_url, login_or_token=token, per_page=per_page)
+            self.github = Github(
+                base_url=base_url, login_or_token=token, per_page=per_page
+            )
         else:
             self.github = Github(login_or_token=token, per_page=per_page)
 
@@ -106,11 +106,6 @@ class GitHubConnector:
         try:
             orgs = []
             user = self.github.get_user()
-
-            paginator = PaginationHandler(
-                per_page=self.per_page,
-                max_items=max_orgs,
-            )
 
             for gh_org in user.get_orgs():
                 if max_orgs and len(orgs) >= max_orgs:
@@ -221,7 +216,9 @@ class GitHubConnector:
                 contributors.append(author)
                 logger.debug(f"Retrieved contributor: {author.username}")
 
-            logger.info(f"Retrieved {len(contributors)} contributors for {owner}/{repo}")
+            logger.info(
+                f"Retrieved {len(contributors)} contributors for {owner}/{repo}"
+            )
             return contributors
 
         except Exception as e:
@@ -450,7 +447,9 @@ class GitHubConnector:
                 )
                 ranges.append(blame_range)
 
-            logger.info(f"Retrieved blame for {owner}/{repo}:{path} with {len(ranges)} ranges")
+            logger.info(
+                f"Retrieved blame for {owner}/{repo}:{path} with {len(ranges)} ranges"
+            )
             return FileBlame(file_path=path, ranges=ranges)
 
         except Exception as e:
