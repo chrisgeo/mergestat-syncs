@@ -8,9 +8,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from git_mergestat import (process_git_blame, process_git_commit_stats,
-                           process_git_commits, process_git_files,
-                           process_single_file_blame)
+from git_mergestat import (
+    process_git_blame,
+    process_git_commit_stats,
+    process_git_commits,
+    process_git_files,
+    process_single_file_blame,
+)
 
 
 class TestBatchSizeConfiguration:
@@ -108,6 +112,7 @@ class TestCommitProcessing:
         """Test that git commits are inserted in batches."""
         mock_store = AsyncMock()
         mock_repo = MagicMock()
+        mock_repo.id = uuid.uuid4()  # Mock the repo.id
 
         # Create mock commits
         mock_commits = []
@@ -127,10 +132,9 @@ class TestCommitProcessing:
         mock_repo.iter_commits.return_value = iter(mock_commits)
 
         with patch("git_mergestat.insert_git_commit_data") as mock_insert:
-            with patch("git_mergestat.REPO_UUID", "test-uuid"):
-                await process_git_commits(mock_repo, mock_store)
-                # Should have been called at least once
-                assert mock_insert.call_count >= 1
+            await process_git_commits(mock_repo, mock_store)
+            # Should have been called at least once
+            assert mock_insert.call_count >= 1
 
 
 class TestCommitStatsProcessing:
@@ -141,6 +145,7 @@ class TestCommitStatsProcessing:
         """Test that commit stats are inserted in batches."""
         mock_store = AsyncMock()
         mock_repo = MagicMock()
+        mock_repo.id = uuid.uuid4()  # Mock the repo.id
 
         # Create mock commits with diffs
         mock_commit = MagicMock()
@@ -159,10 +164,9 @@ class TestCommitStatsProcessing:
         mock_repo.iter_commits.return_value = iter([mock_commit])
 
         with patch("git_mergestat.insert_git_commit_stats") as mock_insert:
-            with patch("git_mergestat.REPO_UUID", "test-uuid"):
-                await process_git_commit_stats(mock_repo, mock_store)
-                # Should have been called at least once
-                assert mock_insert.call_count >= 1
+            await process_git_commit_stats(mock_repo, mock_store)
+            # Should have been called at least once
+            assert mock_insert.call_count >= 1
 
 
 class TestFileProcessing:
@@ -173,6 +177,7 @@ class TestFileProcessing:
         """Test that git files are inserted in batches."""
         mock_store = AsyncMock()
         mock_repo = MagicMock()
+        mock_repo.id = uuid.uuid4()  # Mock the repo.id
 
         # Create some test files
         test_files = []
@@ -183,16 +188,16 @@ class TestFileProcessing:
 
         with patch("git_mergestat.insert_git_file_data") as mock_insert:
             with patch("git_mergestat.REPO_PATH", str(tmp_path)):
-                with patch("git_mergestat.REPO_UUID", "test-uuid"):
-                    await process_git_files(mock_repo, test_files, mock_store)
-                    # Should have been called at least once
-                    assert mock_insert.call_count >= 1
+                await process_git_files(mock_repo, test_files, mock_store)
+                # Should have been called at least once
+                assert mock_insert.call_count >= 1
 
     @pytest.mark.asyncio
     async def test_process_git_files_handles_large_files(self, tmp_path):
         """Test that large files are skipped for content reading."""
         mock_store = AsyncMock()
         mock_repo = MagicMock()
+        mock_repo.id = uuid.uuid4()  # Mock the repo.id
 
         # Create a test file
         test_file = tmp_path / "test.py"
@@ -201,12 +206,11 @@ class TestFileProcessing:
 
         with patch("git_mergestat.insert_git_file_data") as mock_insert:
             with patch("git_mergestat.REPO_PATH", str(tmp_path)):
-                with patch("git_mergestat.REPO_UUID", "test-uuid"):
-                    # Mock os.path.getsize to return a large size
-                    with patch("os.path.getsize", return_value=2_000_000):
-                        await process_git_files(mock_repo, test_files, mock_store)
-                        # Should still insert the file, just without contents
-                        assert mock_insert.call_count >= 1
+                # Mock os.path.getsize to return a large size
+                with patch("os.path.getsize", return_value=2_000_000):
+                    await process_git_files(mock_repo, test_files, mock_store)
+                    # Should still insert the file, just without contents
+                    assert mock_insert.call_count >= 1
 
 
 class TestConnectionPooling:
@@ -237,7 +241,7 @@ class TestRepoUUIDDerivation:
 
     def test_get_repo_uuid_is_deterministic(self, tmp_path):
         """Test that get_repo_uuid returns the same UUID for the same repo."""
-        from git_mergestat import get_repo_uuid
+        from models.git import get_repo_uuid
 
         # Clear REPO_UUID env var for this test
         with patch.dict(os.environ, {}, clear=True):
@@ -249,21 +253,21 @@ class TestRepoUUIDDerivation:
             uuid2 = get_repo_uuid(".")
 
             assert uuid1 == uuid2
-            # Should be a valid UUID format
-            uuid.UUID(uuid1)  # Will raise if not valid
+            # Should be a valid UUID
+            assert isinstance(uuid1, uuid.UUID)
 
     def test_get_repo_uuid_respects_env_var(self):
         """Test that get_repo_uuid respects REPO_UUID environment variable."""
-        from git_mergestat import get_repo_uuid
+        from models.git import get_repo_uuid
 
         test_uuid = "12345678-1234-1234-1234-123456789abc"
         with patch.dict(os.environ, {"REPO_UUID": test_uuid}):
             result = get_repo_uuid(".")
-            assert result == test_uuid
+            assert result == uuid.UUID(test_uuid)
 
     def test_get_repo_uuid_handles_missing_repo(self, tmp_path):
         """Test that get_repo_uuid handles non-git directories gracefully."""
-        from git_mergestat import get_repo_uuid
+        from models.git import get_repo_uuid
 
         # Clear REPO_UUID env var
         with patch.dict(os.environ, {}, clear=True):
@@ -277,4 +281,4 @@ class TestRepoUUIDDerivation:
             result = get_repo_uuid(str(non_git_dir))
 
             # Should return a valid UUID (fallback to random)
-            uuid.UUID(result)  # Will raise if not valid
+            assert isinstance(result, uuid.UUID)

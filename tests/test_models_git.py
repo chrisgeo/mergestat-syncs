@@ -1,9 +1,142 @@
 """Tests for models.git timezone-aware datetime functionality."""
 
+import uuid
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
-from models.git import Repo, GitRef, GitFile, GitCommit, GitCommitStat, GitBlame
+from models.git import (
+    Repo,
+    GitRef,
+    GitFile,
+    GitCommit,
+    GitCommitStat,
+    GitBlame,
+    get_repo_uuid,
+)
+
+
+class TestRepoUUID:
+    """Test that Repo objects get deterministic UUIDs based on git data."""
+
+    def test_two_repos_with_different_remotes_get_different_uuids(self):
+        """Test that two repos with different remote URLs get different UUIDs."""
+        with patch("models.git.GitRepo") as MockGitRepo:
+            # Mock first repo with remote URL 1
+            mock_repo1 = MagicMock()
+            mock_remote1 = MagicMock()
+            mock_remote1.name = "origin"
+            mock_remote1.urls = iter(["https://github.com/user/repo1.git"])
+            mock_repo1.remotes = [mock_remote1]
+            mock_repo1.remote.return_value = mock_remote1
+
+            # Mock second repo with remote URL 2
+            mock_repo2 = MagicMock()
+            mock_remote2 = MagicMock()
+            mock_remote2.name = "origin"
+            mock_remote2.urls = iter(["https://github.com/user/repo2.git"])
+            mock_repo2.remotes = [mock_remote2]
+            mock_repo2.remote.return_value = mock_remote2
+
+            MockGitRepo.side_effect = [mock_repo1, mock_repo2]
+
+            uuid1 = get_repo_uuid("/path/to/repo1")
+            uuid2 = get_repo_uuid("/path/to/repo2")
+
+            assert uuid1 != uuid2
+            assert isinstance(uuid1, uuid.UUID)
+            assert isinstance(uuid2, uuid.UUID)
+
+    def test_same_remote_url_produces_same_uuid(self):
+        """Test that the same remote URL always produces the same UUID."""
+        with patch("models.git.GitRepo") as MockGitRepo:
+
+            def create_mock_repo():
+                mock_repo = MagicMock()
+                mock_remote = MagicMock()
+                mock_remote.name = "origin"
+                mock_remote.urls = iter(["https://github.com/user/same-repo.git"])
+                mock_repo.remotes = [mock_remote]
+                mock_repo.remote.return_value = mock_remote
+                return mock_repo
+
+            MockGitRepo.side_effect = [create_mock_repo(), create_mock_repo()]
+
+            uuid1 = get_repo_uuid("/path/to/repo")
+            uuid2 = get_repo_uuid("/different/path/to/repo")
+
+            assert uuid1 == uuid2
+
+    def test_repo_without_remote_uses_path(self):
+        """Test that repos without remotes use absolute path for UUID."""
+        with patch("models.git.GitRepo") as MockGitRepo:
+            mock_repo = MagicMock()
+            mock_repo.remotes = []  # No remotes
+
+            MockGitRepo.return_value = mock_repo
+
+            with patch("os.path.abspath") as mock_abspath:
+                mock_abspath.return_value = "/absolute/path/to/repo"
+                result = get_repo_uuid("/path/to/repo")
+
+            assert isinstance(result, uuid.UUID)
+
+    def test_repo_id_is_set_on_init(self):
+        """Test that Repo.id is automatically set when initialized with a path."""
+        with (
+            patch("models.git.get_repo_uuid") as mock_get_uuid,
+            patch("models.git.GitRepo.__init__", return_value=None),
+        ):
+            expected_uuid = uuid.uuid4()
+            mock_get_uuid.return_value = expected_uuid
+
+            repo = Repo("/path/to/repo")
+
+            assert repo.id == expected_uuid
+            mock_get_uuid.assert_called_once_with("/path/to/repo")
+
+    def test_repo_id_not_overwritten_if_provided(self):
+        """Test that explicitly provided id is not overwritten."""
+        with (
+            patch("models.git.get_repo_uuid") as mock_get_uuid,
+            patch("models.git.GitRepo.__init__", return_value=None),
+        ):
+            explicit_uuid = uuid.uuid4()
+
+            repo = Repo("/path/to/repo", id=explicit_uuid)
+
+            assert repo.id == explicit_uuid
+            mock_get_uuid.assert_not_called()
+
+    def test_git_commit_uses_repo_id(self):
+        """Test that GitCommit can be created with repo.id."""
+        with (
+            patch("models.git.get_repo_uuid") as mock_get_uuid,
+            patch("models.git.GitRepo.__init__", return_value=None),
+        ):
+            repo_uuid = uuid.uuid4()
+            mock_get_uuid.return_value = repo_uuid
+
+            repo = Repo("/path/to/repo")
+            commit = GitCommit(
+                repo_id=repo.id,
+                hash="abc123",
+                message="Test commit",
+            )
+
+            assert commit.repo_id == repo_uuid
+
+    def test_two_repos_commits_have_different_repo_ids(self):
+        """Test that commits from different repos have different repo_ids."""
+        # Create two different UUIDs (simulating two different repos)
+        uuid1 = uuid.uuid5(uuid.NAMESPACE_URL, "https://github.com/user/repo1.git")
+        uuid2 = uuid.uuid5(uuid.NAMESPACE_URL, "https://github.com/user/repo2.git")
+
+        commit1 = GitCommit(repo_id=uuid1, hash="abc123", message="Commit 1")
+        commit2 = GitCommit(repo_id=uuid2, hash="def456", message="Commit 2")
+
+        assert commit1.repo_id != commit2.repo_id
+        assert commit1.repo_id == uuid1
+        assert commit2.repo_id == uuid2
 
 
 class TestTimezoneAwareDatetimes:
@@ -118,9 +251,9 @@ class TestBackwardCompatibility:
         for model, column_name in models_and_columns:
             column = model.__table__.columns[column_name]
             # Check that the column type has timezone=True
-            assert (
-                column.type.timezone is True
-            ), f"{model.__name__}.{column_name} should have timezone=True"
+            assert column.type.timezone is True, (
+                f"{model.__name__}.{column_name} should have timezone=True"
+            )
 
     def test_datetime_defaults_are_callable(self):
         """Test that all datetime defaults are callable (lambdas)."""
@@ -135,9 +268,9 @@ class TestBackwardCompatibility:
 
         for model, column_name in models_and_columns:
             column = model.__table__.columns[column_name]
-            assert (
-                column.default is not None
-            ), f"{model.__name__}.{column_name} should have a default"
-            assert callable(
-                column.default.arg
-            ), f"{model.__name__}.{column_name} default should be callable"
+            assert column.default is not None, (
+                f"{model.__name__}.{column_name} should have a default"
+            )
+            assert callable(column.default.arg), (
+                f"{model.__name__}.{column_name} default should be callable"
+            )

@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import argparse
 import asyncio
-import hashlib
 import logging
 import mimetypes
 import os
@@ -32,70 +31,11 @@ MONGO_DB_NAME = os.getenv("MONGO_DB_NAME")
 BATCH_SIZE = int(
     os.getenv("BATCH_SIZE", "100")
 )  # Insert every n records (increased from 10 for better performance)
-REPO_UUID = os.getenv("REPO_UUID")
 MAX_WORKERS = int(
     os.getenv("MAX_WORKERS", "4")
 )  # Number of parallel workers for file processing
 
 DataStore = Union[SQLAlchemyStore, MongoStore]
-
-
-def get_repo_uuid(repo_path: str) -> str:
-    """
-    Generate a deterministic UUID for a repository based on git data.
-
-    Priority order:
-    1. REPO_UUID environment variable (if set)
-    2. Remote URL (if repository has a remote configured)
-    3. Absolute path of the repository (fallback)
-
-    :param repo_path: Path to the git repository.
-    :return: UUID string for the repository.
-    """
-    # First check if REPO_UUID is explicitly set
-    env_uuid = os.getenv("REPO_UUID")
-    if env_uuid:
-        return env_uuid
-
-    try:
-        # Try to get repository information from git
-        git_repo = GitRepo(repo_path)
-
-        # Try to get remote URL (most reliable identifier)
-        if git_repo.remotes:
-            remote_url = None
-            # Try to get the origin remote first
-            if "origin" in [r.name for r in git_repo.remotes]:
-                origin = git_repo.remote("origin")
-                remote_url = list(origin.urls)[0] if origin.urls else None
-            else:
-                # Use first available remote
-                remote_url = (
-                    list(git_repo.remotes[0].urls)[0]
-                    if git_repo.remotes[0].urls
-                    else None
-                )
-
-            if remote_url:
-                # Create deterministic UUID from remote URL
-                # Use SHA256 hash and convert to UUID format
-                hash_obj = hashlib.sha256(remote_url.encode("utf-8"))
-                # Take first 16 bytes of hash and create UUID
-                uuid_bytes = hash_obj.digest()[:16]
-                return str(uuid.UUID(bytes=uuid_bytes))
-
-        # Fallback to absolute path if no remote
-        abs_path = os.path.abspath(repo_path)
-        hash_obj = hashlib.sha256(abs_path.encode("utf-8"))
-        uuid_bytes = hash_obj.digest()[:16]
-        return str(uuid.UUID(bytes=uuid_bytes))
-
-    except Exception as e:
-        # If anything fails, generate a random UUID
-        logging.warning(
-            f"Could not derive UUID from git repository data: {e}. Generating random UUID."
-        )
-        return str(uuid.uuid4())
 
 
 async def insert_blame_data(store: DataStore, data_batch: List[GitBlame]) -> None:
@@ -246,19 +186,17 @@ def is_skippable(path: str) -> bool:
     if ext in NON_BINARY_OVERRIDES:
         return False
     mime, _ = mimetypes.guess_type(path)
-    return mime and mime.startswith(
-        (
-            "image/",
-            "video/",
-            "audio/",
-            "application/pdf",
-            "font/",
-            "application/x-executable",
-            "application/x-sharedlib",
-            "application/x-object",
-            "application/x-archive",
-        )
-    )
+    return mime and mime.startswith((
+        "image/",
+        "video/",
+        "audio/",
+        "application/pdf",
+        "font/",
+        "application/x-executable",
+        "application/x-sharedlib",
+        "application/x-object",
+        "application/x-archive",
+    ))
 
 
 async def process_git_files(
@@ -293,7 +231,7 @@ async def process_git_files(
                 pass  # Skip files that can't be read
 
             git_file = GitFile(
-                repo_id=REPO_UUID,
+                repo_id=repo.id,
                 path=rel_path,
                 executable=is_executable,
                 contents=contents,
@@ -344,7 +282,7 @@ async def process_git_commits(repo: Repo, store: DataStore) -> None:
         commit_count = 0
         for commit in repo.iter_commits():
             git_commit = GitCommit(
-                repo_id=REPO_UUID,
+                repo_id=repo.id,
                 hash=commit.hexsha,
                 message=commit.message,
                 author_name=commit.author.name,
@@ -395,7 +333,9 @@ async def process_single_file_blame(
         def process_with_new_repo():
             # Create a new Repo instance for this thread to avoid race conditions
             thread_repo = Repo(repo_path)
-            return GitBlame.process_file(repo_path, filepath, REPO_UUID, thread_repo)
+            return GitBlame.process_file(
+                repo_path, filepath, thread_repo.id, thread_repo
+            )
 
         blame_objects = await loop.run_in_executor(None, process_with_new_repo)
         return blame_objects
@@ -524,7 +464,7 @@ async def process_git_commit_stats(repo: Repo, store: DataStore) -> None:
                     new_mode = oct(diff.b_mode)
 
                 git_commit_stat = GitCommitStat(
-                    repo_id=REPO_UUID,
+                    repo_id=repo.id,
                     commit_hash=commit.hexsha,
                     file_path=file_path,
                     additions=additions,
@@ -588,7 +528,7 @@ async def main() -> None:
     args = parse_args()
 
     # Override environment variables with command-line arguments if provided
-    global DB_CONN_STRING, REPO_PATH, DB_TYPE, REPO_UUID
+    global DB_CONN_STRING, REPO_PATH, DB_TYPE
     if args.db:
         DB_CONN_STRING = args.db
     if args.repo_path:
@@ -603,18 +543,12 @@ async def main() -> None:
             "Database connection string is required (set DB_CONN_STRING or use --db)"
         )
 
-    # Derive REPO_UUID from git repository data (remote URL or path)
-    REPO_UUID = get_repo_uuid(REPO_PATH)
-    if os.getenv("REPO_UUID"):
-        logging.info(f"Using REPO_UUID from environment: {REPO_UUID}")
-    else:
-        logging.info(f"Derived REPO_UUID from git repository: {REPO_UUID}")
-
     # TODO: Implement date filtering for commits
     # start_date = args.start_date
     # end_date = args.end_date
 
     repo: Repo = Repo(REPO_PATH)
+    logging.info(f"Using repository UUID: {repo.id}")
 
     if DB_TYPE == "mongo":
         store: DataStore = MongoStore(DB_CONN_STRING, db_name=MONGO_DB_NAME)
