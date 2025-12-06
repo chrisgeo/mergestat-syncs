@@ -378,8 +378,8 @@ async def process_git_commit_stats(repo: Repo, store: DataStore) -> None:
                 # Compare with first parent
                 diffs = commit.parents[0].diff(commit, create_patch=False)
             else:
-                # Initial commit - compare with NULL_TREE
-                diffs = commit.diff(repo.tree(), create_patch=False)
+                # Initial commit - compare with empty tree
+                diffs = commit.diff(None, create_patch=False)
 
             for diff in diffs:
                 # Determine file path

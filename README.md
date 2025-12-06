@@ -103,7 +103,7 @@ This project includes several key performance optimizations to speed up git data
 
 ### 4. **Optimized Bulk Operations**
 - All database insertions use bulk operations
-- MongoDB operations use `unordered=False` for better performance
+- MongoDB operations use `ordered=False` for better performance
 - SQLAlchemy uses `add_all()` for efficient batch inserts
 
 ### 5. **Smart File Filtering**
