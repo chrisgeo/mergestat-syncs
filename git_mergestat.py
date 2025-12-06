@@ -21,8 +21,13 @@ DB_CONN_STRING = os.getenv("DB_CONN_STRING")
 DB_TYPE = os.getenv("DB_TYPE", "postgres").lower()
 DB_ECHO = os.getenv("DB_ECHO", "false").lower() in ("true", "1", "yes")
 MONGO_DB_NAME = os.getenv("MONGO_DB_NAME")
-BATCH_SIZE = 10  # Insert every n files
+BATCH_SIZE = int(
+    os.getenv("BATCH_SIZE", "100")
+)  # Insert every n records (increased from 10 for better performance)
 REPO_UUID = os.getenv("REPO_UUID")
+MAX_WORKERS = int(
+    os.getenv("MAX_WORKERS", "4")
+)  # Number of parallel workers for file processing
 
 DataStore = Union[SQLAlchemyStore, MongoStore]
 
@@ -200,19 +205,44 @@ async def process_git_files(
     :param all_files: List of file paths in the repository.
     :param store: Storage backend (SQLAlchemy or MongoDB).
     """
+    print(f"Processing {len(all_files)} git files...")
     file_batch: List[GitFile] = []
+
     for filepath in all_files:
-        # Process file data (example logic, replace with actual implementation)
-        file_objects = []  # Replace with logic to fetch GitFile objects
-        file_batch.extend(file_objects)
+        try:
+            rel_path = os.path.relpath(filepath, REPO_PATH)
 
-        if len(file_batch) >= BATCH_SIZE:
-            await insert_git_file_data(store, file_batch)
-            file_batch.clear()
+            # Check if file is executable
+            is_executable = os.access(filepath, os.X_OK)
 
-    # Insert any remaining file data
+            # Read file contents (skip if too large or binary)
+            contents = None
+            try:
+                if os.path.getsize(filepath) < 1_000_000:  # Skip files > 1MB
+                    with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
+                        contents = f.read()
+            except Exception:
+                pass  # Skip files that can't be read
+
+            git_file = GitFile(
+                repo_id=REPO_UUID,
+                path=rel_path,
+                executable=is_executable,
+                contents=contents,
+            )
+            file_batch.append(git_file)
+
+            if len(file_batch) >= BATCH_SIZE:
+                await insert_git_file_data(store, file_batch)
+                print(f"Inserted {len(file_batch)} files")
+                file_batch.clear()
+        except Exception as e:
+            print(f"Error processing file {filepath}: {e}")
+
+    # Insert remaining files
     if file_batch:
         await insert_git_file_data(store, file_batch)
+        print(f"Inserted final {len(file_batch)} files")
 
 
 async def process_git_commits(repo: Repo, store: DataStore) -> None:
@@ -222,39 +252,108 @@ async def process_git_commits(repo: Repo, store: DataStore) -> None:
     :param repo: Git repository object.
     :param store: Storage backend (SQLAlchemy or MongoDB).
     """
+    print("Processing git commits...")
     commit_batch: List[GitCommit] = []
-    # Process commit data (example logic, replace with actual implementation)
-    commit_objects = []  # Replace with logic to fetch GitCommit objects
-    commit_batch.extend(commit_objects)
 
-    if commit_batch:
-        await insert_git_commit_data(store, commit_batch)
+    # Process commits using gitpython
+    try:
+        commit_count = 0
+        for commit in repo.iter_commits():
+            git_commit = GitCommit(
+                repo_id=REPO_UUID,
+                hash=commit.hexsha,
+                message=commit.message,
+                author_name=commit.author.name,
+                author_email=commit.author.email,
+                author_when=commit.authored_datetime,
+                committer_name=commit.committer.name,
+                committer_email=commit.committer.email,
+                committer_when=commit.committed_datetime,
+                parents=len(commit.parents),
+            )
+            commit_batch.append(git_commit)
+            commit_count += 1
+
+            if len(commit_batch) >= BATCH_SIZE:
+                await insert_git_commit_data(store, commit_batch)
+                print(f"Inserted {len(commit_batch)} commits ({commit_count} total)")
+                commit_batch.clear()
+
+        # Insert remaining commits
+        if commit_batch:
+            await insert_git_commit_data(store, commit_batch)
+            print(f"Inserted final {len(commit_batch)} commits ({commit_count} total)")
+    except Exception as e:
+        print(f"Error processing commits: {e}")
+
+
+async def process_single_file_blame(
+    filepath: Path, repo: Repo, semaphore: asyncio.Semaphore
+) -> List[GitBlame]:
+    """
+    Process a single file for blame data with concurrency control.
+
+    :param filepath: Path to the file.
+    :param repo: Repo instance to use for git operations.
+    :param semaphore: Semaphore to control concurrent file processing.
+    :return: List of GitBlame objects.
+    """
+    async with semaphore:
+        # Run blame processing in executor to avoid blocking
+        loop = asyncio.get_event_loop()
+        blame_objects = await loop.run_in_executor(
+            None, GitBlame.process_file, REPO_PATH, filepath, REPO_UUID, repo
+        )
+        return blame_objects
 
 
 async def process_git_blame(
     all_files: List[Path], store: DataStore, repo: Repo
 ) -> None:
     """
-    Process and insert GitBlame data into the database.
+    Process and insert GitBlame data into the database with parallel processing.
 
     :param all_files: List of file paths in the repository.
     :param store: Storage backend (SQLAlchemy or MongoDB).
     :param repo: Repo instance to use for git operations.
     """
+    if not all_files:
+        return
+
+    print(
+        f"Processing git blame for {len(all_files)} files with {MAX_WORKERS} workers..."
+    )
+
+    # Create semaphore to limit concurrent file processing
+    semaphore = asyncio.Semaphore(MAX_WORKERS)
+
     blame_batch: List[GitBlame] = []
-    # Create a single GitRepo instance for all files to avoid expensive re-initialization
 
-    for filepath in all_files:
-        blame_objects = GitBlame.process_file(REPO_PATH, filepath, REPO_UUID, repo=repo)
-        blame_batch.extend(blame_objects)
+    # Process files in chunks to manage memory
+    chunk_size = BATCH_SIZE
+    for i in range(0, len(all_files), chunk_size):
+        chunk = all_files[i : i + chunk_size]
 
-        if len(blame_batch) >= BATCH_SIZE:
+        # Process chunk in parallel
+        tasks = [
+            process_single_file_blame(filepath, repo, semaphore) for filepath in chunk
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Collect results and filter out errors
+        for result in results:
+            if isinstance(result, Exception):
+                print(f"Error processing file: {result}")
+            elif result:
+                blame_batch.extend(result)
+
+        # Insert batch if we have data
+        if blame_batch:
             await insert_blame_data(store, blame_batch)
+            print(
+                f"Inserted blame data for {len(blame_batch)} lines ({i + len(chunk)}/{len(all_files)} files)"
+            )
             blame_batch.clear()
-
-    # Insert any remaining blame data
-    if blame_batch:
-        await insert_blame_data(store, blame_batch)
 
 
 async def process_git_commit_stats(repo: Repo, store: DataStore) -> None:
@@ -264,13 +363,77 @@ async def process_git_commit_stats(repo: Repo, store: DataStore) -> None:
     :param repo: Git repository object.
     :param store: Storage backend (SQLAlchemy or MongoDB).
     """
+    print("Processing git commit stats...")
     commit_stats_batch: List[GitCommitStat] = []
-    # Process commit stats (example logic, replace with actual implementation)
-    commit_stats_objects = []  # Replace with logic to fetch GitCommitStat objects
-    commit_stats_batch.extend(commit_stats_objects)
 
-    if commit_stats_batch:
-        await insert_git_commit_stats(store, commit_stats_batch)
+    try:
+        commit_count = 0
+        for commit in repo.iter_commits():
+            # Get stats for each file changed in this commit
+            if commit.parents:
+                # Compare with first parent
+                diffs = commit.parents[0].diff(commit, create_patch=False)
+            else:
+                # Initial commit - compare with NULL_TREE
+                diffs = commit.diff(repo.tree(), create_patch=False)
+
+            for diff in diffs:
+                # Determine file path
+                file_path = diff.b_path if diff.b_path else diff.a_path
+                if not file_path:
+                    continue
+
+                # Calculate additions and deletions from diff stats
+                additions = 0
+                deletions = 0
+                if hasattr(diff, "diff") and diff.diff:
+                    # Count lines in diff
+                    try:
+                        diff_text = diff.diff.decode("utf-8", errors="ignore")
+                        for line in diff_text.split("\n"):
+                            if line.startswith("+") and not line.startswith("+++"):
+                                additions += 1
+                            elif line.startswith("-") and not line.startswith("---"):
+                                deletions += 1
+                    except Exception:
+                        pass
+
+                # Determine file modes
+                old_mode = "unknown"
+                new_mode = "unknown"
+                if diff.a_mode:
+                    old_mode = oct(diff.a_mode)
+                if diff.b_mode:
+                    new_mode = oct(diff.b_mode)
+
+                git_commit_stat = GitCommitStat(
+                    repo_id=REPO_UUID,
+                    commit_hash=commit.hexsha,
+                    file_path=file_path,
+                    additions=additions,
+                    deletions=deletions,
+                    old_file_mode=old_mode,
+                    new_file_mode=new_mode,
+                )
+                commit_stats_batch.append(git_commit_stat)
+
+            commit_count += 1
+
+            if len(commit_stats_batch) >= BATCH_SIZE:
+                await insert_git_commit_stats(store, commit_stats_batch)
+                print(
+                    f"Inserted {len(commit_stats_batch)} commit stats ({commit_count} commits)"
+                )
+                commit_stats_batch.clear()
+
+        # Insert remaining stats
+        if commit_stats_batch:
+            await insert_git_commit_stats(store, commit_stats_batch)
+            print(
+                f"Inserted final {len(commit_stats_batch)} commit stats ({commit_count} commits)"
+            )
+    except Exception as e:
+        print(f"Error processing commit stats: {e}")
 
 
 def parse_args():

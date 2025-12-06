@@ -20,6 +20,8 @@ This project supports both PostgreSQL and MongoDB as storage backends. You can c
 - **`MONGO_DB_NAME`** (optional): The name of the MongoDB database to use. If not specified, the script will use the database specified in the connection string, or default to `mergestat`.
 - **`REPO_PATH`** (optional): Path to the git repository to analyze. Default: `.` (current directory)
 - **`REPO_UUID`** (optional): UUID for the repository. If not provided, one will be generated.
+- **`BATCH_SIZE`** (optional): Number of records to batch before inserting into the database. Higher values can improve performance but use more memory. Default: `100`
+- **`MAX_WORKERS`** (optional): Number of parallel workers for processing git blame data. Higher values can speed up processing but use more CPU and memory. Default: `4`
 
 ### Command-Line Arguments
 
@@ -49,6 +51,33 @@ MongoDB connection strings follow the standard MongoDB URI format:
 - **With options**: `mongodb://host:port/?authSource=admin&retryWrites=true`
 
 You can also set the database name separately using the `MONGO_DB_NAME` environment variable instead of including it in the connection string.
+
+### Performance Tuning
+
+The script includes several configuration options to optimize performance:
+
+- **`BATCH_SIZE`**: Controls how many records are batched before database insertion. Higher values (e.g., 200-500) can improve throughput but increase memory usage. Lower values (e.g., 50) reduce memory usage but may be slower.
+
+- **`MAX_WORKERS`**: Controls parallel processing of git blame data. Set this based on your CPU cores (e.g., 2-8). Higher values speed up processing but use more CPU and memory.
+
+- **Connection Pooling**: PostgreSQL automatically uses connection pooling with these defaults:
+  - Pool size: 20 connections
+  - Max overflow: 30 additional connections
+  - Connections are recycled every hour
+
+**Example for large repositories:**
+```bash
+export BATCH_SIZE=500
+export MAX_WORKERS=8
+python git_mergestat.py
+```
+
+**Example for resource-constrained environments:**
+```bash
+export BATCH_SIZE=50
+export MAX_WORKERS=2
+python git_mergestat.py
+```
 
 ### PostgreSQL vs MongoDB: Setup and Migration Considerations
 
