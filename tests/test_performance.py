@@ -7,9 +7,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from git_mergestat import (process_git_blame, process_git_commit_stats,
-                           process_git_commits, process_git_files,
-                           process_single_file_blame)
+from git_mergestat import (
+    process_git_blame,
+    process_git_commit_stats,
+    process_git_commits,
+    process_git_files,
+    process_single_file_blame,
+)
 
 
 class TestBatchSizeConfiguration:
@@ -229,3 +233,55 @@ class TestConnectionPooling:
         # Should not raise an error about invalid pool parameters
         store = SQLAlchemyStore(conn_string)
         assert store.engine is not None
+
+
+class TestRepoUUIDDerivation:
+    """Test derivation of REPO_UUID from git repository data."""
+
+    def test_get_repo_uuid_is_deterministic(self, tmp_path):
+        """Test that get_repo_uuid returns the same UUID for the same repo."""
+        from git_mergestat import get_repo_uuid
+
+        # Clear REPO_UUID env var for this test
+        with patch.dict(os.environ, {}, clear=True):
+            if "REPO_UUID" in os.environ:
+                del os.environ["REPO_UUID"]
+
+            # Use the current repository
+            uuid1 = get_repo_uuid(".")
+            uuid2 = get_repo_uuid(".")
+
+            assert uuid1 == uuid2
+            # Should be a valid UUID format
+            import uuid
+
+            uuid.UUID(uuid1)  # Will raise if not valid
+
+    def test_get_repo_uuid_respects_env_var(self):
+        """Test that get_repo_uuid respects REPO_UUID environment variable."""
+        from git_mergestat import get_repo_uuid
+
+        test_uuid = "12345678-1234-1234-1234-123456789abc"
+        with patch.dict(os.environ, {"REPO_UUID": test_uuid}):
+            result = get_repo_uuid(".")
+            assert result == test_uuid
+
+    def test_get_repo_uuid_handles_missing_repo(self, tmp_path):
+        """Test that get_repo_uuid handles non-git directories gracefully."""
+        from git_mergestat import get_repo_uuid
+
+        # Clear REPO_UUID env var
+        with patch.dict(os.environ, {}, clear=True):
+            if "REPO_UUID" in os.environ:
+                del os.environ["REPO_UUID"]
+
+            # Use a non-git directory
+            non_git_dir = tmp_path / "not_a_git_repo"
+            non_git_dir.mkdir()
+
+            result = get_repo_uuid(str(non_git_dir))
+
+            # Should return a valid UUID (fallback to random)
+            import uuid
+
+            uuid.UUID(result)  # Will raise if not valid
