@@ -32,7 +32,21 @@ class SQLAlchemyStore:
     """Async storage implementation backed by SQLAlchemy."""
 
     def __init__(self, conn_string: str, echo: bool = False) -> None:
-        self.engine = create_async_engine(conn_string, echo=echo)
+        # Configure connection pool for better performance (PostgreSQL/MySQL only)
+        engine_kwargs = {"echo": echo}
+
+        # Only add pooling parameters for databases that support them
+        if "sqlite" not in conn_string.lower():
+            engine_kwargs.update(
+                {
+                    "pool_size": 20,  # Increased from default 5
+                    "max_overflow": 30,  # Increased from default 10
+                    "pool_pre_ping": True,  # Verify connections before using
+                    "pool_recycle": 3600,  # Recycle connections after 1 hour
+                }
+            )
+
+        self.engine = create_async_engine(conn_string, **engine_kwargs)
         self.session_factory = sessionmaker(
             self.engine, expire_on_commit=False, class_=AsyncSession
         )
@@ -45,7 +59,6 @@ class SQLAlchemyStore:
     async def __aexit__(self, exc_type, exc, tb) -> None:
         if self.session is not None:
             await self.session.close()
-
 
     async def insert_repo(self, repo: Repo) -> None:
         assert self.session is not None

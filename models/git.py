@@ -2,16 +2,10 @@ import os
 import uuid
 from datetime import datetime, timezone
 from importlib import import_module
+
 from git import Repo as GitRepo
-from sqlalchemy import (
-    JSON,
-    Boolean,
-    Column,
-    DateTime,
-    ForeignKey,
-    Integer,
-    Text,
-)
+from sqlalchemy import (JSON, Boolean, Column, DateTime, ForeignKey, Integer,
+                        Text)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import declarative_base, relationship
 
