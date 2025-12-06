@@ -27,9 +27,8 @@ class TestExceptions:
         """Test RateLimitException."""
         with pytest.raises(RateLimitException) as exc_info:
             raise RateLimitException("Rate limit exceeded")
-        # assertions moved outside the with block
-    assert "Rate limit exceeded" in str(exc_info.value)
-    assert isinstance(exc_info.value, ConnectorException)
+        assert "Rate limit exceeded" in str(exc_info.value)
+        assert isinstance(exc_info.value, ConnectorException)
 
     def test_authentication_exception(self):
         """Test AuthenticationException."""
@@ -42,9 +41,8 @@ class TestExceptions:
         """Test NotFoundException."""
         with pytest.raises(NotFoundException) as exc_info:
             raise NotFoundException("Resource not found")
-        # assertions moved outside the with block
-    assert "Resource not found" in str(exc_info.value)
-    assert isinstance(exc_info.value, ConnectorException)
+        assert "Resource not found" in str(exc_info.value)
+        assert isinstance(exc_info.value, ConnectorException)
 
     def test_pagination_exception(self):
         """Test PaginationException."""

@@ -4,12 +4,9 @@ import asyncio
 import logging
 import mimetypes
 import os
-import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Tuple, Union
-
-from git import Repo as GitRepo
 
 from models.git import GitBlame, GitCommit, GitCommitStat, GitFile, Repo
 from storage import MongoStore, SQLAlchemyStore
@@ -27,9 +24,12 @@ except ImportError:
     ConnectorException = Exception
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s"
+)
 
-# === CONFIGURATION ===# The line `REPO_PATH = os.getenv("REPO_PATH", ".")` is retrieving the value of
+# === CONFIGURATION ===
+# The line `REPO_PATH = os.getenv("REPO_PATH", ".")` retrieves the value of
 # an environment variable named "REPO_PATH". If the environment variable is not
 # set, it defaults to "." (current directory). This allows the script to be
 # more flexible by allowing the user to specify the path to the repository as
@@ -408,7 +408,8 @@ async def process_git_blame(
         if blame_batch:
             await insert_blame_data(store, blame_batch)
             logging.info(
-                f"Inserted blame data for {len(blame_batch)} lines ({i + len(chunk)}/{len(all_files)} files)"
+                f"Inserted blame data for {len(blame_batch)} lines "
+                f"({i + len(chunk)}/{len(all_files)} files)"
             )
             blame_batch.clear()
 
@@ -467,7 +468,9 @@ async def process_git_commit_stats(repo: Repo, store: DataStore) -> None:
                                 deletions += 1
                     except Exception as e:
                         logging.warning(
-                            f"Failed to decode diff or count lines for file '{file_path}' in commit '{getattr(commit, 'hexsha', None)}': {e}"
+                            f"Failed to decode diff or count lines for file "
+                            f"'{file_path}' in commit "
+                            f"'{getattr(commit, 'hexsha', None)}': {e}"
                         )
 
                 # Determine file modes
