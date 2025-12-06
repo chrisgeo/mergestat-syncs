@@ -151,14 +151,22 @@ class MongoStore:
         await self._upsert_many(
             "git_commit_stats",
             commit_stats,
-            lambda obj: f"{getattr(obj, 'repo_id')}:{getattr(obj, 'commit_hash')}:{getattr(obj, 'file_path')}",
+            lambda obj: (
+                f"{getattr(obj, 'repo_id')}:"
+                f"{getattr(obj, 'commit_hash')}:"
+                f"{getattr(obj, 'file_path')}"
+            ),
         )
 
     async def insert_blame_data(self, data_batch: List[GitBlame]) -> None:
         await self._upsert_many(
             "git_blame",
             data_batch,
-            lambda obj: f"{getattr(obj, 'repo_id')}:{getattr(obj, 'path')}:{getattr(obj, 'line_no')}",
+            lambda obj: (
+                f"{getattr(obj, 'repo_id')}:"
+                f"{getattr(obj, 'path')}:"
+                f"{getattr(obj, 'line_no')}"
+            ),
         )
 
     async def _upsert_many(

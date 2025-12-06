@@ -4,19 +4,32 @@ import asyncio
 import logging
 import mimetypes
 import os
-import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Tuple, Union
-
-from git import Repo as GitRepo
 
 from models.git import GitBlame, GitCommit, GitCommitStat, GitFile, Repo
 from storage import MongoStore, SQLAlchemyStore
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
+# Import connectors (optional - will be None if not available)
+try:
+    from connectors import GitHubConnector, GitLabConnector
+    from connectors.exceptions import ConnectorException
 
-# === CONFIGURATION ===# The line `REPO_PATH = os.getenv("REPO_PATH", ".")` is retrieving the value of
+    CONNECTORS_AVAILABLE = True
+except ImportError:
+    CONNECTORS_AVAILABLE = False
+    GitHubConnector = None
+    GitLabConnector = None
+    ConnectorException = Exception
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s"
+)
+
+# === CONFIGURATION ===
+# The line `REPO_PATH = os.getenv("REPO_PATH", ".")` retrieves the value of
 # an environment variable named "REPO_PATH". If the environment variable is not
 # set, it defaults to "." (current directory). This allows the script to be
 # more flexible by allowing the user to specify the path to the repository as
@@ -186,17 +199,19 @@ def is_skippable(path: str) -> bool:
     if ext in NON_BINARY_OVERRIDES:
         return False
     mime, _ = mimetypes.guess_type(path)
-    return mime and mime.startswith((
-        "image/",
-        "video/",
-        "audio/",
-        "application/pdf",
-        "font/",
-        "application/x-executable",
-        "application/x-sharedlib",
-        "application/x-object",
-        "application/x-archive",
-    ))
+    return mime and mime.startswith(
+        (
+            "image/",
+            "video/",
+            "audio/",
+            "application/pdf",
+            "font/",
+            "application/x-executable",
+            "application/x-sharedlib",
+            "application/x-object",
+            "application/x-archive",
+        )
+    )
 
 
 async def process_git_files(
@@ -393,7 +408,8 @@ async def process_git_blame(
         if blame_batch:
             await insert_blame_data(store, blame_batch)
             logging.info(
-                f"Inserted blame data for {len(blame_batch)} lines ({i + len(chunk)}/{len(all_files)} files)"
+                f"Inserted blame data for {len(blame_batch)} lines "
+                f"({i + len(chunk)}/{len(all_files)} files)"
             )
             blame_batch.clear()
 
@@ -452,7 +468,9 @@ async def process_git_commit_stats(repo: Repo, store: DataStore) -> None:
                                 deletions += 1
                     except Exception as e:
                         logging.warning(
-                            f"Failed to decode diff or count lines for file '{file_path}' in commit '{getattr(commit, 'hexsha', None)}': {e}"
+                            f"Failed to decode diff or count lines for file "
+                            f"'{file_path}' in commit "
+                            f"'{getattr(commit, 'hexsha', None)}': {e}"
                         )
 
                 # Determine file modes
@@ -493,14 +511,272 @@ async def process_git_commit_stats(repo: Repo, store: DataStore) -> None:
         logging.error(f"Error processing commit stats: {e}")
 
 
+async def process_github_repo(
+    store: DataStore, owner: str, repo_name: str, token: str
+) -> None:
+    """
+    Process a GitHub repository using the GitHub connector.
+
+    :param store: Storage backend.
+    :param owner: Repository owner.
+    :param repo_name: Repository name.
+    :param token: GitHub token.
+    """
+    if not CONNECTORS_AVAILABLE:
+        raise RuntimeError(
+            "Connectors are not available. Please install required dependencies."
+        )
+
+    logging.info(f"Processing GitHub repository: {owner}/{repo_name}")
+
+    connector = GitHubConnector(token=token)
+    try:
+        # Get repository information
+        repos = connector.list_repositories(org_name=owner, max_repos=1)
+        if not repos:
+            # Try getting it from authenticated user's repos
+            all_repos = connector.list_repositories(max_repos=100)
+            repos = [r for r in all_repos if r.full_name == f"{owner}/{repo_name}"]
+
+        if not repos:
+            logging.error(f"Repository {owner}/{repo_name} not found")
+            return
+
+        repo_info = repos[0]
+        logging.info(f"Found repository: {repo_info.full_name}")
+
+        # Create Repo object for database
+        db_repo = Repo(
+            repo_path=None,  # Not a local repo
+            repo=repo_info.full_name,
+            settings={
+                "source": "github",
+                "repo_id": repo_info.id,
+                "url": repo_info.url,
+                "default_branch": repo_info.default_branch,
+            },
+            tags=["github", repo_info.language] if repo_info.language else ["github"],
+        )
+
+        logging.info(f"Storing repository: {db_repo.repo}")
+        await store.insert_repo(db_repo)
+        logging.info(f"Repository stored with ID: {db_repo.id}")
+
+        # Get and store commits
+        logging.info("Fetching commits from GitHub...")
+        gh_repo = connector.github.get_repo(f"{owner}/{repo_name}")
+        commits = list(gh_repo.get_commits()[:100])  # Limit to 100 for now
+
+        commit_objects = []
+        for commit in commits:
+            git_commit = GitCommit(
+                repo_id=db_repo.id,
+                hash=commit.sha,
+                message=commit.commit.message,
+                author_name=(
+                    commit.commit.author.name if commit.commit.author else "Unknown"
+                ),
+                author_email=commit.commit.author.email if commit.commit.author else "",
+                author_when=(
+                    commit.commit.author.date
+                    if commit.commit.author
+                    else datetime.now(timezone.utc)
+                ),
+                committer_name=(
+                    commit.commit.committer.name
+                    if commit.commit.committer
+                    else "Unknown"
+                ),
+                committer_email=(
+                    commit.commit.committer.email if commit.commit.committer else ""
+                ),
+                committer_when=(
+                    commit.commit.committer.date
+                    if commit.commit.committer
+                    else datetime.now(timezone.utc)
+                ),
+                parents=len(commit.parents),
+            )
+            commit_objects.append(git_commit)
+
+        await store.insert_git_commit_data(commit_objects)
+        logging.info(f"Stored {len(commit_objects)} commits from GitHub")
+
+        # Get and store commit stats
+        logging.info("Fetching commit stats from GitHub...")
+        stats_objects = []
+        for commit in commits[:50]:  # Limit to 50 for stats
+            try:
+                for file in commit.files:
+                    stat = GitCommitStat(
+                        repo_id=db_repo.id,
+                        commit_hash=commit.sha,
+                        file_path=file.filename,
+                        additions=file.additions,
+                        deletions=file.deletions,
+                        old_file_mode="unknown",
+                        new_file_mode="unknown",
+                    )
+                    stats_objects.append(stat)
+            except Exception as e:
+                logging.warning(f"Failed to get stats for commit {commit.sha}: {e}")
+
+        if stats_objects:
+            await store.insert_git_commit_stats(stats_objects)
+            logging.info(f"Stored {len(stats_objects)} commit stats from GitHub")
+
+        logging.info(f"Successfully processed GitHub repository: {owner}/{repo_name}")
+
+    except ConnectorException as e:
+        logging.error(f"Connector error: {e}")
+        raise
+    except Exception as e:
+        logging.error(f"Error processing GitHub repository: {e}")
+        raise
+    finally:
+        connector.close()
+
+
+async def process_gitlab_project(
+    store: DataStore, project_id: int, token: str, gitlab_url: str
+) -> None:
+    """
+    Process a GitLab project using the GitLab connector.
+
+    :param store: Storage backend.
+    :param project_id: GitLab project ID.
+    :param token: GitLab token.
+    :param gitlab_url: GitLab instance URL.
+    """
+    if not CONNECTORS_AVAILABLE:
+        raise RuntimeError(
+            "Connectors are not available. Please install required dependencies."
+        )
+
+    logging.info(f"Processing GitLab project: {project_id}")
+
+    connector = GitLabConnector(url=gitlab_url, private_token=token)
+    try:
+        # Get project information
+        gl_project = connector.gitlab.projects.get(project_id)
+        logging.info(f"Found project: {gl_project.name}")
+
+        # Create Repo object for database
+        full_name = (
+            gl_project.path_with_namespace
+            if hasattr(gl_project, "path_with_namespace")
+            else gl_project.name
+        )
+
+        db_repo = Repo(
+            repo_path=None,  # Not a local repo
+            repo=full_name,
+            settings={
+                "source": "gitlab",
+                "project_id": gl_project.id,
+                "url": gl_project.web_url if hasattr(gl_project, "web_url") else None,
+                "default_branch": (
+                    gl_project.default_branch
+                    if hasattr(gl_project, "default_branch")
+                    else "main"
+                ),
+            },
+            tags=["gitlab"],
+        )
+
+        logging.info(f"Storing project: {db_repo.repo}")
+        await store.insert_repo(db_repo)
+        logging.info(f"Project stored with ID: {db_repo.id}")
+
+        # Get and store commits
+        logging.info("Fetching commits from GitLab...")
+        commits = gl_project.commits.list(per_page=100, get_all=False)
+
+        commit_objects = []
+        for commit in commits:
+            git_commit = GitCommit(
+                repo_id=db_repo.id,
+                hash=commit.id,
+                message=commit.message,
+                author_name=(
+                    commit.author_name if hasattr(commit, "author_name") else "Unknown"
+                ),
+                author_email=(
+                    commit.author_email if hasattr(commit, "author_email") else ""
+                ),
+                author_when=(
+                    datetime.fromisoformat(commit.authored_date.replace("Z", "+00:00"))
+                    if hasattr(commit, "authored_date")
+                    else datetime.now(timezone.utc)
+                ),
+                committer_name=(
+                    commit.committer_name
+                    if hasattr(commit, "committer_name")
+                    else "Unknown"
+                ),
+                committer_email=(
+                    commit.committer_email if hasattr(commit, "committer_email") else ""
+                ),
+                committer_when=(
+                    datetime.fromisoformat(commit.committed_date.replace("Z", "+00:00"))
+                    if hasattr(commit, "committed_date")
+                    else datetime.now(timezone.utc)
+                ),
+                parents=len(commit.parent_ids) if hasattr(commit, "parent_ids") else 0,
+            )
+            commit_objects.append(git_commit)
+
+        await store.insert_git_commit_data(commit_objects)
+        logging.info(f"Stored {len(commit_objects)} commits from GitLab")
+
+        # Get and store commit stats
+        logging.info("Fetching commit stats from GitLab...")
+        stats_objects = []
+        for commit in commits[:50]:  # Limit to 50 for stats
+            try:
+                detailed_commit = gl_project.commits.get(commit.id)
+                if hasattr(detailed_commit, "stats"):
+                    # GitLab provides aggregate stats per commit
+                    # We'll create a single entry per commit with aggregate data
+                    stat = GitCommitStat(
+                        repo_id=db_repo.id,
+                        commit_hash=commit.id,
+                        file_path="__aggregate__",  # Special marker for aggregate stats
+                        additions=detailed_commit.stats.get("additions", 0),
+                        deletions=detailed_commit.stats.get("deletions", 0),
+                        old_file_mode="unknown",
+                        new_file_mode="unknown",
+                    )
+                    stats_objects.append(stat)
+            except Exception as e:
+                logging.warning(f"Failed to get stats for commit {commit.id}: {e}")
+
+        if stats_objects:
+            await store.insert_git_commit_stats(stats_objects)
+            logging.info(f"Stored {len(stats_objects)} commit stats from GitLab")
+
+        logging.info(f"Successfully processed GitLab project: {project_id}")
+
+    except ConnectorException as e:
+        logging.error(f"Connector error: {e}")
+        raise
+    except Exception as e:
+        logging.error(f"Error processing GitLab project: {e}")
+        raise
+    finally:
+        connector.close()
+
+
 def parse_args():
     """
     Parse command-line arguments.
     """
-    parser = argparse.ArgumentParser(description="Process git repository data.")
+    parser = argparse.ArgumentParser(
+        description="Process git repository data from local repo or GitHub/GitLab."
+    )
     parser.add_argument("--db", required=False, help="Database connection string.")
     parser.add_argument(
-        "--repo-path", required=False, help="Path to the git repository."
+        "--repo-path", required=False, help="Path to the local git repository."
     )
     parser.add_argument(
         "--db-type",
@@ -518,6 +794,43 @@ def parse_args():
         required=False,
         help="End date for filtering commits (YYYY-MM-DD).",
     )
+
+    # GitHub connector options
+    parser.add_argument(
+        "--github-token",
+        required=False,
+        help="GitHub personal access token (or set GITHUB_TOKEN env var).",
+    )
+    parser.add_argument(
+        "--github-owner",
+        required=False,
+        help="GitHub repository owner/organization.",
+    )
+    parser.add_argument(
+        "--github-repo",
+        required=False,
+        help="GitHub repository name.",
+    )
+
+    # GitLab connector options
+    parser.add_argument(
+        "--gitlab-token",
+        required=False,
+        help="GitLab private token (or set GITLAB_TOKEN env var).",
+    )
+    parser.add_argument(
+        "--gitlab-url",
+        required=False,
+        default="https://gitlab.com",
+        help="GitLab instance URL (default: https://gitlab.com).",
+    )
+    parser.add_argument(
+        "--gitlab-project-id",
+        required=False,
+        type=int,
+        help="GitLab project ID.",
+    )
+
     return parser.parse_args()
 
 
@@ -543,41 +856,69 @@ async def main() -> None:
             "Database connection string is required (set DB_CONN_STRING or use --db)"
         )
 
-    # TODO: Implement date filtering for commits
-    # start_date = args.start_date
-    # end_date = args.end_date
+    # Determine mode: local repo, GitHub, or GitLab
+    github_token = args.github_token or os.getenv("GITHUB_TOKEN")
+    gitlab_token = args.gitlab_token or os.getenv("GITLAB_TOKEN")
 
-    repo: Repo = Repo(REPO_PATH)
-    logging.info(f"Using repository UUID: {repo.id}")
+    use_github = github_token and args.github_owner and args.github_repo
+    use_gitlab = gitlab_token and args.gitlab_project_id
 
+    if use_github and use_gitlab:
+        raise ValueError(
+            "Cannot use both GitHub and GitLab modes simultaneously. Choose one."
+        )
+
+    # Initialize storage
     if DB_TYPE == "mongo":
         store: DataStore = MongoStore(DB_CONN_STRING, db_name=MONGO_DB_NAME)
     else:
         store = SQLAlchemyStore(DB_CONN_STRING, echo=DB_ECHO)
 
     async with store as storage:
-        # Ensure the repository is inserted first
-        await insert_repo_data(storage, repo)
+        if use_github:
+            # GitHub connector mode
+            logging.info("=== GitHub Connector Mode ===")
+            await process_github_repo(
+                storage, args.github_owner, args.github_repo, github_token
+            )
+        elif use_gitlab:
+            # GitLab connector mode
+            logging.info("=== GitLab Connector Mode ===")
+            await process_gitlab_project(
+                storage, args.gitlab_project_id, gitlab_token, args.gitlab_url
+            )
+        else:
+            # Local repository mode
+            logging.info("=== Local Repository Mode ===")
+            # TODO: Implement date filtering for commits
+            # start_date = args.start_date
+            # end_date = args.end_date
 
-        all_files: List[Path] = [
-            Path(REPO_PATH) / f
-            for f in repo.git.ls_files().splitlines()
-            if not is_skippable(f)
-        ]
-        if not all_files:
-            logging.info("No files to process.")
-            return
-        logging.info(f"Found {len(all_files)} files to process.")
+            repo: Repo = Repo(REPO_PATH)
+            logging.info(f"Using repository UUID: {repo.id}")
 
-        # Process GitFile data first
-        await process_git_files(repo, all_files, storage)
+            # Ensure the repository is inserted first
+            await insert_repo_data(storage, repo)
 
-        # Process other data asynchronously
-        await asyncio.gather(
-            process_git_commits(repo, storage),
-            process_git_blame(all_files, storage, repo),
-            process_git_commit_stats(repo, storage),
-        )
+            all_files: List[Path] = [
+                Path(REPO_PATH) / f
+                for f in repo.git.ls_files().splitlines()
+                if not is_skippable(f)
+            ]
+            if not all_files:
+                logging.info("No files to process.")
+                return
+            logging.info(f"Found {len(all_files)} files to process.")
+
+            # Process GitFile data first
+            await process_git_files(repo, all_files, storage)
+
+            # Process other data asynchronously
+            await asyncio.gather(
+                process_git_commits(repo, storage),
+                process_git_blame(all_files, storage, repo),
+                process_git_commit_stats(repo, storage),
+            )
 
 
 if __name__ == "__main__":
