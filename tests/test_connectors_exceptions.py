@@ -42,6 +42,7 @@ class TestExceptions:
         """Test NotFoundException."""
         with pytest.raises(NotFoundException) as exc_info:
             raise NotFoundException("Resource not found")
+        # assertions moved outside the with block
         assert "Resource not found" in str(exc_info.value)
         assert isinstance(exc_info.value, ConnectorException)
 
