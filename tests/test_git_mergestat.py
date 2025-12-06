@@ -330,7 +330,7 @@ class TestResolveRepoIdAndFiles:
         test_file = tmp_path / "file.txt"
         test_file.write_text("hello")
 
-        git_file = _build_git_file(test_file, repo_id)
+        git_file = _build_git_file(test_file, repo_id, str(tmp_path))
 
         assert isinstance(git_file, GitFile)
         assert git_file.repo_id == repo_id
