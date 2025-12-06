@@ -61,7 +61,7 @@ async def github_to_storage_example():
 
             # Get and store commits
             print("Fetching commits...")
-            owner, repo_name = repo.full_name.split("/")
+            _, repo_name = repo.full_name.split("/")
 
             # For demo purposes, we'll use PyGithub to get commits
             gh_repo = connector.github.get_repo(repo.full_name)
