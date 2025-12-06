@@ -27,8 +27,9 @@ class TestExceptions:
         """Test RateLimitException."""
         with pytest.raises(RateLimitException) as exc_info:
             raise RateLimitException("Rate limit exceeded")
-        assert "Rate limit exceeded" in str(exc_info.value)
-        assert isinstance(exc_info.value, ConnectorException)
+        # assertions moved outside the with block
+    assert "Rate limit exceeded" in str(exc_info.value)
+    assert isinstance(exc_info.value, ConnectorException)
 
     def test_authentication_exception(self):
         """Test AuthenticationException."""
