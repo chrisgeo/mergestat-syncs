@@ -1,15 +1,74 @@
+import hashlib
+import logging
 import os
 import uuid
 from datetime import datetime, timezone
 from importlib import import_module
 
 from git import Repo as GitRepo
-from sqlalchemy import (JSON, Boolean, Column, DateTime, ForeignKey, Integer,
-                        Text)
+from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Integer, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
+
+
+def get_repo_uuid(repo_path: str) -> uuid.UUID:
+    """
+    Generate a deterministic UUID for a repository based on git data.
+
+    Priority order:
+    1. REPO_UUID environment variable (if set)
+    2. Remote URL (if repository has a remote configured)
+    3. Absolute path of the repository (fallback)
+
+    :param repo_path: Path to the git repository.
+    :return: UUID for the repository.
+    """
+    # First check if REPO_UUID is explicitly set
+    env_uuid = os.getenv("REPO_UUID")
+    if env_uuid:
+        return uuid.UUID(env_uuid)
+
+    try:
+        # Try to get repository information from git
+        git_repo = GitRepo(repo_path)
+
+        # Try to get remote URL (most reliable identifier)
+        if git_repo.remotes:
+            remote_url = None
+            # Try to get the origin remote first
+            if "origin" in [r.name for r in git_repo.remotes]:
+                origin = git_repo.remote("origin")
+                remote_url = list(origin.urls)[0] if origin.urls else None
+            else:
+                # Use first available remote
+                remote_url = (
+                    list(git_repo.remotes[0].urls)[0]
+                    if git_repo.remotes[0].urls
+                    else None
+                )
+
+            if remote_url:
+                # Create deterministic UUID from remote URL
+                # Use SHA256 hash and convert to UUID format
+                hash_obj = hashlib.sha256(remote_url.encode("utf-8"))
+                # Take first 16 bytes of hash and create UUID
+                uuid_bytes = hash_obj.digest()[:16]
+                return uuid.UUID(bytes=uuid_bytes)
+
+        # Fallback to absolute path if no remote
+        abs_path = os.path.abspath(repo_path)
+        hash_obj = hashlib.sha256(abs_path.encode("utf-8"))
+        uuid_bytes = hash_obj.digest()[:16]
+        return uuid.UUID(bytes=uuid_bytes)
+
+    except Exception as e:
+        # If anything fails, generate a random UUID
+        logging.warning(
+            f"Could not derive UUID from git repository data: {e}. Generating random UUID."
+        )
+        return uuid.uuid4()
 
 
 class Repo(Base, GitRepo):
@@ -19,9 +78,16 @@ class Repo(Base, GitRepo):
         """
         Initialize the Repo class with the given repository path.
 
+        Automatically derives a deterministic UUID from the repository
+        if one is not explicitly provided.
+
         :param repo_path: Path to the git repository (optional).
         :param kwargs: Additional keyword arguments for SQLAlchemy ORM.
         """
+        # Auto-derive UUID from repo_path if not explicitly provided
+        if repo_path and "id" not in kwargs:
+            kwargs["id"] = get_repo_uuid(repo_path)
+
         super().__init__(**kwargs)  # Initialize SQLAlchemy ORM
         if repo_path:
             GitRepo.__init__(self, repo_path)  # Initialize GitPython Repo
@@ -229,18 +295,16 @@ class GitBlameMixin:
             line_no = 1
             for commit, lines in blame_info:
                 for line in lines:
-                    blame_data.append(
-                        (
-                            repo_uuid,
-                            commit.author.email,
-                            commit.author.name,
-                            commit.committed_datetime,
-                            commit.hexsha,
-                            line_no,
-                            line.rstrip("\n"),
-                            rel_path,
-                        )
-                    )
+                    blame_data.append((
+                        repo_uuid,
+                        commit.author.email,
+                        commit.author.name,
+                        commit.committed_datetime,
+                        commit.hexsha,
+                        line_no,
+                        line.rstrip("\n"),
+                        rel_path,
+                    ))
                     line_no += 1
         except Exception as e:
             print(f"Error processing {rel_path}: {e}")
