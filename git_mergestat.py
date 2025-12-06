@@ -5,7 +5,7 @@ import logging
 import mimetypes
 import os
 from pathlib import Path
-from typing import List, Union
+from typing import List, Tuple, Union
 
 from models.git import GitBlame, GitCommit, GitCommitStat, GitFile, Repo
 from storage import MongoStore, SQLAlchemyStore
@@ -213,7 +213,7 @@ async def process_git_files(
     """
     print(f"Processing {len(all_files)} git files...")
     file_batch: List[GitFile] = []
-    failed_files: List[tuple[Path, str]] = []  # Track failed files
+    failed_files: List[Tuple[Path, str]] = []  # Track failed files
     successfully_processed = 0
 
     for filepath in all_files:
@@ -358,7 +358,7 @@ async def process_git_blame(
     semaphore = asyncio.Semaphore(MAX_WORKERS)
 
     blame_batch: List[GitBlame] = []
-    failed_files: List[tuple[Path, str]] = []  # Track failed files with error messages
+    failed_files: List[Tuple[Path, str]] = []  # Track failed files with error messages
     successfully_processed = 0
 
     # Process files in chunks to manage memory
