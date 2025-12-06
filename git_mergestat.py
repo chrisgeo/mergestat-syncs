@@ -471,7 +471,7 @@ async def main() -> None:
     args = parse_args()
 
     # Override environment variables with command-line arguments if provided
-    global DB_CONN_STRING, REPO_PATH, DB_TYPE
+    global DB_CONN_STRING, REPO_PATH, DB_TYPE, REPO_UUID
     if args.db:
         DB_CONN_STRING = args.db
     if args.repo_path:
@@ -485,6 +485,13 @@ async def main() -> None:
         raise ValueError(
             "Database connection string is required (set DB_CONN_STRING or use --db)"
         )
+
+    # Ensure REPO_UUID is set, generate one if not provided
+    if not REPO_UUID:
+        import uuid
+
+        REPO_UUID = str(uuid.uuid4())
+        print(f"Generated REPO_UUID: {REPO_UUID}")
 
     # TODO: Implement date filtering for commits
     # start_date = args.start_date

@@ -18,7 +18,10 @@ class TestBatchSizeConfiguration:
 
     def test_batch_size_defaults_to_100(self):
         """Test that BATCH_SIZE defaults to 100."""
-        assert BATCH_SIZE == 100 or BATCH_SIZE == int(os.getenv("BATCH_SIZE", "100"))
+        # Import here to get the actual module-level value
+        from git_mergestat import BATCH_SIZE as actual_batch_size
+
+        assert actual_batch_size == 100
 
     def test_batch_size_can_be_configured_via_env(self):
         """Test that BATCH_SIZE can be configured via environment variable."""
@@ -33,7 +36,10 @@ class TestMaxWorkersConfiguration:
 
     def test_max_workers_defaults_to_4(self):
         """Test that MAX_WORKERS defaults to 4."""
-        assert MAX_WORKERS == 4 or MAX_WORKERS == int(os.getenv("MAX_WORKERS", "4"))
+        # Import here to get the actual module-level value
+        from git_mergestat import MAX_WORKERS as actual_max_workers
+
+        assert actual_max_workers == 4
 
     def test_max_workers_can_be_configured_via_env(self):
         """Test that MAX_WORKERS can be configured via environment variable."""
