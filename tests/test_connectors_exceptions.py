@@ -55,6 +55,7 @@ class TestExceptions:
         """Test APIException."""
         with pytest.raises(APIException) as exc_info:
             raise APIException("API error")
+        # moved assertions outside the with block
         assert "API error" in str(exc_info.value)
         assert isinstance(exc_info.value, ConnectorException)
 
