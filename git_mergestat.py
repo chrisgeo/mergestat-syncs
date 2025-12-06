@@ -96,11 +96,17 @@ async def _bounded_to_thread_map(
         yield await task
 
 
-def _build_git_file(filepath: Path, repo_id: uuid.UUID) -> Optional[GitFile]:
+def _build_git_file(filepath: Path, repo_id: uuid.UUID, repo_path: Optional[str] = None) -> Optional[GitFile]:
     """
     Build a GitFile instance from a path, skipping unreadable files.
+    
+    :param filepath: Path to the file to process.
+    :param repo_id: UUID of the repository.
+    :param repo_path: Path to the repository root. If None, uses REPO_PATH global.
     """
-    rel_path = os.path.relpath(filepath, REPO_PATH)
+    if repo_path is None:
+        repo_path = REPO_PATH
+    rel_path = os.path.relpath(filepath, repo_path)
     try:
         stat = filepath.stat()
         executable = bool(stat.st_mode & 0o111)
@@ -342,7 +348,7 @@ async def process_git_files(
     """
     file_batch: List[GitFile] = []
     async for git_file in _bounded_to_thread_map(
-        all_files, lambda path: _build_git_file(path, repo_id)
+        all_files, lambda path: _build_git_file(path, repo_id, REPO_PATH)
     ):
         if git_file is None:
             continue
