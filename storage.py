@@ -176,7 +176,6 @@ class MongoStore:
         if not docs:
             return
 
-
         operations = [
             UpdateOne({"_id": doc["_id"]}, {"$set": doc}, upsert=True) for doc in docs
         ]
