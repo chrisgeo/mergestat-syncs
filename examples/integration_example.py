@@ -101,7 +101,7 @@ async def github_to_storage_example():
                 )
                 commit_objects.append(git_commit)
                 print(
-                    f"  - {commit.sha[:8]}: {commit.commit.message.split(chr(10))[0][:50]}"
+                    f"  - {commit.sha[:8]}: {commit.commit.message.split('\n')[0][:50]}"
                 )
 
             await store.insert_git_commit_data(commit_objects)
@@ -224,7 +224,7 @@ async def gitlab_to_storage_example():
                     ),
                 )
                 commit_objects.append(git_commit)
-                print(f"  - {commit.id[:8]}: {commit.message.split(chr(10))[0][:50]}")
+                print(f"  - {commit.id[:8]}: {commit.message.split('\n')[0][:50]}")
 
             await store.insert_git_commit_data(commit_objects)
             print(f"\nStored {len(commit_objects)} commits")

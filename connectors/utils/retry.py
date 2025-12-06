@@ -110,7 +110,9 @@ def retry_with_backoff(
                         logger.error(f"All {max_retries} attempts failed. Giving up.")
 
             # If we get here, all retries failed
-            raise last_exception or Exception("Max retries exceeded")
+            if last_exception:
+                raise last_exception
+            raise Exception("Max retries exceeded with no exception captured")
 
         @wraps(func)
         def sync_wrapper(*args: Any, **kwargs: Any) -> T:
@@ -138,7 +140,9 @@ def retry_with_backoff(
                         logger.error(f"All {max_retries} attempts failed. Giving up.")
 
             # If we get here, all retries failed
-            raise last_exception or Exception("Max retries exceeded")
+            if last_exception:
+                raise last_exception
+            raise Exception("Max retries exceeded with no exception captured")
 
         # Return appropriate wrapper based on function type
         if asyncio.iscoroutinefunction(func):
