@@ -28,10 +28,11 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: postgres
+      PG_DATA: /var/lib/postgresql/
     ports:
-      - "5333:5432"
+      - "5555:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/
   stats:
     image: python:alpine
     environment:
