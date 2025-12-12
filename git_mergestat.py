@@ -531,18 +531,25 @@ async def process_github_repo(
 
     connector = GitHubConnector(token=token)
     try:
-        # Get repository information
-        repos = connector.list_repositories(org_name=owner, max_repos=1)
-        if not repos:
-            # Try getting it from authenticated user's repos
-            all_repos = connector.list_repositories(max_repos=100)
-            repos = [r for r in all_repos if r.full_name == f"{owner}/{repo_name}"]
-
-        if not repos:
-            logging.error(f"Repository {owner}/{repo_name} not found")
-            return
-
-        repo_info = repos[0]
+        # Get repository information directly using full name
+        logging.info(f"Fetching repository information...")
+        gh_repo = connector.github.get_repo(f"{owner}/{repo_name}")
+        
+        # Convert to our Repository model
+        from connectors.models import Repository
+        repo_info = Repository(
+            id=gh_repo.id,
+            name=gh_repo.name,
+            full_name=gh_repo.full_name,
+            default_branch=gh_repo.default_branch,
+            description=gh_repo.description,
+            url=gh_repo.html_url,
+            created_at=gh_repo.created_at,
+            updated_at=gh_repo.updated_at,
+            language=gh_repo.language,
+            stars=gh_repo.stargazers_count,
+            forks=gh_repo.forks_count,
+        )
         logging.info(f"Found repository: {repo_info.full_name}")
 
         # Create Repo object for database
@@ -564,7 +571,6 @@ async def process_github_repo(
 
         # Get and store commits
         logging.info("Fetching commits from GitHub...")
-        gh_repo = connector.github.get_repo(f"{owner}/{repo_name}")
         commits = list(gh_repo.get_commits()[:100])  # Limit to 100 for now
 
         commit_objects = []
