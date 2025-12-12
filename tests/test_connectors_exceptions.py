@@ -4,14 +4,9 @@ Tests for connector exceptions.
 
 import pytest
 
-from connectors.exceptions import (
-    APIException,
-    AuthenticationException,
-    ConnectorException,
-    NotFoundException,
-    PaginationException,
-    RateLimitException,
-)
+from connectors.exceptions import (APIException, AuthenticationException,
+                                   ConnectorException, NotFoundException,
+                                   PaginationException, RateLimitException)
 
 
 class TestExceptions:

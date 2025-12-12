@@ -6,6 +6,15 @@ Using Mergestat's database schema, this set of syncs will use any git repository
 
 Mostly because using mergestat's syncs are great but take a lot of time to understand. The goal of this was for a personal project to understand how my teams are doing, and with a limited budget.
 
+## Private Repository Support ✅
+
+**Both GitHub and GitLab connectors fully support private repositories!** When provided with tokens that have appropriate permissions, you can access and sync data from private repositories just as easily as public ones.
+
+- **GitHub**: Requires `repo` scope on your personal access token
+- **GitLab**: Requires `read_api` and `read_repository` scopes on your private token
+
+See [`PRIVATE_REPO_TESTING.md`](./PRIVATE_REPO_TESTING.md) for detailed instructions on setting up and testing private repository access, or [`VERIFICATION_SUMMARY.md`](./VERIFICATION_SUMMARY.md) for a comprehensive overview.
+
 ## Database Configuration
 
 This project supports both PostgreSQL and MongoDB as storage backends. You can configure the database backend using environment variables or command-line arguments.

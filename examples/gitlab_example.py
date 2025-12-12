@@ -38,14 +38,14 @@ def main():
 
         # Example 2: List projects (multiple ways)
         print("\n=== Example 2: List Projects ===")
-        
+
         # List all accessible projects
         print("All accessible projects:")
         projects = connector.list_projects(max_projects=3)
         for project in projects:
             print(f"  - {project.full_name}")
             print(f"    Stars: {project.stars}, Forks: {project.forks}")
-        
+
         # List projects for a specific group (by name)
         print("\nProjects for gitlab-org group:")
         try:
@@ -55,7 +55,7 @@ def main():
                 print(f"    Stars: {project.stars}, Forks: {project.forks}")
         except Exception as e:
             print(f"  Could not fetch gitlab-org projects: {e}")
-        
+
         # Search for projects
         print("\nSearch results for 'docker':")
         projects = connector.list_projects(search="docker", max_projects=3)
@@ -69,7 +69,9 @@ def main():
         project_name = "gitlab-org/gitlab-foss"
         print(f"Getting contributors for project {project_name}...")
         try:
-            contributors = connector.get_contributors(project_name=project_name, max_contributors=10)
+            contributors = connector.get_contributors(
+                project_name=project_name, max_contributors=10
+            )
             for contributor in contributors:
                 print(f"  - {contributor.username}")
         except Exception as e:
@@ -77,7 +79,9 @@ def main():
             # Fallback to project ID
             project_id = 278964
             print(f"  Trying with project ID {project_id}...")
-            contributors = connector.get_contributors(project_id=project_id, max_contributors=10)
+            contributors = connector.get_contributors(
+                project_id=project_id, max_contributors=10
+            )
             for contributor in contributors:
                 print(f"  - {contributor.username}")
 
@@ -98,9 +102,13 @@ def main():
         print("\n=== Example 5: Get Merge Requests ===")
         print(f"Getting MRs for project {project_name}...")
         try:
-            mrs = connector.get_merge_requests(project_name=project_name, state="opened", max_mrs=5)
+            mrs = connector.get_merge_requests(
+                project_name=project_name, state="opened", max_mrs=5
+            )
         except Exception:
-            mrs = connector.get_merge_requests(project_id=278964, state="opened", max_mrs=5)
+            mrs = connector.get_merge_requests(
+                project_id=278964, state="opened", max_mrs=5
+            )
         for mr in mrs:
             print(f"  - MR !{mr.number}: {mr.title}")
             print(
@@ -113,9 +121,13 @@ def main():
         file_path = "README.md"
         print(f"Getting blame for project {project_name}:{file_path}...")
         try:
-            blame = connector.get_file_blame(project_name=project_name, file_path=file_path, ref="master")
+            blame = connector.get_file_blame(
+                project_name=project_name, file_path=file_path, ref="master"
+            )
         except Exception:
-            blame = connector.get_file_blame(project_id=278964, file_path=file_path, ref="master")
+            blame = connector.get_file_blame(
+                project_id=278964, file_path=file_path, ref="master"
+            )
         print(f"  File: {blame.file_path}")
         print(f"  Number of blame ranges: {len(blame.ranges)}")
         if blame.ranges:

@@ -6,7 +6,8 @@ from datetime import datetime, timezone
 from importlib import import_module
 
 from git import Repo as GitRepo
-from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Integer, Text
+from sqlalchemy import (JSON, Boolean, Column, DateTime, ForeignKey, Integer,
+                        Text)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import declarative_base, relationship
 
@@ -297,16 +298,18 @@ class GitBlameMixin:
             line_no = 1
             for commit, lines in blame_info:
                 for line in lines:
-                    blame_data.append((
-                        repo_uuid,
-                        commit.author.email,
-                        commit.author.name,
-                        commit.committed_datetime,
-                        commit.hexsha,
-                        line_no,
-                        line.rstrip("\n"),
-                        rel_path,
-                    ))
+                    blame_data.append(
+                        (
+                            repo_uuid,
+                            commit.author.email,
+                            commit.author.name,
+                            commit.committed_datetime,
+                            commit.hexsha,
+                            line_no,
+                            line.rstrip("\n"),
+                            rel_path,
+                        )
+                    )
                     line_no += 1
         except Exception as e:
             print(f"Error processing {rel_path}: {e}")

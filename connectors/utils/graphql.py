@@ -10,11 +10,8 @@ from typing import Any, Dict, Optional
 
 import requests
 
-from connectors.exceptions import (
-    APIException,
-    AuthenticationException,
-    RateLimitException,
-)
+from connectors.exceptions import (APIException, AuthenticationException,
+                                   RateLimitException)
 from connectors.utils.retry import retry_with_backoff
 
 logger = logging.getLogger(__name__)

@@ -6,10 +6,12 @@ Production-grade connectors for retrieving data from GitHub and GitLab APIs with
 
 - **GitHub Connector**: Uses PyGithub and GraphQL API
   - Fetch repositories for organizations and individual users
+  - **Full support for private repositories** with proper token scopes
   - Search and filter repositories by keywords
   - Support for fetching ALL repositories or limiting results
 - **GitLab Connector**: Uses python-gitlab and REST API
   - Use project names instead of IDs for easier access
+  - **Full support for private projects** with proper token permissions
   - Fetch projects for groups using group names or IDs
   - Search and filter projects by keywords
   - Support for fetching ALL projects or limiting results
@@ -134,6 +136,92 @@ blame = connector.get_file_blame(project_name="group/project", file_path="path/t
 connector.close()
 ```
 
+## Private Repository Access
+
+Both connectors fully support private repositories/projects when provided with tokens that have the appropriate permissions.
+
+### GitHub Private Repositories
+
+```python
+from connectors import GitHubConnector
+
+# Initialize with token that has 'repo' scope
+connector = GitHubConnector(token="ghp_XXXXXXXXXXXXXXXXXXXX")
+
+# List authenticated user's repositories (includes private repos)
+my_repos = connector.list_repositories(max_repos=50)
+
+# Access a specific private repository
+owner = "your-username"
+repo_name = "your-private-repo"
+
+# Get repository statistics
+stats = connector.get_repo_stats(owner, repo_name, max_commits=100)
+print(f"Private repo has {stats.total_commits} commits")
+
+# Get contributors
+contributors = connector.get_contributors(owner, repo_name)
+print(f"Private repo has {len(contributors)} contributors")
+
+# Get pull requests
+prs = connector.get_pull_requests(owner, repo_name, state="open")
+print(f"Private repo has {len(prs)} open PRs")
+
+connector.close()
+```
+
+**Important**: Ensure your GitHub token has the `repo` scope. Tokens without this scope will not be able to access private repositories.
+
+### GitLab Private Projects
+
+```python
+from connectors import GitLabConnector
+
+# Initialize with token that has appropriate permissions
+connector = GitLabConnector(
+    url="https://gitlab.com",
+    private_token="glpat-XXXXXXXXXXXXXXXXXXXX"
+)
+
+# List all accessible projects (includes private projects)
+my_projects = connector.list_projects(max_projects=50)
+
+# Access a specific private project by name
+project_name = "your-group/your-private-project"
+
+# Get project statistics
+stats = connector.get_repo_stats(project_name=project_name, max_commits=100)
+print(f"Private project has {stats.total_commits} commits")
+
+# Get contributors
+contributors = connector.get_contributors(project_name=project_name)
+print(f"Private project has {len(contributors)} contributors")
+
+# Get merge requests
+mrs = connector.get_merge_requests(project_name=project_name, state="opened")
+print(f"Private project has {len(mrs)} open MRs")
+
+connector.close()
+```
+
+**Important**: Ensure your GitLab token has `read_api` and `read_repository` scopes. Tokens without these scopes will not be able to access private projects.
+
+### Verifying Private Access
+
+You can verify your token has access to private repositories by running the integration tests:
+
+```bash
+# For GitHub private repositories
+export GITHUB_TOKEN=your_token
+export GITHUB_PRIVATE_REPO=owner/repo  # Replace with your private repo
+pytest tests/test_private_repo_access.py::TestGitHubPrivateRepoAccess -v
+
+# For GitLab private projects
+export GITLAB_TOKEN=your_token
+export GITLAB_PRIVATE_PROJECT=group/project  # Replace with your private project
+pytest tests/test_private_repo_access.py::TestGitLabPrivateProjectAccess -v
+```
+
 ## Data Models
 
 All connectors use the same data models:
@@ -160,6 +248,25 @@ connector = GitHubConnector(
 )
 ```
 
+#### GitHub Token Scopes
+
+To access repositories, your GitHub personal access token needs appropriate scopes:
+
+- **Public repositories only**: No special scopes required (but token is still recommended for higher rate limits)
+- **Private repositories**: Requires `repo` scope for full access to private repositories
+- **Organization repositories**: May require `read:org` scope to list organization repositories
+
+**To create a GitHub token with private repository access:**
+
+1. Go to GitHub Settings → Developer settings → Personal access tokens → Tokens (classic)
+2. Click "Generate new token (classic)"
+3. Select scopes:
+   - ✅ `repo` - Full control of private repositories (includes all repo sub-scopes)
+   - ✅ `read:org` - Read org and team membership (if accessing organization repos)
+4. Generate and copy the token
+
+**Security Note**: Keep your token secure and never commit it to version control. Use environment variables to store tokens.
+
 ### GitLab Connector
 
 ```python
@@ -170,6 +277,28 @@ connector = GitLabConnector(
     max_workers=4,                   # Concurrent workers
 )
 ```
+
+#### GitLab Token Permissions
+
+To access projects, your GitLab private token needs appropriate scopes:
+
+- **Public projects only**: No token required, but recommended for higher rate limits
+- **Private projects**: Requires a token with the following scopes:
+  - `read_api` - Read access to the API
+  - `read_repository` - Read access to repository data
+- **Write operations**: Would require `write_repository` or `api` scope (not used by this connector)
+
+**To create a GitLab token with private project access:**
+
+1. Go to GitLab Settings → Access Tokens
+2. Create a new token with:
+   - Name: "MergeStat Sync" (or any descriptive name)
+   - Scopes:
+     - ✅ `read_api` - Read-only API access
+     - ✅ `read_repository` - Read repository content
+3. Copy the generated token
+
+**Security Note**: GitLab tokens are sensitive. Store them securely in environment variables and never commit them to your repository.
 
 ## Error Handling
 

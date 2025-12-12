@@ -7,7 +7,6 @@ import pytest_asyncio
 from pymongo import UpdateOne
 from sqlalchemy import select
 
-
 from models import GitBlame, GitCommit, GitCommitStat, GitFile, Repo
 from models.git import Base
 from storage import MongoStore, SQLAlchemyStore, model_to_dict

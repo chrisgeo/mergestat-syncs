@@ -55,6 +55,8 @@ else:
             "Database URL not configured. Set DB_CONN_STRING environment variable "
             "or configure sqlalchemy.url in alembic.ini"
         )
+
+
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode.
 

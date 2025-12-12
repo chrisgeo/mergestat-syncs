@@ -1,8 +1,9 @@
 """Shared test fixtures for the test suite."""
+
+import mimetypes
 import os
 import uuid
 from pathlib import Path
-import mimetypes
 
 import pytest
 from git import Repo as GitRepo

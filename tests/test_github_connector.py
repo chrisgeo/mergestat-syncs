@@ -3,6 +3,7 @@ Tests for GitHub connector new features.
 """
 
 from unittest.mock import Mock, patch
+
 import pytest
 
 from connectors import GitHubConnector
@@ -55,7 +56,9 @@ class TestGitHubConnectorRepositories:
         assert repos[0].full_name == "testuser/test-repo"
         mock_github_instance.get_user.assert_called_once_with("testuser")
 
-    def test_list_repositories_with_search(self, mock_github_client, mock_graphql_client):
+    def test_list_repositories_with_search(
+        self, mock_github_client, mock_graphql_client
+    ):
         """Test listing repositories with search query."""
         # Setup mock
         mock_repo = Mock()
@@ -81,9 +84,13 @@ class TestGitHubConnectorRepositories:
         # Assert
         assert len(repos) == 1
         assert repos[0].name == "python-test"
-        mock_github_instance.search_repositories.assert_called_once_with(query="python test")
+        mock_github_instance.search_repositories.assert_called_once_with(
+            query="python test"
+        )
 
-    def test_list_repositories_search_within_org(self, mock_github_client, mock_graphql_client):
+    def test_list_repositories_search_within_org(
+        self, mock_github_client, mock_graphql_client
+    ):
         """Test searching repositories within an organization."""
         # Setup mock - now using search_repositories API
         mock_repo1 = Mock()
@@ -105,7 +112,9 @@ class TestGitHubConnectorRepositories:
 
         # Test - search for "api" within org
         connector = GitHubConnector(token="test_token")
-        repos = connector.list_repositories(org_name="myorg", search="api", max_repos=10)
+        repos = connector.list_repositories(
+            org_name="myorg", search="api", max_repos=10
+        )
 
         # Assert - API search was called with correct query
         assert len(repos) == 1
@@ -114,7 +123,9 @@ class TestGitHubConnectorRepositories:
             query="api org:myorg"
         )
 
-    def test_list_all_repositories_no_limit(self, mock_github_client, mock_graphql_client):
+    def test_list_all_repositories_no_limit(
+        self, mock_github_client, mock_graphql_client
+    ):
         """Test listing all repositories without max_repos limit."""
         # Setup mock
         mock_repos = []

@@ -4,15 +4,8 @@ import uuid
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
-from models.git import (
-    Repo,
-    GitRef,
-    GitFile,
-    GitCommit,
-    GitCommitStat,
-    GitBlame,
-    get_repo_uuid,
-)
+from models.git import (GitBlame, GitCommit, GitCommitStat, GitFile, GitRef,
+                        Repo, get_repo_uuid)
 
 
 class TestRepoUUID:
@@ -251,9 +244,9 @@ class TestBackwardCompatibility:
         for model, column_name in models_and_columns:
             column = model.__table__.columns[column_name]
             # Check that the column type has timezone=True
-            assert column.type.timezone is True, (
-                f"{model.__name__}.{column_name} should have timezone=True"
-            )
+            assert (
+                column.type.timezone is True
+            ), f"{model.__name__}.{column_name} should have timezone=True"
 
     def test_datetime_defaults_are_callable(self):
         """Test that all datetime defaults are callable (lambdas)."""
@@ -268,9 +261,9 @@ class TestBackwardCompatibility:
 
         for model, column_name in models_and_columns:
             column = model.__table__.columns[column_name]
-            assert column.default is not None, (
-                f"{model.__name__}.{column_name} should have a default"
-            )
-            assert callable(column.default.arg), (
-                f"{model.__name__}.{column_name} default should be callable"
-            )
+            assert (
+                column.default is not None
+            ), f"{model.__name__}.{column_name} should have a default"
+            assert callable(
+                column.default.arg
+            ), f"{model.__name__}.{column_name} default should be callable"

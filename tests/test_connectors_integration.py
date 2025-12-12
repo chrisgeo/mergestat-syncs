@@ -6,10 +6,10 @@ They can be skipped in CI/CD environments by setting SKIP_INTEGRATION_TESTS=1.
 """
 
 import os
+
 import pytest
 
 from connectors import GitHubConnector, GitLabConnector
-
 
 # Skip integration tests if environment variable is set
 skip_integration = os.getenv("SKIP_INTEGRATION_TESTS", "0") == "1"
@@ -92,7 +92,9 @@ class TestGitHubIntegration:
 
         try:
             # Search for Python repositories
-            repos = connector.list_repositories(search="python language:python", max_repos=10)
+            repos = connector.list_repositories(
+                search="python language:python", max_repos=10
+            )
 
             # Assertions
             assert len(repos) > 0, "Should find at least one Python repository"
@@ -120,8 +122,7 @@ class TestGitLabIntegration:
         """Test fetching first 10 public projects from GitLab."""
         # Use unauthenticated connector for public projects
         connector = GitLabConnector(
-            url="https://gitlab.com",
-            private_token=os.getenv("GITLAB_TOKEN")
+            url="https://gitlab.com", private_token=os.getenv("GITLAB_TOKEN")
         )
 
         try:
@@ -149,8 +150,7 @@ class TestGitLabIntegration:
         """Test fetching first 10 public projects from a GitLab group."""
         # Use unauthenticated connector for public projects
         connector = GitLabConnector(
-            url="https://gitlab.com",
-            private_token=os.getenv("GITLAB_TOKEN")
+            url="https://gitlab.com", private_token=os.getenv("GITLAB_TOKEN")
         )
 
         try:
@@ -180,8 +180,7 @@ class TestGitLabIntegration:
         """Test searching for public projects on GitLab."""
         # Use unauthenticated connector for public projects
         connector = GitLabConnector(
-            url="https://gitlab.com",
-            private_token=os.getenv("GITLAB_TOKEN")
+            url="https://gitlab.com", private_token=os.getenv("GITLAB_TOKEN")
         )
 
         try:
