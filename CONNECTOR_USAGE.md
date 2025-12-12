@@ -22,20 +22,29 @@ python git_mergestat.py --db "postgresql+asyncpg://localhost:5432/mergestat" --r
 
 ## GitHub Connector Mode
 
-Fetch repository data directly from GitHub without cloning.
+Fetch repository data directly from GitHub without cloning. **Fully supports both public and private repositories**.
 
 ### Requirements
 
 - GitHub personal access token with appropriate permissions
+  - **For public repositories**: Any valid token (for higher rate limits)
+  - **For private repositories**: Token must have `repo` scope
 - Repository owner and name
 
 ### Usage
 
 ```bash
-# Using environment variables
+# Public repository
 export DB_CONN_STRING="postgresql+asyncpg://localhost:5432/mergestat"
 export GITHUB_TOKEN="ghp_xxxxxxxxxxxx"
 python git_mergestat.py --github-owner torvalds --github-repo linux
+
+# Private repository (token must have 'repo' scope)
+export GITHUB_TOKEN="ghp_xxxxxxxxxxxx"  # Token with 'repo' scope
+python git_mergestat.py \
+  --db "postgresql+asyncpg://localhost:5432/mergestat" \
+  --github-owner your-org \
+  --github-repo your-private-repo
 
 # Using command-line arguments
 python git_mergestat.py \
@@ -64,20 +73,28 @@ python git_mergestat.py \
 
 ## GitLab Connector Mode
 
-Fetch project data directly from GitLab (including self-hosted instances).
+Fetch project data directly from GitLab (including self-hosted instances). **Fully supports both public and private projects**.
 
 ### Requirements
 
 - GitLab private token with appropriate permissions
+  - **For public projects**: Token optional (but recommended for rate limits)
+  - **For private projects**: Token must have `read_api` and `read_repository` scopes
 - Project ID (numeric ID, not path)
 
 ### Usage
 
 ```bash
-# GitLab.com
+# Public project on GitLab.com
 export DB_CONN_STRING="postgresql+asyncpg://localhost:5432/mergestat"
 export GITLAB_TOKEN="glpat-xxxxxxxxxxxx"
 python git_mergestat.py --gitlab-project-id 278964
+
+# Private project (token must have 'read_api' and 'read_repository' scopes)
+export GITLAB_TOKEN="glpat-xxxxxxxxxxxx"  # Token with required scopes
+python git_mergestat.py \
+  --db "postgresql+asyncpg://localhost:5432/mergestat" \
+  --gitlab-project-id 12345
 
 # Self-hosted GitLab
 python git_mergestat.py \
@@ -211,14 +228,28 @@ pip install -r requirements.txt
 ### GitHub Authentication Errors
 
 Ensure your token has the appropriate scopes:
-- `repo` - Full control of private repositories
-- `read:org` - Read org and team membership
+- **`repo`** - Full control of private repositories (REQUIRED for private repos)
+- **`read:org`** - Read org and team membership (recommended for organization repos)
+
+**For private repositories**: The `repo` scope is mandatory. Without it, you'll receive 404 errors when trying to access private repositories.
+
+**To verify your token scopes**:
+1. Go to https://github.com/settings/tokens
+2. Find your token and check which scopes are selected
+3. If `repo` is not checked, generate a new token with this scope
 
 ### GitLab Authentication Errors
 
 Ensure your token has the appropriate scopes:
-- `read_api` - Read access to API
-- `read_repository` - Read repository data
+- **`read_api`** - Read access to API (REQUIRED for private projects)
+- **`read_repository`** - Read repository data (REQUIRED for private projects)
+
+**For private projects**: Both scopes are mandatory. Without them, you'll receive authentication or permission errors.
+
+**To verify your token permissions**:
+1. Go to your GitLab instance Settings → Access Tokens
+2. Review the token's scopes
+3. If needed, create a new token with `read_api` and `read_repository` scopes
 
 ### Finding Repository/Project IDs
 
