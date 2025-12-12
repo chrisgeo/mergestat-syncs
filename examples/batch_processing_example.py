@@ -142,8 +142,20 @@ async def async_main():
 
 
 if __name__ == "__main__":
-    # Run synchronous example
-    main()
+    import argparse
 
-    # Optionally run async example
-    # asyncio.run(async_main())
+    parser = argparse.ArgumentParser(description="Batch repository processing example")
+    parser.add_argument(
+        "--async",
+        dest="use_async",
+        action="store_true",
+        help="Run async version instead of sync version",
+    )
+    args = parser.parse_args()
+
+    if args.use_async:
+        print("Running async version...")
+        asyncio.run(async_main())
+    else:
+        print("Running sync version (use --async for async version)...")
+        main()

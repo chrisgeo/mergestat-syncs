@@ -542,11 +542,19 @@ class GitHubConnector:
         :param max_repos: Maximum number of matching repositories to retrieve.
         :return: List of Repository objects matching the pattern.
 
+        Note:
+            Pattern matching is performed client-side after fetching all repositories
+            from the organization/user. For large organizations with many repositories,
+            consider using list_repositories with search parameter for server-side
+            filtering when applicable, or set a reasonable max_repos limit.
+
         Examples:
             - pattern='chrisgeo/m*' matches 'chrisgeo/mergestat-syncs'
             - pattern='*/sync*' with org_name='myorg' matches 'myorg/sync-tool'
         """
-        # First, get all repositories from the source
+        # Fetch all repositories from the source then filter client-side
+        # Note: Server-side filtering with GitHub's search API doesn't support
+        # all fnmatch patterns, so we filter locally for maximum flexibility
         all_repos = self.list_repositories(
             org_name=org_name,
             user_name=user_name,
@@ -565,6 +573,36 @@ class GitHubConnector:
             f"Found {len(matching_repos)} repositories matching pattern '{pattern}'"
         )
         return matching_repos
+
+    def _get_repositories_for_processing(
+        self,
+        org_name: Optional[str] = None,
+        user_name: Optional[str] = None,
+        pattern: Optional[str] = None,
+        max_repos: Optional[int] = None,
+    ) -> List[Repository]:
+        """
+        Get repositories for batch processing, optionally filtered by pattern.
+
+        :param org_name: Optional organization name.
+        :param user_name: Optional user name.
+        :param pattern: Optional fnmatch-style pattern.
+        :param max_repos: Maximum number of repos to retrieve.
+        :return: List of Repository objects.
+        """
+        if pattern:
+            return self.list_repositories_with_pattern(
+                pattern=pattern,
+                org_name=org_name,
+                user_name=user_name,
+                max_repos=max_repos,
+            )
+        else:
+            return self.list_repositories(
+                org_name=org_name,
+                user_name=user_name,
+                max_repos=max_repos,
+            )
 
     def _process_single_repo_stats(
         self,
@@ -647,19 +685,12 @@ class GitHubConnector:
             ...         print(f"{result.repository.full_name}: {result.stats}")
         """
         # Step 1: Get repositories
-        if pattern:
-            repos = self.list_repositories_with_pattern(
-                pattern=pattern,
-                org_name=org_name,
-                user_name=user_name,
-                max_repos=max_repos,
-            )
-        else:
-            repos = self.list_repositories(
-                org_name=org_name,
-                user_name=user_name,
-                max_repos=max_repos,
-            )
+        repos = self._get_repositories_for_processing(
+            org_name=org_name,
+            user_name=user_name,
+            pattern=pattern,
+            max_repos=max_repos,
+        )
 
         logger.info(f"Processing {len(repos)} repositories with batch_size={batch_size}")
 
@@ -756,25 +787,15 @@ class GitHubConnector:
         # Step 1: Get repositories (using sync method via run_in_executor)
         loop = asyncio.get_event_loop()
 
-        if pattern:
-            repos = await loop.run_in_executor(
-                None,
-                lambda: self.list_repositories_with_pattern(
-                    pattern=pattern,
-                    org_name=org_name,
-                    user_name=user_name,
-                    max_repos=max_repos,
-                ),
-            )
-        else:
-            repos = await loop.run_in_executor(
-                None,
-                lambda: self.list_repositories(
-                    org_name=org_name,
-                    user_name=user_name,
-                    max_repos=max_repos,
-                ),
-            )
+        repos = await loop.run_in_executor(
+            None,
+            lambda: self._get_repositories_for_processing(
+                org_name=org_name,
+                user_name=user_name,
+                pattern=pattern,
+                max_repos=max_repos,
+            ),
+        )
 
         logger.info(f"Processing {len(repos)} repositories asynchronously")
 
