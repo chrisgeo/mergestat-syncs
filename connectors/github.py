@@ -134,28 +134,55 @@ class GitHubConnector:
     def list_repositories(
         self,
         org_name: Optional[str] = None,
+        user_name: Optional[str] = None,
+        search: Optional[str] = None,
         max_repos: Optional[int] = None,
     ) -> List[Repository]:
         """
-        List repositories for an organization or authenticated user.
+        List repositories for an organization, user, or search query.
 
-        :param org_name: Optional organization name. If None, lists user's repos.
-        :param max_repos: Maximum number of repositories to retrieve.
+        :param org_name: Optional organization name. If provided, lists organization repos.
+        :param user_name: Optional user name. If provided, lists that user's repos.
+        :param search: Optional search query to filter repositories. 
+                      If provided with org_name/user_name, searches within that scope.
+                      If provided alone, performs global search.
+        :param max_repos: Maximum number of repositories to retrieve. If None, retrieves all.
         :return: List of Repository objects.
         """
         try:
             repos = []
 
-            if org_name:
+            # Handle search-based repository listing
+            if search and not org_name and not user_name:
+                # Global search across all GitHub
+                gh_repos = self.github.search_repositories(query=search)
+            elif org_name:
+                # Organization repositories
                 source = self.github.get_organization(org_name)
                 gh_repos = source.get_repos()
+            elif user_name:
+                # Specific user repositories
+                source = self.github.get_user(user_name)
+                gh_repos = source.get_repos()
             else:
+                # Authenticated user's repositories
                 user = self.github.get_user()
                 gh_repos = user.get_repos()
 
             for gh_repo in gh_repos:
                 if max_repos and len(repos) >= max_repos:
                     break
+
+                # Apply search filter if specified and not using global search
+                if search and (org_name or user_name or (not org_name and not user_name)):
+                    # For scoped searches, filter by name/description containing search term
+                    search_lower = search.lower()
+                    if not (
+                        (gh_repo.name and search_lower in gh_repo.name.lower()) or
+                        (gh_repo.description and search_lower in gh_repo.description.lower()) or
+                        (gh_repo.full_name and search_lower in gh_repo.full_name.lower())
+                    ):
+                        continue
 
                 repo = Repository(
                     id=gh_repo.id,

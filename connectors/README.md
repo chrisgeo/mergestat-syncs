@@ -5,12 +5,20 @@ Production-grade connectors for retrieving data from GitHub and GitLab APIs with
 ## Features
 
 - **GitHub Connector**: Uses PyGithub and GraphQL API
+  - Fetch repositories for organizations and individual users
+  - Search and filter repositories by keywords
+  - Support for fetching ALL repositories or limiting results
 - **GitLab Connector**: Uses python-gitlab and REST API
+  - Use project names instead of IDs for easier access
+  - Fetch projects for groups using group names or IDs
+  - Search and filter projects by keywords
+  - Support for fetching ALL projects or limiting results
 - **Automatic Pagination**: Handles paginated responses seamlessly
 - **Rate Limiting**: Exponential backoff for API rate limits
 - **Retry Logic**: Automatic retries with configurable backoff
 - **Type-Safe Models**: Dataclasses for all data structures
 - **Error Handling**: Clear exception types for different errors
+- **Backward Compatible**: All legacy parameters still supported
 
 ## Installation
 
@@ -38,8 +46,23 @@ connector = GitHubConnector(token="your_github_token")
 # List organizations
 orgs = connector.list_organizations(max_orgs=10)
 
-# List repositories
+# List repositories for authenticated user
 repos = connector.list_repositories(max_repos=20)
+
+# List repositories for a specific user
+repos = connector.list_repositories(user_name="octocat", max_repos=20)
+
+# List repositories for an organization
+repos = connector.list_repositories(org_name="github", max_repos=20)
+
+# Search for repositories (global search)
+repos = connector.list_repositories(search="python machine learning")
+
+# Search within an organization
+repos = connector.list_repositories(org_name="github", search="api")
+
+# Get ALL repositories (no limit)
+all_repos = connector.list_repositories()
 
 # Get contributors
 contributors = connector.get_contributors("owner", "repo")
@@ -74,20 +97,38 @@ connector = GitLabConnector(
 # List groups
 groups = connector.list_groups(max_groups=10)
 
-# List projects
+# List all accessible projects
 projects = connector.list_projects(max_projects=20)
 
-# Get contributors
+# List projects for a group by name
+projects = connector.list_projects(group_name="gitlab-org", max_projects=20)
+
+# List projects for a group by ID (legacy support)
+projects = connector.list_projects(group_id=123, max_projects=20)
+
+# Search for projects
+projects = connector.list_projects(search="python")
+
+# Search within a group
+projects = connector.list_projects(group_name="gitlab-org", search="api")
+
+# Get ALL projects (no limit)
+all_projects = connector.list_projects()
+
+# Get contributors using project name
+contributors = connector.get_contributors(project_name="group/project")
+
+# Get contributors using project ID (legacy support)
 contributors = connector.get_contributors(project_id=123)
 
-# Get project statistics
-stats = connector.get_repo_stats(project_id=123, max_commits=100)
+# Get project statistics using project name
+stats = connector.get_repo_stats(project_name="group/project", max_commits=100)
 
-# Get merge requests
-mrs = connector.get_merge_requests(project_id=123, state="opened")
+# Get merge requests using project name
+mrs = connector.get_merge_requests(project_name="group/project", state="opened")
 
-# Get file blame using REST API
-blame = connector.get_file_blame(project_id=123, file_path="path/to/file.py")
+# Get file blame using project name
+blame = connector.get_file_blame(project_name="group/project", file_path="path/to/file.py")
 
 # Close connector
 connector.close()

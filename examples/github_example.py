@@ -35,9 +35,26 @@ def main():
         for org in orgs:
             print(f"  - {org.name} (ID: {org.id})")
 
-        # Example 2: List repositories
+        # Example 2: List repositories (multiple ways)
         print("\n=== Example 2: List Repositories ===")
-        repos = connector.list_repositories(max_repos=5)
+        
+        # List authenticated user's repositories
+        print("Authenticated user's repos:")
+        repos = connector.list_repositories(max_repos=3)
+        for repo in repos:
+            print(f"  - {repo.full_name} ({repo.language})")
+            print(f"    Stars: {repo.stars}, Forks: {repo.forks}")
+        
+        # List a specific user's repositories
+        print("\nSpecific user's repos (torvalds):")
+        repos = connector.list_repositories(user_name="torvalds", max_repos=3)
+        for repo in repos:
+            print(f"  - {repo.full_name} ({repo.language})")
+            print(f"    Stars: {repo.stars}, Forks: {repo.forks}")
+        
+        # Search for repositories
+        print("\nSearch results for 'python flask':")
+        repos = connector.list_repositories(search="python flask", max_repos=3)
         for repo in repos:
             print(f"  - {repo.full_name} ({repo.language})")
             print(f"    Stars: {repo.stars}, Forks: {repo.forks}")
