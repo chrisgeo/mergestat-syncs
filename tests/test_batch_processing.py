@@ -182,11 +182,11 @@ class TestGitHubConnectorBatchProcessing:
         mock_github_instance = mock_github_client.return_value
         mock_github_instance.get_user.return_value = mock_user
 
-        # Test pattern matching
+        # Test pattern matching using list_repositories with pattern parameter
         connector = GitHubConnector(token="test_token")
-        repos = connector.list_repositories_with_pattern(
-            pattern="chrisgeo/merge*",
+        repos = connector.list_repositories(
             user_name="chrisgeo",
+            pattern="chrisgeo/merge*",
         )
 
         # Should only return repos matching the pattern
@@ -196,7 +196,7 @@ class TestGitHubConnectorBatchProcessing:
     def test_list_repositories_with_pattern_max_repos(
         self, mock_github_client, mock_graphql_client
     ):
-        """Test list_repositories_with_pattern respects max_repos."""
+        """Test list_repositories with pattern respects max_repos."""
         # Setup mock repos
         mock_repos = [
             self._create_mock_repo(f"mergestat-{i}", f"chrisgeo/mergestat-{i}")
@@ -211,9 +211,9 @@ class TestGitHubConnectorBatchProcessing:
 
         # Test with max_repos limit
         connector = GitHubConnector(token="test_token")
-        repos = connector.list_repositories_with_pattern(
-            pattern="chrisgeo/merge*",
+        repos = connector.list_repositories(
             user_name="chrisgeo",
+            pattern="chrisgeo/merge*",
             max_repos=3,
         )
 

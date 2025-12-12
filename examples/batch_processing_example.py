@@ -43,9 +43,9 @@ def main():
         print("\n=== Example 1: List Repositories with Pattern ===")
         print("Pattern: 'chrisgeo/merge*'")
 
-        repos = connector.list_repositories_with_pattern(
-            pattern="chrisgeo/merge*",
+        repos = connector.list_repositories(
             user_name="chrisgeo",
+            pattern="chrisgeo/merge*",
             max_repos=10,
         )
         print(f"Found {len(repos)} matching repositories:")

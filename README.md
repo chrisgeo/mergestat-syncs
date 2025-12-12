@@ -32,6 +32,13 @@ from connectors import GitHubConnector
 
 connector = GitHubConnector(token="your_token")
 
+# List repos with pattern matching (integrated into list_repositories)
+repos = connector.list_repositories(
+    org_name="myorg",
+    pattern="myorg/api-*",      # Filter repos matching this pattern
+    max_repos=50,
+)
+
 # Get all repos matching a pattern with stats
 results = connector.get_repos_with_stats(
     org_name="myorg",

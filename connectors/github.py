@@ -171,6 +171,7 @@ class GitHubConnector:
         org_name: Optional[str] = None,
         user_name: Optional[str] = None,
         search: Optional[str] = None,
+        pattern: Optional[str] = None,
         max_repos: Optional[int] = None,
     ) -> List[Repository]:
         """
@@ -181,8 +182,15 @@ class GitHubConnector:
         :param search: Optional search query to filter repositories.
                       If provided with org_name/user_name, searches within that scope.
                       If provided alone, performs global search.
+        :param pattern: Optional fnmatch-style pattern to filter repositories by full name
+                       (e.g., 'chrisgeo/m*', '*/api-*'). Pattern matching is performed
+                       client-side after fetching repositories. Case-insensitive.
         :param max_repos: Maximum number of repositories to retrieve. If None, retrieves all.
         :return: List of Repository objects.
+
+        Examples:
+            - pattern='chrisgeo/m*' matches 'chrisgeo/mergestat-syncs'
+            - pattern='*/sync*' matches 'anyorg/sync-tool'
         """
         try:
             repos = []
@@ -223,10 +231,20 @@ class GitHubConnector:
                     stars=gh_repo.stargazers_count,
                     forks=gh_repo.forks_count,
                 )
+
+                # Apply pattern filter if specified
+                if pattern and not match_repo_pattern(repo.full_name, pattern):
+                    continue
+
                 repos.append(repo)
                 logger.debug(f"Retrieved repository: {repo.full_name}")
 
-            logger.info(f"Retrieved {len(repos)} repositories")
+            if pattern:
+                logger.info(
+                    f"Retrieved {len(repos)} repositories matching pattern '{pattern}'"
+                )
+            else:
+                logger.info(f"Retrieved {len(repos)} repositories")
             return repos
 
         except Exception as e:
@@ -526,54 +544,6 @@ class GitHubConnector:
         except Exception as e:
             self._handle_github_exception(e)
 
-    def list_repositories_with_pattern(
-        self,
-        pattern: str,
-        org_name: Optional[str] = None,
-        user_name: Optional[str] = None,
-        max_repos: Optional[int] = None,
-    ) -> List[Repository]:
-        """
-        List repositories matching a pattern using fnmatch-style matching.
-
-        :param pattern: Pattern to match repository full names (e.g., 'chrisgeo/m*').
-        :param org_name: Optional organization name to scope the search.
-        :param user_name: Optional user name to scope the search.
-        :param max_repos: Maximum number of matching repositories to retrieve.
-        :return: List of Repository objects matching the pattern.
-
-        Note:
-            Pattern matching is performed client-side after fetching all repositories
-            from the organization/user. For large organizations with many repositories,
-            consider using list_repositories with search parameter for server-side
-            filtering when applicable, or set a reasonable max_repos limit.
-
-        Examples:
-            - pattern='chrisgeo/m*' matches 'chrisgeo/mergestat-syncs'
-            - pattern='*/sync*' with org_name='myorg' matches 'myorg/sync-tool'
-        """
-        # Fetch all repositories from the source then filter client-side
-        # Note: Server-side filtering with GitHub's search API doesn't support
-        # all fnmatch patterns, so we filter locally for maximum flexibility
-        all_repos = self.list_repositories(
-            org_name=org_name,
-            user_name=user_name,
-            max_repos=None,  # Get all repos first, then filter
-        )
-
-        # Filter by pattern
-        matching_repos = []
-        for repo in all_repos:
-            if match_repo_pattern(repo.full_name, pattern):
-                matching_repos.append(repo)
-                if max_repos and len(matching_repos) >= max_repos:
-                    break
-
-        logger.info(
-            f"Found {len(matching_repos)} repositories matching pattern '{pattern}'"
-        )
-        return matching_repos
-
     def _get_repositories_for_processing(
         self,
         org_name: Optional[str] = None,
@@ -590,19 +560,12 @@ class GitHubConnector:
         :param max_repos: Maximum number of repos to retrieve.
         :return: List of Repository objects.
         """
-        if pattern:
-            return self.list_repositories_with_pattern(
-                pattern=pattern,
-                org_name=org_name,
-                user_name=user_name,
-                max_repos=max_repos,
-            )
-        else:
-            return self.list_repositories(
-                org_name=org_name,
-                user_name=user_name,
-                max_repos=max_repos,
-            )
+        return self.list_repositories(
+            org_name=org_name,
+            user_name=user_name,
+            pattern=pattern,
+            max_repos=max_repos,
+        )
 
     def _process_single_repo_stats(
         self,
