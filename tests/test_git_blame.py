@@ -1,4 +1,5 @@
 """Tests for GitBlame functionality including repo instance reuse."""
+
 import os
 from unittest.mock import MagicMock, patch
 
@@ -21,7 +22,9 @@ class TestGitBlameMixin:
             # First element should be the repo_uuid
             assert blame_data[0][0] == repo_uuid
 
-    def test_fetch_blame_with_repo_param(self, repo_path, test_file, repo_uuid, git_repo):
+    def test_fetch_blame_with_repo_param(
+        self, repo_path, test_file, repo_uuid, git_repo
+    ):
         """Test fetch_blame reuses provided Repo instance."""
         blame_data = GitBlameMixin.fetch_blame(
             repo_path, test_file, repo_uuid, repo=git_repo
@@ -44,7 +47,7 @@ class TestGitBlameMixin:
                 repo_path,
                 os.path.join(repo_path, "README.md"),
                 repo_uuid,
-                repo=git_repo
+                repo=git_repo,
             )
 
             # Repo should not be called when we pass an existing instance
@@ -58,23 +61,22 @@ class TestGitBlameMixin:
             mock_repo.return_value = mock_repo_instance
 
             GitBlameMixin.fetch_blame(
-                repo_path,
-                os.path.join(repo_path, "README.md"),
-                repo_uuid,
-                repo=None
+                repo_path, os.path.join(repo_path, "README.md"), repo_uuid, repo=None
             )
 
             # Repo should be instantiated when none is provided
             mock_repo.assert_called_once_with(repo_path)
 
-    def test_fetch_blame_handles_errors_gracefully(self, repo_path, repo_uuid, git_repo, capsys):
+    def test_fetch_blame_handles_errors_gracefully(
+        self, repo_path, repo_uuid, git_repo, capsys
+    ):
         """Test that fetch_blame handles errors and prints message."""
         # Try to process a non-existent file
         blame_data = GitBlameMixin.fetch_blame(
             repo_path,
             os.path.join(repo_path, "nonexistent_file.xyz"),
             repo_uuid,
-            repo=git_repo
+            repo=git_repo,
         )
 
         # Should return empty list on error
@@ -101,7 +103,9 @@ class TestGitBlameProcessFile:
             assert blame_objects[0].line_no >= 1
             assert blame_objects[0].path is not None
 
-    def test_process_file_with_repo_param(self, repo_path, test_file, repo_uuid, git_repo):
+    def test_process_file_with_repo_param(
+        self, repo_path, test_file, repo_uuid, git_repo
+    ):
         """Test process_file reuses provided Repo instance."""
         blame_objects = GitBlame.process_file(
             repo_path, test_file, repo_uuid, repo=git_repo
@@ -163,7 +167,9 @@ class TestGitBlameProcessFile:
 class TestRepoInstanceReuse:
     """Integration tests for repo instance reuse across multiple files."""
 
-    def test_single_repo_instance_for_multiple_files(self, repo_path, repo_uuid, git_repo):
+    def test_single_repo_instance_for_multiple_files(
+        self, repo_path, repo_uuid, git_repo
+    ):
         """Test that a single repo instance can be used for multiple files."""
         # Get a few files from the repo
         test_files = [

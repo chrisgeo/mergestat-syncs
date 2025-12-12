@@ -3,6 +3,7 @@ Tests for GitLab connector new features.
 """
 
 from unittest.mock import Mock, patch
+
 import pytest
 
 from connectors import GitLabConnector
@@ -47,7 +48,9 @@ class TestGitLabConnectorProjects:
         mock_gitlab_instance.groups.get.return_value = mock_group
 
         # Test
-        connector = GitLabConnector(url="https://gitlab.com", private_token="test_token")
+        connector = GitLabConnector(
+            url="https://gitlab.com", private_token="test_token"
+        )
         projects = connector.list_projects(group_name="mygroup", max_projects=10)
 
         # Assert
@@ -76,7 +79,9 @@ class TestGitLabConnectorProjects:
         mock_gitlab_instance.projects.list.return_value = [mock_project]
 
         # Test
-        connector = GitLabConnector(url="https://gitlab.com", private_token="test_token")
+        connector = GitLabConnector(
+            url="https://gitlab.com", private_token="test_token"
+        )
         projects = connector.list_projects(search="docker", max_projects=10)
 
         # Assert
@@ -86,7 +91,9 @@ class TestGitLabConnectorProjects:
         call_kwargs = mock_gitlab_instance.projects.list.call_args[1]
         assert call_kwargs["search"] == "docker"
 
-    def test_list_projects_search_within_group(self, mock_gitlab_client, mock_rest_client):
+    def test_list_projects_search_within_group(
+        self, mock_gitlab_client, mock_rest_client
+    ):
         """Test searching projects within a group."""
         # Setup mock
         mock_project = Mock()
@@ -110,8 +117,12 @@ class TestGitLabConnectorProjects:
         mock_gitlab_instance.groups.get.return_value = mock_group
 
         # Test
-        connector = GitLabConnector(url="https://gitlab.com", private_token="test_token")
-        projects = connector.list_projects(group_name="mygroup", search="api", max_projects=10)
+        connector = GitLabConnector(
+            url="https://gitlab.com", private_token="test_token"
+        )
+        projects = connector.list_projects(
+            group_name="mygroup", search="api", max_projects=10
+        )
 
         # Assert
         assert len(projects) == 1
@@ -143,7 +154,9 @@ class TestGitLabConnectorProjects:
         mock_gitlab_instance.projects.list.return_value = mock_projects
 
         # Test - no max_projects specified
-        connector = GitLabConnector(url="https://gitlab.com", private_token="test_token")
+        connector = GitLabConnector(
+            url="https://gitlab.com", private_token="test_token"
+        )
         projects = connector.list_projects()
 
         # Assert - all projects should be returned
@@ -178,7 +191,9 @@ class TestGitLabConnectorProjects:
         mock_gitlab_instance.groups.get.return_value = mock_group
 
         # Test - using old group_id parameter
-        connector = GitLabConnector(url="https://gitlab.com", private_token="test_token")
+        connector = GitLabConnector(
+            url="https://gitlab.com", private_token="test_token"
+        )
         projects = connector.list_projects(group_id=123)
 
         # Assert
@@ -186,7 +201,9 @@ class TestGitLabConnectorProjects:
         assert projects[0].name == "legacy-project"
         mock_gitlab_instance.groups.get.assert_called_once_with(123)
 
-    def test_get_contributors_with_project_name(self, mock_gitlab_client, mock_rest_client):
+    def test_get_contributors_with_project_name(
+        self, mock_gitlab_client, mock_rest_client
+    ):
         """Test getting contributors using project name."""
         # Setup mock
         mock_project = Mock()
@@ -212,7 +229,9 @@ class TestGitLabConnectorProjects:
         assert contributors[0].username == "User 1"
         mock_gitlab_instance.projects.get.assert_called_once_with("mygroup/myproject")
 
-    def test_get_merge_requests_with_project_name(self, mock_gitlab_client, mock_rest_client):
+    def test_get_merge_requests_with_project_name(
+        self, mock_gitlab_client, mock_rest_client
+    ):
         """Test getting merge requests using project name."""
         # Setup mock
         mock_project = Mock()
@@ -235,14 +254,14 @@ class TestGitLabConnectorProjects:
                         "id": 1,
                         "username": "user1",
                         "name": "User 1",
-                        "web_url": "https://gitlab.com/user1"
+                        "web_url": "https://gitlab.com/user1",
                     },
                     "created_at": "2023-01-01T00:00:00Z",
                     "target_branch": "main",
                     "source_branch": "feature",
                 }
             ],
-            []  # Empty list to stop pagination
+            [],  # Empty list to stop pagination
         ]
 
         # Test

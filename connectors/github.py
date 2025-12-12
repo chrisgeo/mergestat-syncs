@@ -11,21 +11,11 @@ from typing import List, Optional
 
 from github import Github, GithubException, RateLimitExceededException
 
-from connectors.exceptions import (
-    APIException,
-    AuthenticationException,
-    RateLimitException,
-)
-from connectors.models import (
-    Author,
-    BlameRange,
-    CommitStats,
-    FileBlame,
-    Organization,
-    PullRequest,
-    RepoStats,
-    Repository,
-)
+from connectors.exceptions import (APIException, AuthenticationException,
+                                   RateLimitException)
+from connectors.models import (Author, BlameRange, CommitStats, FileBlame,
+                               Organization, PullRequest, Repository,
+                               RepoStats)
 from connectors.utils import GitHubGraphQLClient, retry_with_backoff
 
 logger = logging.getLogger(__name__)

@@ -12,21 +12,11 @@ from typing import List, Optional
 import gitlab
 from gitlab.exceptions import GitlabAuthenticationError, GitlabError
 
-from connectors.exceptions import (
-    APIException,
-    AuthenticationException,
-    RateLimitException,
-)
-from connectors.models import (
-    Author,
-    BlameRange,
-    CommitStats,
-    FileBlame,
-    Organization,
-    PullRequest,
-    RepoStats,
-    Repository,
-)
+from connectors.exceptions import (APIException, AuthenticationException,
+                                   RateLimitException)
+from connectors.models import (Author, BlameRange, CommitStats, FileBlame,
+                               Organization, PullRequest, Repository,
+                               RepoStats)
 from connectors.utils import GitLabRESTClient, retry_with_backoff
 
 logger = logging.getLogger(__name__)
@@ -168,12 +158,9 @@ class GitLabConnector:
             projects = []
 
             # Build common list parameters
-            list_params = {
-                'per_page': self.per_page,
-                'get_all': (max_projects is None)
-            }
+            list_params = {"per_page": self.per_page, "get_all": (max_projects is None)}
             if search:
-                list_params['search'] = search
+                list_params["search"] = search
 
             # Determine source and fetch projects
             if group_name or group_id:
@@ -601,7 +588,9 @@ class GitLabConnector:
             actual_project_id = project_id
 
         try:
-            blame_data = self.rest_client.get_file_blame(actual_project_id, file_path, ref)
+            blame_data = self.rest_client.get_file_blame(
+                actual_project_id, file_path, ref
+            )
 
             ranges = []
             current_line = 1

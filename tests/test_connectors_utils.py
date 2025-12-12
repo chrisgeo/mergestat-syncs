@@ -7,7 +7,8 @@ import time
 
 import pytest
 
-from connectors.utils.pagination import AsyncPaginationHandler, PaginationHandler
+from connectors.utils.pagination import (AsyncPaginationHandler,
+                                         PaginationHandler)
 from connectors.utils.retry import RateLimiter, retry_with_backoff
 
 
@@ -84,9 +85,7 @@ class TestRetryDecorator:
         """Test retry on exception."""
         call_count = [0]
 
-        @retry_with_backoff(
-            max_retries=3, initial_delay=0.01, exceptions=(ValueError,)
-        )
+        @retry_with_backoff(max_retries=3, initial_delay=0.01, exceptions=(ValueError,))
         def failing_func():
             call_count[0] += 1
             if call_count[0] < 3:
@@ -100,9 +99,7 @@ class TestRetryDecorator:
     def test_max_retries_exceeded(self):
         """Test exceeding max retries."""
 
-        @retry_with_backoff(
-            max_retries=2, initial_delay=0.01, exceptions=(ValueError,)
-        )
+        @retry_with_backoff(max_retries=2, initial_delay=0.01, exceptions=(ValueError,))
         def always_fail():
             raise ValueError("Always fails")
 

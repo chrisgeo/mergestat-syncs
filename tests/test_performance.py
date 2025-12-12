@@ -8,13 +8,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from git_mergestat import (
-    process_git_blame,
-    process_git_commit_stats,
-    process_git_commits,
-    process_git_files,
-    process_single_file_blame,
-)
+from git_mergestat import (process_git_blame, process_git_commit_stats,
+                           process_git_commits, process_git_files,
+                           process_single_file_blame)
 
 
 class TestBatchSizeConfiguration:

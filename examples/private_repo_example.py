@@ -20,7 +20,8 @@ import traceback
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from connectors import GitHubConnector, GitLabConnector  # noqa: E402
-from connectors.exceptions import APIException, AuthenticationException  # noqa: E402
+from connectors.exceptions import (APIException,  # noqa: E402
+                                   AuthenticationException)
 
 
 def test_github_private_repo():
@@ -69,9 +70,7 @@ def test_github_private_repo():
 
         if not found:
             print(f"   ⚠️  Private repository {private_repo} not found in user's repos")
-            print(
-                "   This might mean the token doesn't have access to this repository"
-            )
+            print("   This might mean the token doesn't have access to this repository")
 
         # Test 2: Get repository statistics
         print("\n2. Fetching repository statistics...")

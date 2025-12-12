@@ -24,9 +24,7 @@ except ImportError:
     ConnectorException = Exception
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
 
 # === CONFIGURATION ===
 # The line `REPO_PATH = os.getenv("REPO_PATH", ".")` retrieves the value of
@@ -383,7 +381,7 @@ async def process_git_blame(
     # Process files in chunks to manage memory
     chunk_size = BATCH_SIZE
     for i in range(0, len(all_files), chunk_size):
-        chunk = all_files[i : i + chunk_size]
+        chunk = all_files[i: i + chunk_size]
 
         # Process chunk in parallel
         # Note: Each worker creates its own Repo instance for thread-safety
@@ -532,11 +530,12 @@ async def process_github_repo(
     connector = GitHubConnector(token=token)
     try:
         # Get repository information directly using full name
-        logging.info(f"Fetching repository information...")
+        logging.info("Fetching repository information...")
         gh_repo = connector.github.get_repo(f"{owner}/{repo_name}")
-        
+
         # Convert to our Repository model
         from connectors.models import Repository
+
         repo_info = Repository(
             id=gh_repo.id,
             name=gh_repo.name,

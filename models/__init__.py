@@ -1,11 +1,5 @@
-from .git import (  # noqa: F401
-    GitBlame,
-    GitBlameMixin,
-    GitCommit,
-    GitCommitStat,
-    GitFile,
-    Repo,
-)
+from .git import (GitBlame, GitBlameMixin, GitCommit,  # noqa: F401
+                  GitCommitStat, GitFile, Repo)
 
 __all__ = [
     "GitBlame",
