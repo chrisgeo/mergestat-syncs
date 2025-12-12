@@ -322,20 +322,13 @@ class TestPrivateRepoTokenValidation:
         """Test that GitLab connector fails gracefully with invalid token."""
         invalid_token = "glpat-invalid_token_1234567890"
         
-        # GitLab connector may not fail at initialization
-        connector = GitLabConnector(
-            url="https://gitlab.com",
-            private_token=invalid_token
-        )
+        print("\nTesting GitLab with invalid token...")
         
-        try:
-            # Attempt to list projects with invalid token
-            print("\nTesting GitLab with invalid token...")
-            
-            with pytest.raises((AuthenticationException, APIException)) as exc_info:
-                connector.list_projects(max_projects=1)
-            
-            print(f"  ✓ Correctly raised exception: {type(exc_info.value).__name__}")
-            
-        finally:
-            connector.close()
+        # GitLab connector validates token at initialization
+        with pytest.raises((AuthenticationException, APIException)) as exc_info:
+            connector = GitLabConnector(
+                url="https://gitlab.com",
+                private_token=invalid_token
+            )
+        
+        print(f"  ✓ Correctly raised exception at initialization: {type(exc_info.value).__name__}")
