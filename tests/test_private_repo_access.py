@@ -43,6 +43,8 @@ class TestGitHubPrivateRepoAccess:
             )
 
         # Parse owner and repo
+        owner = None
+        repo_name = None
         try:
             owner, repo_name = private_repo.split("/")
         except ValueError:
