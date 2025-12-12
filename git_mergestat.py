@@ -381,7 +381,7 @@ async def process_git_blame(
     # Process files in chunks to manage memory
     chunk_size = BATCH_SIZE
     for i in range(0, len(all_files), chunk_size):
-        chunk = all_files[i: i + chunk_size]
+        chunk = all_files[i : i + chunk_size]
 
         # Process chunk in parallel
         # Note: Each worker creates its own Repo instance for thread-safety
@@ -786,8 +786,8 @@ def parse_args():
     parser.add_argument(
         "--db-type",
         required=False,
-        choices=["postgres", "mongo"],
-        help="Database backend to use (postgres or mongo).",
+        choices=["postgres", "mongo", "sqlite"],
+        help="Database backend to use (postgres, mongo, or sqlite).",
     )
     parser.add_argument(
         "--start-date",
@@ -854,8 +854,8 @@ async def main() -> None:
     if args.db_type:
         DB_TYPE = args.db_type.lower()
 
-    if DB_TYPE not in {"postgres", "mongo"}:
-        raise ValueError("DB_TYPE must be either 'postgres' or 'mongo'")
+    if DB_TYPE not in {"postgres", "mongo", "sqlite"}:
+        raise ValueError("DB_TYPE must be 'postgres', 'mongo', or 'sqlite'")
     if not DB_CONN_STRING:
         raise ValueError(
             "Database connection string is required (set DB_CONN_STRING or use --db)"
@@ -877,6 +877,7 @@ async def main() -> None:
     if DB_TYPE == "mongo":
         store: DataStore = MongoStore(DB_CONN_STRING, db_name=MONGO_DB_NAME)
     else:
+        # Both postgres and sqlite use SQLAlchemyStore
         store = SQLAlchemyStore(DB_CONN_STRING, echo=DB_ECHO)
 
     async with store as storage:

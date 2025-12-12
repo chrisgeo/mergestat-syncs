@@ -1222,3 +1222,307 @@ class TestMongoStoreMultipleRepos:
             if doc.get("repo_id") == str(repo2_id)
         ]
         assert len(repo2_commits) == 3
+
+
+# SQLite-specific Tests
+
+
+class TestSQLiteAsyncStorage:
+    """Test SQLite async storage specific functionality."""
+
+    @pytest.fixture
+    def sqlite_memory_url(self):
+        """Return a SQLite in-memory database URL for testing."""
+        return "sqlite+aiosqlite:///:memory:"
+
+    @pytest.fixture
+    def sqlite_file_url(self, tmp_path):
+        """Return a SQLite file-based database URL for testing."""
+        db_path = tmp_path / "test_mergestat.db"
+        return f"sqlite+aiosqlite:///{db_path}"
+
+    @pytest_asyncio.fixture
+    async def sqlite_memory_store(self, sqlite_memory_url):
+        """Create a SQLAlchemyStore instance with an in-memory SQLite database."""
+        store = SQLAlchemyStore(sqlite_memory_url)
+
+        # Create tables
+        async with store.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        yield store
+
+        # Cleanup
+        async with store.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+        await store.engine.dispose()
+
+    @pytest_asyncio.fixture
+    async def sqlite_file_store(self, sqlite_file_url):
+        """Create a SQLAlchemyStore instance with a file-based SQLite database."""
+        store = SQLAlchemyStore(sqlite_file_url)
+
+        # Create tables
+        async with store.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        yield store
+
+        # Cleanup
+        async with store.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+        await store.engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_sqlite_memory_store_connection_string_detection(
+        self, sqlite_memory_url
+    ):
+        """Test that SQLite connection strings are correctly identified."""
+        store = SQLAlchemyStore(sqlite_memory_url)
+
+        # SQLite should not have pool_size configured (uses StaticPool by default)
+        engine = store.engine
+        assert "sqlite" in str(engine.url).lower()
+        await store.engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_sqlite_file_store_connection_string_detection(self, sqlite_file_url):
+        """Test that SQLite file-based connection strings are correctly identified."""
+        store = SQLAlchemyStore(sqlite_file_url)
+
+        engine = store.engine
+        assert "sqlite" in str(engine.url).lower()
+        await store.engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_sqlite_memory_store_insert_and_query(self, sqlite_memory_store):
+        """Test inserting and querying data with SQLite in-memory database."""
+        test_repo = Repo(
+            id=uuid.uuid4(),
+            repo="https://github.com/test/sqlite-test.git",
+            ref="main",
+            settings={},
+            tags=[],
+        )
+
+        async with sqlite_memory_store as store:
+            await store.insert_repo(test_repo)
+
+            # Verify the repo was inserted
+            result = await store.session.execute(
+                select(Repo).where(Repo.id == test_repo.id)
+            )
+            saved_repo = result.scalar_one_or_none()
+
+            assert saved_repo is not None
+            assert saved_repo.id == test_repo.id
+            assert saved_repo.repo == "https://github.com/test/sqlite-test.git"
+
+    @pytest.mark.asyncio
+    async def test_sqlite_file_store_insert_and_query(self, sqlite_file_store):
+        """Test inserting and querying data with SQLite file database."""
+        test_repo = Repo(
+            id=uuid.uuid4(),
+            repo="https://github.com/test/sqlite-file-test.git",
+            ref="develop",
+            settings={"source": "test"},
+            tags=["test"],
+        )
+
+        async with sqlite_file_store as store:
+            await store.insert_repo(test_repo)
+
+            # Verify the repo was inserted
+            result = await store.session.execute(
+                select(Repo).where(Repo.id == test_repo.id)
+            )
+            saved_repo = result.scalar_one_or_none()
+
+            assert saved_repo is not None
+            assert saved_repo.id == test_repo.id
+            assert saved_repo.repo == "https://github.com/test/sqlite-file-test.git"
+
+    @pytest.mark.asyncio
+    async def test_sqlite_store_insert_all_data_types(self, sqlite_memory_store):
+        """Test inserting all data types (commits, files, stats, blame) into SQLite."""
+        test_repo_id = uuid.uuid4()
+        test_repo = Repo(
+            id=test_repo_id,
+            repo="https://github.com/test/all-types.git",
+            ref="main",
+            settings={},
+            tags=[],
+        )
+
+        file_data = [
+            GitFile(
+                repo_id=test_repo_id,
+                path="src/main.py",
+                executable=False,
+                contents="print('hello')",
+            ),
+        ]
+
+        commit_data = [
+            GitCommit(
+                repo_id=test_repo_id,
+                hash="abc123def456",
+                message="Initial commit",
+                author_name="Test Author",
+                author_email="test@example.com",
+                author_when=datetime(2024, 1, 1, tzinfo=timezone.utc),
+                committer_name="Test Committer",
+                committer_email="committer@example.com",
+                committer_when=datetime(2024, 1, 1, tzinfo=timezone.utc),
+                parents=0,
+            ),
+        ]
+
+        commit_stats = [
+            GitCommitStat(
+                repo_id=test_repo_id,
+                commit_hash="abc123def456",
+                file_path="src/main.py",
+                additions=10,
+                deletions=0,
+                old_file_mode="100644",
+                new_file_mode="100644",
+            ),
+        ]
+
+        blame_data = [
+            GitBlame(
+                repo_id=test_repo_id,
+                path="src/main.py",
+                line_no=1,
+                author_email="test@example.com",
+                author_name="Test Author",
+                author_when=datetime(2024, 1, 1, tzinfo=timezone.utc),
+                commit_hash="abc123def456",
+                line="print('hello')",
+            ),
+        ]
+
+        async with sqlite_memory_store as store:
+            # Insert all data types
+            await store.insert_repo(test_repo)
+            await store.insert_git_file_data(file_data)
+            await store.insert_git_commit_data(commit_data)
+            await store.insert_git_commit_stats(commit_stats)
+            await store.insert_blame_data(blame_data)
+
+            # Verify all data was inserted
+            repo_result = await store.session.execute(
+                select(Repo).where(Repo.id == test_repo_id)
+            )
+            assert repo_result.scalar_one_or_none() is not None
+
+            file_result = await store.session.execute(
+                select(GitFile).where(GitFile.repo_id == test_repo_id)
+            )
+            assert len(file_result.scalars().all()) == 1
+
+            commit_result = await store.session.execute(
+                select(GitCommit).where(GitCommit.repo_id == test_repo_id)
+            )
+            assert len(commit_result.scalars().all()) == 1
+
+            stats_result = await store.session.execute(
+                select(GitCommitStat).where(GitCommitStat.repo_id == test_repo_id)
+            )
+            assert len(stats_result.scalars().all()) == 1
+
+            blame_result = await store.session.execute(
+                select(GitBlame).where(GitBlame.repo_id == test_repo_id)
+            )
+            assert len(blame_result.scalars().all()) == 1
+
+    @pytest.mark.asyncio
+    async def test_sqlite_store_no_connection_pooling_params(self, sqlite_memory_url):
+        """Test that SQLite stores don't use PostgreSQL-specific pooling params."""
+        store = SQLAlchemyStore(sqlite_memory_url)
+
+        # The engine should be created without pool_size, max_overflow params
+        # which are PostgreSQL-specific
+        engine = store.engine
+
+        # Verify the engine was created successfully
+        assert engine is not None
+
+        # SQLite connections should work
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        await store.engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_sqlite_store_multiple_sessions(self, sqlite_file_url):
+        """Test that multiple sessions can be created with SQLite file store."""
+        store = SQLAlchemyStore(sqlite_file_url)
+
+        # Create tables
+        async with store.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        test_repo = Repo(
+            id=uuid.uuid4(),
+            repo="https://github.com/test/multi-session.git",
+            ref="main",
+            settings={},
+            tags=[],
+        )
+
+        # First session - insert data
+        async with store as s1:
+            await s1.insert_repo(test_repo)
+
+        # Second session - verify data persists
+        async with store as s2:
+            result = await s2.session.execute(
+                select(Repo).where(Repo.id == test_repo.id)
+            )
+            saved_repo = result.scalar_one_or_none()
+            assert saved_repo is not None
+            assert saved_repo.id == test_repo.id
+
+        # Cleanup
+        async with store.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+        await store.engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_sqlite_store_concurrent_inserts(self, sqlite_memory_store):
+        """Test that concurrent inserts work correctly with SQLite."""
+        test_repo_id = uuid.uuid4()
+        test_repo = Repo(
+            id=test_repo_id,
+            repo="https://github.com/test/concurrent.git",
+            ref="main",
+            settings={},
+            tags=[],
+        )
+
+        async with sqlite_memory_store as store:
+            await store.insert_repo(test_repo)
+
+            # Create multiple files to insert concurrently
+            files = [
+                GitFile(
+                    repo_id=test_repo_id,
+                    path=f"file{i}.txt",
+                    executable=False,
+                    contents=f"content{i}",
+                )
+                for i in range(10)
+            ]
+
+            # Insert in batches
+            await store.insert_git_file_data(files[:5])
+            await store.insert_git_file_data(files[5:])
+
+            # Verify all files were inserted
+            result = await store.session.execute(
+                select(GitFile).where(GitFile.repo_id == test_repo_id)
+            )
+            saved_files = result.scalars().all()
+            assert len(saved_files) == 10
