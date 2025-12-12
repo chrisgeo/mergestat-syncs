@@ -167,48 +167,23 @@ class GitLabConnector:
         try:
             projects = []
 
-            # Determine which method to use for fetching projects
-            if group_name:
-                # Get group by name/path and list its projects
-                group = self.gitlab.groups.get(group_name)
-                if search:
-                    gl_projects = group.projects.list(
-                        per_page=self.per_page,
-                        get_all=(max_projects is None),
-                        search=search
-                    )
-                else:
-                    gl_projects = group.projects.list(
-                        per_page=self.per_page,
-                        get_all=(max_projects is None)
-                    )
-            elif group_id:
-                # Get group by ID and list its projects
-                group = self.gitlab.groups.get(group_id)
-                if search:
-                    gl_projects = group.projects.list(
-                        per_page=self.per_page,
-                        get_all=(max_projects is None),
-                        search=search
-                    )
-                else:
-                    gl_projects = group.projects.list(
-                        per_page=self.per_page,
-                        get_all=(max_projects is None)
-                    )
+            # Build common list parameters
+            list_params = {
+                'per_page': self.per_page,
+                'get_all': (max_projects is None)
+            }
+            if search:
+                list_params['search'] = search
+
+            # Determine source and fetch projects
+            if group_name or group_id:
+                # Get group by name or ID and list its projects
+                group_identifier = group_name if group_name else group_id
+                group = self.gitlab.groups.get(group_identifier)
+                gl_projects = group.projects.list(**list_params)
             else:
                 # List all accessible projects
-                if search:
-                    gl_projects = self.gitlab.projects.list(
-                        per_page=self.per_page,
-                        get_all=(max_projects is None),
-                        search=search
-                    )
-                else:
-                    gl_projects = self.gitlab.projects.list(
-                        per_page=self.per_page,
-                        get_all=(max_projects is None)
-                    )
+                gl_projects = self.gitlab.projects.list(**list_params)
 
             for gl_project in gl_projects:
                 if max_projects and len(projects) >= max_projects:
