@@ -152,31 +152,24 @@ class GitHubConnector:
         try:
             repos = []
 
-            # Handle search-based repository listing
+            # Determine the appropriate API method and parameters
             if search:
-                # Use GitHub's search API with qualifiers for scoped searches
+                # Build search query with optional scope qualifiers
+                query_parts = [search]
                 if org_name:
-                    # Search within organization
-                    search_query = f"{search} org:{org_name}"
+                    query_parts.append(f"org:{org_name}")
                 elif user_name:
-                    # Search within user's repositories
-                    search_query = f"{search} user:{user_name}"
-                else:
-                    # Global search across all GitHub
-                    search_query = search
-                gh_repos = self.github.search_repositories(query=search_query)
-            elif org_name:
-                # Organization repositories (no search)
-                source = self.github.get_organization(org_name)
-                gh_repos = source.get_repos()
-            elif user_name:
-                # Specific user repositories (no search)
-                source = self.github.get_user(user_name)
-                gh_repos = source.get_repos()
+                    query_parts.append(f"user:{user_name}")
+                gh_repos = self.github.search_repositories(query=" ".join(query_parts))
             else:
-                # Authenticated user's repositories
-                user = self.github.get_user()
-                gh_repos = user.get_repos()
+                # Fetch repositories without search
+                if org_name:
+                    source = self.github.get_organization(org_name)
+                elif user_name:
+                    source = self.github.get_user(user_name)
+                else:
+                    source = self.github.get_user()
+                gh_repos = source.get_repos()
 
             for gh_repo in gh_repos:
                 if max_repos and len(repos) >= max_repos:
