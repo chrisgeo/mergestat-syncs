@@ -176,11 +176,13 @@ class TestGitLabPrivateProjectAccess:
             print(f"\nTest 1: Fetching private project {private_project}...")
             
             # Try to get the project (works with both name and ID)
+            # Note: This is a direct python-gitlab API call, not wrapped by connector
             try:
                 project = connector.gitlab.projects.get(private_project)
                 print(f"  ✓ Successfully accessed private project: {project.name}")
                 project_identifier = private_project
-            except (APIException, AuthenticationException) as e:
+            except Exception as e:
+                # python-gitlab can raise various exceptions (GitlabAuthenticationError, GitlabGetError, etc.)
                 pytest.fail(f"Failed to access private project {private_project}: {e}")
             
             # Test 2: List projects (should include private ones)

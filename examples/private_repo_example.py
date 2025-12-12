@@ -149,10 +149,12 @@ def test_gitlab_private_project():
         # Test 1: Get project details
         print("\n1. Fetching project details...")
         try:
+            # Direct python-gitlab API call to verify basic access
             project = connector.gitlab.projects.get(private_project)
             print(f"   ✅ Found project: {project.name}")
             print(f"   ✅ Full path: {project.path_with_namespace if hasattr(project, 'path_with_namespace') else 'N/A'}")
         except Exception as e:
+            # python-gitlab can raise various exceptions depending on the error
             print(f"   ❌ Failed to access project: {e}")
             return False
         

@@ -146,7 +146,7 @@ Both connectors fully support private repositories/projects when provided with t
 from connectors import GitHubConnector
 
 # Initialize with token that has 'repo' scope
-connector = GitHubConnector(token="ghp_your_token_with_repo_scope")
+connector = GitHubConnector(token="ghp_XXXXXXXXXXXXXXXXXXXX")
 
 # List authenticated user's repositories (includes private repos)
 my_repos = connector.list_repositories(max_repos=50)
@@ -180,7 +180,7 @@ from connectors import GitLabConnector
 # Initialize with token that has appropriate permissions
 connector = GitLabConnector(
     url="https://gitlab.com",
-    private_token="glpat_your_token_with_read_api_scope"
+    private_token="glpat-XXXXXXXXXXXXXXXXXXXX"
 )
 
 # List all accessible projects (includes private projects)
