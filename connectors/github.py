@@ -218,6 +218,10 @@ class GitHubConnector:
                 if max_repos and len(repos) >= max_repos:
                     break
 
+                # Apply pattern filter early to avoid unnecessary object creation
+                if pattern and not match_repo_pattern(gh_repo.full_name, pattern):
+                    continue
+
                 repo = Repository(
                     id=gh_repo.id,
                     name=gh_repo.name,
@@ -232,19 +236,11 @@ class GitHubConnector:
                     forks=gh_repo.forks_count,
                 )
 
-                # Apply pattern filter if specified
-                if pattern and not match_repo_pattern(repo.full_name, pattern):
-                    continue
-
                 repos.append(repo)
                 logger.debug(f"Retrieved repository: {repo.full_name}")
 
-            if pattern:
-                logger.info(
-                    f"Retrieved {len(repos)} repositories matching pattern '{pattern}'"
-                )
-            else:
-                logger.info(f"Retrieved {len(repos)} repositories")
+            pattern_msg = f" matching pattern '{pattern}'" if pattern else ""
+            logger.info(f"Retrieved {len(repos)} repositories{pattern_msg}")
             return repos
 
         except Exception as e:
