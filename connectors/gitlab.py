@@ -339,16 +339,16 @@ class GitLabConnector:
     )
     def get_commit_stats(
         self,
+        sha: str,
         project_id: Optional[int] = None,
         project_name: Optional[str] = None,
-        sha: str = "",
     ) -> CommitStats:
         """
         Get statistics for a specific commit.
 
+        :param sha: Commit SHA.
         :param project_id: GitLab project ID (deprecated, use project_name).
         :param project_name: GitLab project name/path (e.g., 'group/project').
-        :param sha: Commit SHA.
         :return: CommitStats object.
         """
         # Use project_name if provided, otherwise fall back to project_id
@@ -596,17 +596,17 @@ class GitLabConnector:
     )
     def get_file_blame(
         self,
+        file_path: str,
         project_id: Optional[int] = None,
         project_name: Optional[str] = None,
-        file_path: str = "",
         ref: str = "main",
     ) -> FileBlame:
         """
         Get blame information for a file using GitLab REST API.
 
+        :param file_path: File path within the repository.
         :param project_id: GitLab project ID (deprecated, use project_name).
         :param project_name: GitLab project name/path (e.g., 'group/project').
-        :param file_path: File path within the repository.
         :param ref: Git reference (branch, tag, or commit SHA).
         :return: FileBlame object.
         """

@@ -169,13 +169,16 @@ class GitHubConnector:
                 user = self.github.get_user()
                 gh_repos = user.get_repos()
 
+            # Determine if we need client-side filtering
+            # (only needed when search is specified but not using global search API)
+            needs_filtering = search and (org_name or user_name)
+
             for gh_repo in gh_repos:
                 if max_repos and len(repos) >= max_repos:
                     break
 
-                # Apply search filter if specified and not using global search
-                if search and (org_name or user_name or (not org_name and not user_name)):
-                    # For scoped searches, filter by name/description containing search term
+                # Apply client-side search filter for scoped searches
+                if needs_filtering:
                     search_lower = search.lower()
                     name_match = (
                         gh_repo.name and search_lower in gh_repo.name.lower()
