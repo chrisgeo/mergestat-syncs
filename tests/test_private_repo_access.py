@@ -8,7 +8,7 @@ SKIP_INTEGRATION_TESTS=1 or if no private repository is configured.
 Environment Variables:
     GITHUB_TOKEN: GitHub personal access token with 'repo' scope
     GITHUB_PRIVATE_REPO: GitHub private repo in format 'owner/repo'
-    GITLAB_TOKEN: GitLab private token with 'read_repository' scope
+    GITLAB_TOKEN: GitLab private token with 'read_api' and 'read_repository' scopes
     GITLAB_PRIVATE_PROJECT: GitLab private project name/path or ID
     SKIP_INTEGRATION_TESTS: Set to '1' to skip all integration tests
 """
@@ -43,8 +43,7 @@ class TestGitHubPrivateRepoAccess:
             )
 
         # Parse owner and repo
-        owner = None
-        repo_name = None
+
         try:
             owner, repo_name = private_repo.split("/")
         except ValueError:
