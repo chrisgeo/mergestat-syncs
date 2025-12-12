@@ -180,7 +180,7 @@ class TestGitLabPrivateProjectAccess:
                 project = connector.gitlab.projects.get(private_project)
                 print(f"  ✓ Successfully accessed private project: {project.name}")
                 project_identifier = private_project
-            except Exception as e:
+            except (APIException, AuthenticationException) as e:
                 pytest.fail(f"Failed to access private project {private_project}: {e}")
             
             # Test 2: List projects (should include private ones)
@@ -194,7 +194,7 @@ class TestGitLabPrivateProjectAccess:
             print(f"\nTest 3: Fetching stats for private project...")
             try:
                 stats = connector.get_repo_stats(project_name=project_identifier, max_commits=10)
-            except Exception:
+            except APIException:
                 # Fallback to project_id if project_name doesn't work
                 if str(private_project).isdigit():
                     stats = connector.get_repo_stats(project_id=int(private_project), max_commits=10)
@@ -208,7 +208,7 @@ class TestGitLabPrivateProjectAccess:
             print(f"\nTest 4: Fetching contributors for private project...")
             try:
                 contributors = connector.get_contributors(project_name=project_identifier, max_contributors=5)
-            except Exception:
+            except APIException:
                 if str(private_project).isdigit():
                     contributors = connector.get_contributors(project_id=int(private_project), max_contributors=5)
                 else:
@@ -221,7 +221,7 @@ class TestGitLabPrivateProjectAccess:
             print(f"\nTest 5: Fetching merge requests for private project...")
             try:
                 mrs = connector.get_merge_requests(project_name=project_identifier, state="all", max_mrs=5)
-            except Exception:
+            except APIException:
                 if str(private_project).isdigit():
                     mrs = connector.get_merge_requests(project_id=int(private_project), state="all", max_mrs=5)
                 else:
