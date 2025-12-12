@@ -291,6 +291,28 @@ pytest tests/test_connectors_models.py -v
 pytest tests/test_connectors_*.py --cov=connectors --cov-report=html
 ```
 
+### Integration Tests
+
+Integration tests make real API calls to GitHub and GitLab to fetch public repositories:
+
+```bash
+# Run integration tests (requires GITHUB_TOKEN for GitHub tests)
+export GITHUB_TOKEN=your_github_token
+export GITLAB_TOKEN=your_gitlab_token  # Optional, GitLab tests work without token
+pytest tests/test_connectors_integration.py -v
+
+# Skip integration tests in CI/CD
+export SKIP_INTEGRATION_TESTS=1
+pytest tests/test_connectors_integration.py -v
+```
+
+Integration tests verify:
+- Fetching first 10 public repositories from GitHub organizations and users
+- Searching repositories on GitHub
+- Fetching first 10 public projects from GitLab
+- Fetching projects from GitLab groups
+- Searching projects on GitLab
+
 ## Integration with Existing Storage
 
 The connectors can be integrated with the existing storage system:
