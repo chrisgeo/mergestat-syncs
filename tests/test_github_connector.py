@@ -85,7 +85,7 @@ class TestGitHubConnectorRepositories:
 
     def test_list_repositories_search_within_org(self, mock_github_client, mock_graphql_client):
         """Test searching repositories within an organization."""
-        # Setup mock
+        # Setup mock - now using search_repositories API
         mock_repo1 = Mock()
         mock_repo1.id = 1
         mock_repo1.name = "api-service"
@@ -99,33 +99,20 @@ class TestGitHubConnectorRepositories:
         mock_repo1.stargazers_count = 10
         mock_repo1.forks_count = 5
 
-        mock_repo2 = Mock()
-        mock_repo2.id = 2
-        mock_repo2.name = "web-frontend"
-        mock_repo2.full_name = "myorg/web-frontend"
-        mock_repo2.default_branch = "main"
-        mock_repo2.description = "Web frontend"
-        mock_repo2.html_url = "https://github.com/myorg/web-frontend"
-        mock_repo2.created_at = None
-        mock_repo2.updated_at = None
-        mock_repo2.language = "JavaScript"
-        mock_repo2.stargazers_count = 5
-        mock_repo2.forks_count = 2
-
-        mock_org = Mock()
-        mock_org.get_repos.return_value = [mock_repo1, mock_repo2]
-
         mock_github_instance = mock_github_client.return_value
-        mock_github_instance.get_organization.return_value = mock_org
+        # When search is provided with org_name, it uses search_repositories
+        mock_github_instance.search_repositories.return_value = [mock_repo1]
 
         # Test - search for "api" within org
         connector = GitHubConnector(token="test_token")
         repos = connector.list_repositories(org_name="myorg", search="api", max_repos=10)
 
-        # Assert - only api-service should match
+        # Assert - API search was called with correct query
         assert len(repos) == 1
         assert repos[0].name == "api-service"
-        mock_github_instance.get_organization.assert_called_once_with("myorg")
+        mock_github_instance.search_repositories.assert_called_once_with(
+            query="api org:myorg"
+        )
 
     def test_list_all_repositories_no_limit(self, mock_github_client, mock_graphql_client):
         """Test listing all repositories without max_repos limit."""

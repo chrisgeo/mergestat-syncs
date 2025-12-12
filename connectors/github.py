@@ -153,15 +153,24 @@ class GitHubConnector:
             repos = []
 
             # Handle search-based repository listing
-            if search and not org_name and not user_name:
-                # Global search across all GitHub
-                gh_repos = self.github.search_repositories(query=search)
+            if search:
+                # Use GitHub's search API with qualifiers for scoped searches
+                if org_name:
+                    # Search within organization
+                    search_query = f"{search} org:{org_name}"
+                elif user_name:
+                    # Search within user's repositories
+                    search_query = f"{search} user:{user_name}"
+                else:
+                    # Global search across all GitHub
+                    search_query = search
+                gh_repos = self.github.search_repositories(query=search_query)
             elif org_name:
-                # Organization repositories
+                # Organization repositories (no search)
                 source = self.github.get_organization(org_name)
                 gh_repos = source.get_repos()
             elif user_name:
-                # Specific user repositories
+                # Specific user repositories (no search)
                 source = self.github.get_user(user_name)
                 gh_repos = source.get_repos()
             else:
@@ -169,30 +178,9 @@ class GitHubConnector:
                 user = self.github.get_user()
                 gh_repos = user.get_repos()
 
-            # Determine if we need client-side filtering
-            # (only needed when search is specified but not using global search API)
-            needs_filtering = search and (org_name or user_name)
-
             for gh_repo in gh_repos:
                 if max_repos and len(repos) >= max_repos:
                     break
-
-                # Apply client-side search filter for scoped searches
-                if needs_filtering:
-                    search_lower = search.lower()
-                    name_match = (
-                        gh_repo.name and search_lower in gh_repo.name.lower()
-                    )
-                    desc_match = (
-                        gh_repo.description and
-                        search_lower in gh_repo.description.lower()
-                    )
-                    full_name_match = (
-                        gh_repo.full_name and
-                        search_lower in gh_repo.full_name.lower()
-                    )
-                    if not (name_match or desc_match or full_name_match):
-                        continue
 
                 repo = Repository(
                     id=gh_repo.id,
