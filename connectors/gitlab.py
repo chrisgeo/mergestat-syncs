@@ -314,9 +314,9 @@ class GitLabConnector:
     )
     def get_commit_stats(
         self,
-        sha: str,
         project_id: Optional[int] = None,
         project_name: Optional[str] = None,
+        sha: str = None,
     ) -> CommitStats:
         """
         Get statistics for a specific commit.
