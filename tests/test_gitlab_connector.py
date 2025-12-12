@@ -2,11 +2,10 @@
 Tests for GitLab connector new features.
 """
 
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import Mock, patch
 import pytest
 
 from connectors import GitLabConnector
-from connectors.models import Repository
 
 
 class TestGitLabConnectorProjects:
@@ -42,7 +41,7 @@ class TestGitLabConnectorProjects:
         mock_group = Mock()
         mock_group.projects = Mock()
         mock_group.projects.list.return_value = [mock_project]
-        
+
         mock_gitlab_instance = mock_gitlab_client.return_value
         mock_gitlab_instance.groups = Mock()
         mock_gitlab_instance.groups.get.return_value = mock_group
@@ -105,7 +104,7 @@ class TestGitLabConnectorProjects:
         mock_group = Mock()
         mock_group.projects = Mock()
         mock_group.projects.list.return_value = [mock_project]
-        
+
         mock_gitlab_instance = mock_gitlab_client.return_value
         mock_gitlab_instance.groups = Mock()
         mock_gitlab_instance.groups.get.return_value = mock_group
@@ -153,7 +152,9 @@ class TestGitLabConnectorProjects:
         call_kwargs = mock_gitlab_instance.projects.list.call_args[1]
         assert call_kwargs["get_all"] is True
 
-    def test_list_projects_backward_compatibility_group_id(self, mock_gitlab_client, mock_rest_client):
+    def test_list_projects_backward_compatibility_group_id(
+        self, mock_gitlab_client, mock_rest_client
+    ):
         """Test backward compatibility with group_id parameter."""
         # Setup mock
         mock_project = Mock()
@@ -171,7 +172,7 @@ class TestGitLabConnectorProjects:
         mock_group = Mock()
         mock_group.projects = Mock()
         mock_group.projects.list.return_value = [mock_project]
-        
+
         mock_gitlab_instance = mock_gitlab_client.return_value
         mock_gitlab_instance.groups = Mock()
         mock_gitlab_instance.groups.get.return_value = mock_group
@@ -193,14 +194,18 @@ class TestGitLabConnectorProjects:
             {"name": "User 1", "email": "user1@example.com"},
             {"name": "User 2", "email": "user2@example.com"},
         ]
-        
+
         mock_gitlab_instance = mock_gitlab_client.return_value
         mock_gitlab_instance.projects = Mock()
         mock_gitlab_instance.projects.get.return_value = mock_project
 
         # Test
-        connector = GitLabConnector(url="https://gitlab.com", private_token="test_token")
-        contributors = connector.get_contributors(project_name="mygroup/myproject", max_contributors=10)
+        connector = GitLabConnector(
+            url="https://gitlab.com", private_token="test_token"
+        )
+        contributors = connector.get_contributors(
+            project_name="mygroup/myproject", max_contributors=10
+        )
 
         # Assert
         assert len(contributors) == 2
@@ -212,7 +217,7 @@ class TestGitLabConnectorProjects:
         # Setup mock
         mock_project = Mock()
         mock_project.id = 123
-        
+
         mock_gitlab_instance = mock_gitlab_client.return_value
         mock_gitlab_instance.projects = Mock()
         mock_gitlab_instance.projects.get.return_value = mock_project
@@ -226,7 +231,12 @@ class TestGitLabConnectorProjects:
                     "iid": 10,
                     "title": "Test MR",
                     "state": "opened",
-                    "author": {"id": 1, "username": "user1", "name": "User 1", "web_url": "https://gitlab.com/user1"},
+                    "author": {
+                        "id": 1,
+                        "username": "user1",
+                        "name": "User 1",
+                        "web_url": "https://gitlab.com/user1"
+                    },
                     "created_at": "2023-01-01T00:00:00Z",
                     "target_branch": "main",
                     "source_branch": "feature",
@@ -236,8 +246,12 @@ class TestGitLabConnectorProjects:
         ]
 
         # Test
-        connector = GitLabConnector(url="https://gitlab.com", private_token="test_token")
-        mrs = connector.get_merge_requests(project_name="mygroup/myproject", state="opened", max_mrs=10)
+        connector = GitLabConnector(
+            url="https://gitlab.com", private_token="test_token"
+        )
+        mrs = connector.get_merge_requests(
+            project_name="mygroup/myproject", state="opened", max_mrs=10
+        )
 
         # Assert
         assert len(mrs) == 1
@@ -245,15 +259,20 @@ class TestGitLabConnectorProjects:
         mock_gitlab_instance.projects.get.assert_called_once_with("mygroup/myproject")
         assert mock_rest_instance.get_merge_requests.call_count == 2
 
-    def test_methods_require_project_identifier(self, mock_gitlab_client, mock_rest_client):
-        """Test that methods raise ValueError when no project identifier is provided."""
-        connector = GitLabConnector(url="https://gitlab.com", private_token="test_token")
+    def test_methods_require_project_identifier(
+        self, mock_gitlab_client, mock_rest_client
+    ):
+        """Test that methods raise ValueError when no identifier provided."""
+        connector = GitLabConnector(
+            url="https://gitlab.com", private_token="test_token"
+        )
 
-        with pytest.raises(ValueError, match="Either project_id or project_name must be provided"):
+        error_msg = "Either project_id or project_name must be provided"
+        with pytest.raises(ValueError, match=error_msg):
             connector.get_contributors()
 
-        with pytest.raises(ValueError, match="Either project_id or project_name must be provided"):
+        with pytest.raises(ValueError, match=error_msg):
             connector.get_commit_stats(sha="abc123")
 
-        with pytest.raises(ValueError, match="Either project_id or project_name must be provided"):
+        with pytest.raises(ValueError, match=error_msg):
             connector.get_repo_stats()

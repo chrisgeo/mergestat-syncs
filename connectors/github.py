@@ -143,7 +143,7 @@ class GitHubConnector:
 
         :param org_name: Optional organization name. If provided, lists organization repos.
         :param user_name: Optional user name. If provided, lists that user's repos.
-        :param search: Optional search query to filter repositories. 
+        :param search: Optional search query to filter repositories.
                       If provided with org_name/user_name, searches within that scope.
                       If provided alone, performs global search.
         :param max_repos: Maximum number of repositories to retrieve. If None, retrieves all.
@@ -177,11 +177,18 @@ class GitHubConnector:
                 if search and (org_name or user_name or (not org_name and not user_name)):
                     # For scoped searches, filter by name/description containing search term
                     search_lower = search.lower()
-                    if not (
-                        (gh_repo.name and search_lower in gh_repo.name.lower()) or
-                        (gh_repo.description and search_lower in gh_repo.description.lower()) or
-                        (gh_repo.full_name and search_lower in gh_repo.full_name.lower())
-                    ):
+                    name_match = (
+                        gh_repo.name and search_lower in gh_repo.name.lower()
+                    )
+                    desc_match = (
+                        gh_repo.description and
+                        search_lower in gh_repo.description.lower()
+                    )
+                    full_name_match = (
+                        gh_repo.full_name and
+                        search_lower in gh_repo.full_name.lower()
+                    )
+                    if not (name_match or desc_match or full_name_match):
                         continue
 
                 repo = Repository(

@@ -2,11 +2,10 @@
 Tests for GitHub connector new features.
 """
 
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import Mock, patch
 import pytest
 
 from connectors import GitHubConnector
-from connectors.models import Repository
 
 
 class TestGitHubConnectorRepositories:
@@ -42,7 +41,7 @@ class TestGitHubConnectorRepositories:
 
         mock_user = Mock()
         mock_user.get_repos.return_value = [mock_repo]
-        
+
         mock_github_instance = mock_github_client.return_value
         mock_github_instance.get_user.return_value = mock_user
 
@@ -115,7 +114,7 @@ class TestGitHubConnectorRepositories:
 
         mock_org = Mock()
         mock_org.get_repos.return_value = [mock_repo1, mock_repo2]
-        
+
         mock_github_instance = mock_github_client.return_value
         mock_github_instance.get_organization.return_value = mock_org
 
@@ -149,7 +148,7 @@ class TestGitHubConnectorRepositories:
 
         mock_user = Mock()
         mock_user.get_repos.return_value = mock_repos
-        
+
         mock_github_instance = mock_github_client.return_value
         mock_github_instance.get_user.return_value = mock_user
 
@@ -160,7 +159,9 @@ class TestGitHubConnectorRepositories:
         # Assert - all repos should be returned
         assert len(repos) == 150
 
-    def test_list_repositories_backward_compatibility(self, mock_github_client, mock_graphql_client):
+    def test_list_repositories_backward_compatibility(
+        self, mock_github_client, mock_graphql_client
+    ):
         """Test backward compatibility with org_name parameter."""
         # Setup mock
         mock_repo = Mock()
@@ -178,7 +179,7 @@ class TestGitHubConnectorRepositories:
 
         mock_org = Mock()
         mock_org.get_repos.return_value = [mock_repo]
-        
+
         mock_github_instance = mock_github_client.return_value
         mock_github_instance.get_organization.return_value = mock_org
 

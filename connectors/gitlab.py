@@ -173,7 +173,7 @@ class GitLabConnector:
                 group = self.gitlab.groups.get(group_name)
                 if search:
                     gl_projects = group.projects.list(
-                        per_page=self.per_page, 
+                        per_page=self.per_page,
                         get_all=(max_projects is None),
                         search=search
                     )
@@ -300,7 +300,7 @@ class GitLabConnector:
         project_identifier = project_name if project_name else project_id
         if not project_identifier:
             raise ValueError("Either project_id or project_name must be provided")
-        
+
         try:
             project = self.gitlab.projects.get(project_identifier)
             contributors = []
@@ -355,7 +355,7 @@ class GitLabConnector:
         project_identifier = project_name if project_name else project_id
         if not project_identifier:
             raise ValueError("Either project_id or project_name must be provided")
-        
+
         try:
             project = self.gitlab.projects.get(project_identifier)
             commit = project.commits.get(sha)
@@ -396,7 +396,7 @@ class GitLabConnector:
         project_identifier = project_name if project_name else project_id
         if not project_identifier:
             raise ValueError("Either project_id or project_name must be provided")
-        
+
         try:
             project = self.gitlab.projects.get(project_identifier)
 
@@ -487,7 +487,7 @@ class GitLabConnector:
         project_identifier = project_name if project_name else project_id
         if not project_identifier:
             raise ValueError("Either project_id or project_name must be provided")
-        
+
         # If project_name is provided, we need to get the project_id for the REST API
         if project_name:
             try:
@@ -497,7 +497,7 @@ class GitLabConnector:
                 self._handle_gitlab_exception(e)
         else:
             actual_project_id = project_id
-        
+
         try:
             merge_requests = []
             page = 1
@@ -614,7 +614,7 @@ class GitLabConnector:
         project_identifier = project_name if project_name else project_id
         if not project_identifier:
             raise ValueError("Either project_id or project_name must be provided")
-        
+
         # If project_name is provided, we need to get the project_id for the REST API
         if project_name:
             try:
@@ -624,7 +624,7 @@ class GitLabConnector:
                 self._handle_gitlab_exception(e)
         else:
             actual_project_id = project_id
-        
+
         try:
             blame_data = self.rest_client.get_file_blame(actual_project_id, file_path, ref)
 
@@ -667,7 +667,8 @@ class GitLabConnector:
                     current_line += num_lines
 
             logger.info(
-                f"Retrieved blame for project {project_identifier}:{file_path} with {len(ranges)} ranges"
+                f"Retrieved blame for project {project_identifier}:{file_path} "
+                f"with {len(ranges)} ranges"
             )
             return FileBlame(file_path=file_path, ranges=ranges)
 
