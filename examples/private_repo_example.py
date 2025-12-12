@@ -230,7 +230,8 @@ def test_gitlab_private_project():
             print(f"\n❌ API error: {e}")
         return False
 
-    except Exception:
+    except Exception as e:
+        print(f"\n❌ Unexpected error: {e}")
         traceback.print_exc()
         return False
 
