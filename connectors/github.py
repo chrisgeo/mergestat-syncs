@@ -134,24 +134,42 @@ class GitHubConnector:
     def list_repositories(
         self,
         org_name: Optional[str] = None,
+        user_name: Optional[str] = None,
+        search: Optional[str] = None,
         max_repos: Optional[int] = None,
     ) -> List[Repository]:
         """
-        List repositories for an organization or authenticated user.
+        List repositories for an organization, user, or search query.
 
-        :param org_name: Optional organization name. If None, lists user's repos.
-        :param max_repos: Maximum number of repositories to retrieve.
+        :param org_name: Optional organization name. If provided, lists organization repos.
+        :param user_name: Optional user name. If provided, lists that user's repos.
+        :param search: Optional search query to filter repositories.
+                      If provided with org_name/user_name, searches within that scope.
+                      If provided alone, performs global search.
+        :param max_repos: Maximum number of repositories to retrieve. If None, retrieves all.
         :return: List of Repository objects.
         """
         try:
             repos = []
 
-            if org_name:
-                source = self.github.get_organization(org_name)
-                gh_repos = source.get_repos()
+            # Determine the appropriate API method and parameters
+            if search:
+                # Build search query with optional scope qualifiers
+                query_parts = [search]
+                if org_name:
+                    query_parts.append(f"org:{org_name}")
+                elif user_name:
+                    query_parts.append(f"user:{user_name}")
+                gh_repos = self.github.search_repositories(query=" ".join(query_parts))
             else:
-                user = self.github.get_user()
-                gh_repos = user.get_repos()
+                # Fetch repositories without search
+                if org_name:
+                    source = self.github.get_organization(org_name)
+                elif user_name:
+                    source = self.github.get_user(user_name)
+                else:
+                    source = self.github.get_user()
+                gh_repos = source.get_repos()
 
             for gh_repo in gh_repos:
                 if max_repos and len(repos) >= max_repos:

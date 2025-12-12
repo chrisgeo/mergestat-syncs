@@ -150,25 +150,40 @@ class GitLabConnector:
     def list_projects(
         self,
         group_id: Optional[int] = None,
+        group_name: Optional[str] = None,
+        search: Optional[str] = None,
         max_projects: Optional[int] = None,
     ) -> List[Repository]:
         """
         List projects for a group or all accessible projects.
 
-        :param group_id: Optional group ID. If None, lists all accessible projects.
-        :param max_projects: Maximum number of projects to retrieve.
+        :param group_id: Optional group ID. If provided, lists group projects.
+        :param group_name: Optional group name/path. If provided, lists group projects.
+                          Takes precedence over group_id if both are provided.
+        :param search: Optional search query to filter projects by name.
+        :param max_projects: Maximum number of projects to retrieve. If None, retrieves all.
         :return: List of Repository objects (representing GitLab projects).
         """
         try:
             projects = []
 
-            if group_id:
-                group = self.gitlab.groups.get(group_id)
-                gl_projects = group.projects.list(per_page=self.per_page, get_all=False)
+            # Build common list parameters
+            list_params = {
+                'per_page': self.per_page,
+                'get_all': (max_projects is None)
+            }
+            if search:
+                list_params['search'] = search
+
+            # Determine source and fetch projects
+            if group_name or group_id:
+                # Get group by name or ID and list its projects
+                group_identifier = group_name if group_name else group_id
+                group = self.gitlab.groups.get(group_identifier)
+                gl_projects = group.projects.list(**list_params)
             else:
-                gl_projects = self.gitlab.projects.list(
-                    per_page=self.per_page, get_all=False
-                )
+                # List all accessible projects
+                gl_projects = self.gitlab.projects.list(**list_params)
 
             for gl_project in gl_projects:
                 if max_projects and len(projects) >= max_projects:
@@ -244,18 +259,25 @@ class GitLabConnector:
     )
     def get_contributors(
         self,
-        project_id: int,
+        project_id: Optional[int] = None,
+        project_name: Optional[str] = None,
         max_contributors: Optional[int] = None,
     ) -> List[Author]:
         """
         Get contributors for a project.
 
-        :param project_id: GitLab project ID.
+        :param project_id: GitLab project ID (deprecated, use project_name).
+        :param project_name: GitLab project name/path (e.g., 'group/project').
         :param max_contributors: Maximum number of contributors to retrieve.
         :return: List of Author objects.
         """
+        # Use project_name if provided, otherwise fall back to project_id
+        project_identifier = project_name if project_name else project_id
+        if not project_identifier:
+            raise ValueError("Either project_id or project_name must be provided")
+
         try:
-            project = self.gitlab.projects.get(project_id)
+            project = self.gitlab.projects.get(project_identifier)
             contributors = []
 
             gl_contributors = project.repository_contributors(
@@ -278,7 +300,7 @@ class GitLabConnector:
                 logger.debug(f"Retrieved contributor: {author.username}")
 
             logger.info(
-                f"Retrieved {len(contributors)} contributors for project {project_id}"
+                f"Retrieved {len(contributors)} contributors for project {project_identifier}"
             )
             return contributors
 
@@ -292,18 +314,25 @@ class GitLabConnector:
     )
     def get_commit_stats(
         self,
-        project_id: int,
-        sha: str,
+        project_id: Optional[int] = None,
+        project_name: Optional[str] = None,
+        sha: str = None,
     ) -> CommitStats:
         """
         Get statistics for a specific commit.
 
-        :param project_id: GitLab project ID.
         :param sha: Commit SHA.
+        :param project_id: GitLab project ID (deprecated, use project_name).
+        :param project_name: GitLab project name/path (e.g., 'group/project').
         :return: CommitStats object.
         """
+        # Use project_name if provided, otherwise fall back to project_id
+        project_identifier = project_name if project_name else project_id
+        if not project_identifier:
+            raise ValueError("Either project_id or project_name must be provided")
+
         try:
-            project = self.gitlab.projects.get(project_id)
+            project = self.gitlab.projects.get(project_identifier)
             commit = project.commits.get(sha)
 
             return CommitStats(
@@ -326,18 +355,25 @@ class GitLabConnector:
     )
     def get_repo_stats(
         self,
-        project_id: int,
+        project_id: Optional[int] = None,
+        project_name: Optional[str] = None,
         max_commits: Optional[int] = None,
     ) -> RepoStats:
         """
         Get aggregated statistics for a project.
 
-        :param project_id: GitLab project ID.
+        :param project_id: GitLab project ID (deprecated, use project_name).
+        :param project_name: GitLab project name/path (e.g., 'group/project').
         :param max_commits: Maximum number of commits to analyze.
         :return: RepoStats object.
         """
+        # Use project_name if provided, otherwise fall back to project_id
+        project_identifier = project_name if project_name else project_id
+        if not project_identifier:
+            raise ValueError("Either project_id or project_name must be provided")
+
         try:
-            project = self.gitlab.projects.get(project_id)
+            project = self.gitlab.projects.get(project_identifier)
 
             total_additions = 0
             total_deletions = 0
@@ -408,18 +444,35 @@ class GitLabConnector:
     )
     def get_merge_requests(
         self,
-        project_id: int,
+        project_id: Optional[int] = None,
+        project_name: Optional[str] = None,
         state: str = "all",
         max_mrs: Optional[int] = None,
     ) -> List[PullRequest]:
         """
         Get merge requests for a project using REST API.
 
-        :param project_id: GitLab project ID.
+        :param project_id: GitLab project ID (deprecated, use project_name).
+        :param project_name: GitLab project name/path (e.g., 'group/project').
         :param state: State filter ('opened', 'closed', 'merged', 'all').
         :param max_mrs: Maximum number of merge requests to retrieve.
         :return: List of PullRequest objects (representing GitLab merge requests).
         """
+        # Use project_name if provided, otherwise fall back to project_id
+        project_identifier = project_name if project_name else project_id
+        if not project_identifier:
+            raise ValueError("Either project_id or project_name must be provided")
+
+        # If project_name is provided, we need to get the project_id for the REST API
+        if project_name:
+            try:
+                project = self.gitlab.projects.get(project_name)
+                actual_project_id = project.id
+            except Exception as e:
+                self._handle_gitlab_exception(e)
+        else:
+            actual_project_id = project_id
+
         try:
             merge_requests = []
             page = 1
@@ -429,7 +482,7 @@ class GitLabConnector:
                     break
 
                 mrs = self.rest_client.get_merge_requests(
-                    project_id=project_id,
+                    project_id=actual_project_id,
                     state=state,
                     page=page,
                     per_page=self.per_page,
@@ -504,7 +557,7 @@ class GitLabConnector:
                 page += 1
 
             logger.info(
-                f"Retrieved {len(merge_requests)} merge requests for project {project_id}"
+                f"Retrieved {len(merge_requests)} merge requests for project {project_identifier}"
             )
             return merge_requests
 
@@ -518,20 +571,37 @@ class GitLabConnector:
     )
     def get_file_blame(
         self,
-        project_id: int,
         file_path: str,
+        project_id: Optional[int] = None,
+        project_name: Optional[str] = None,
         ref: str = "main",
     ) -> FileBlame:
         """
         Get blame information for a file using GitLab REST API.
 
-        :param project_id: GitLab project ID.
         :param file_path: File path within the repository.
+        :param project_id: GitLab project ID (deprecated, use project_name).
+        :param project_name: GitLab project name/path (e.g., 'group/project').
         :param ref: Git reference (branch, tag, or commit SHA).
         :return: FileBlame object.
         """
+        # Use project_name if provided, otherwise fall back to project_id
+        project_identifier = project_name if project_name else project_id
+        if not project_identifier:
+            raise ValueError("Either project_id or project_name must be provided")
+
+        # If project_name is provided, we need to get the project_id for the REST API
+        if project_name:
+            try:
+                project = self.gitlab.projects.get(project_name)
+                actual_project_id = project.id
+            except Exception as e:
+                self._handle_gitlab_exception(e)
+        else:
+            actual_project_id = project_id
+
         try:
-            blame_data = self.rest_client.get_file_blame(project_id, file_path, ref)
+            blame_data = self.rest_client.get_file_blame(actual_project_id, file_path, ref)
 
             ranges = []
             current_line = 1
@@ -572,7 +642,8 @@ class GitLabConnector:
                     current_line += num_lines
 
             logger.info(
-                f"Retrieved blame for project {project_id}:{file_path} with {len(ranges)} ranges"
+                f"Retrieved blame for project {project_identifier}:{file_path} "
+                f"with {len(ranges)} ranges"
             )
             return FileBlame(file_path=file_path, ranges=ranges)
 

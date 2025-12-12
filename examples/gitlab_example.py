@@ -36,26 +36,58 @@ def main():
         for group in groups:
             print(f"  - {group.name} (ID: {group.id})")
 
-        # Example 2: List projects
+        # Example 2: List projects (multiple ways)
         print("\n=== Example 2: List Projects ===")
-        projects = connector.list_projects(max_projects=5)
+        
+        # List all accessible projects
+        print("All accessible projects:")
+        projects = connector.list_projects(max_projects=3)
+        for project in projects:
+            print(f"  - {project.full_name}")
+            print(f"    Stars: {project.stars}, Forks: {project.forks}")
+        
+        # List projects for a specific group (by name)
+        print("\nProjects for gitlab-org group:")
+        try:
+            projects = connector.list_projects(group_name="gitlab-org", max_projects=3)
+            for project in projects:
+                print(f"  - {project.full_name}")
+                print(f"    Stars: {project.stars}, Forks: {project.forks}")
+        except Exception as e:
+            print(f"  Could not fetch gitlab-org projects: {e}")
+        
+        # Search for projects
+        print("\nSearch results for 'docker':")
+        projects = connector.list_projects(search="docker", max_projects=3)
         for project in projects:
             print(f"  - {project.full_name}")
             print(f"    Stars: {project.stars}, Forks: {project.forks}")
 
         # Example 3: Get contributors for a specific project
         print("\n=== Example 3: Get Contributors ===")
-        # Replace with your own project ID
-        project_id = 278964  # gitlab-org/gitlab-foss
-        print(f"Getting contributors for project {project_id}...")
-        contributors = connector.get_contributors(project_id, max_contributors=10)
-        for contributor in contributors:
-            print(f"  - {contributor.username}")
+        # Using project name (preferred method)
+        project_name = "gitlab-org/gitlab-foss"
+        print(f"Getting contributors for project {project_name}...")
+        try:
+            contributors = connector.get_contributors(project_name=project_name, max_contributors=10)
+            for contributor in contributors:
+                print(f"  - {contributor.username}")
+        except Exception as e:
+            print(f"  Could not fetch contributors: {e}")
+            # Fallback to project ID
+            project_id = 278964
+            print(f"  Trying with project ID {project_id}...")
+            contributors = connector.get_contributors(project_id=project_id, max_contributors=10)
+            for contributor in contributors:
+                print(f"  - {contributor.username}")
 
         # Example 4: Get project statistics
         print("\n=== Example 4: Get Project Statistics ===")
-        print(f"Getting stats for project {project_id}...")
-        stats = connector.get_repo_stats(project_id, max_commits=100)
+        print(f"Getting stats for project {project_name}...")
+        try:
+            stats = connector.get_repo_stats(project_name=project_name, max_commits=100)
+        except Exception:
+            stats = connector.get_repo_stats(project_id=278964, max_commits=100)
         print(f"  Total commits: {stats.total_commits}")
         print(f"  Additions: {stats.additions}")
         print(f"  Deletions: {stats.deletions}")
@@ -64,8 +96,11 @@ def main():
 
         # Example 5: Get merge requests
         print("\n=== Example 5: Get Merge Requests ===")
-        print(f"Getting MRs for project {project_id}...")
-        mrs = connector.get_merge_requests(project_id, state="opened", max_mrs=5)
+        print(f"Getting MRs for project {project_name}...")
+        try:
+            mrs = connector.get_merge_requests(project_name=project_name, state="opened", max_mrs=5)
+        except Exception:
+            mrs = connector.get_merge_requests(project_id=278964, state="opened", max_mrs=5)
         for mr in mrs:
             print(f"  - MR !{mr.number}: {mr.title}")
             print(
@@ -76,8 +111,11 @@ def main():
         print("\n=== Example 6: Get File Blame ===")
         # Replace with an actual file path in the repository
         file_path = "README.md"
-        print(f"Getting blame for project {project_id}:{file_path}...")
-        blame = connector.get_file_blame(project_id, file_path, ref="master")
+        print(f"Getting blame for project {project_name}:{file_path}...")
+        try:
+            blame = connector.get_file_blame(project_name=project_name, file_path=file_path, ref="master")
+        except Exception:
+            blame = connector.get_file_blame(project_id=278964, file_path=file_path, ref="master")
         print(f"  File: {blame.file_path}")
         print(f"  Number of blame ranges: {len(blame.ranges)}")
         if blame.ranges:
