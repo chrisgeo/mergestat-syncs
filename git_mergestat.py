@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import List, Tuple, Union
 
 from models.git import GitBlame, GitCommit, GitCommitStat, GitFile, Repo
-from storage import MongoStore, SQLAlchemyStore
+from storage import MongoStore, SQLAlchemyStore, create_store, detect_db_type
 
 # Import connectors (optional - will be None if not available)
 try:
@@ -832,8 +832,53 @@ async def process_github_repos_batch(
 
     connector = GitHubConnector(token=token)
 
+    # Track results for summary and incremental storage
+    all_results: List[BatchResult] = []
+    stored_count = 0
+
+    async def store_result(result: BatchResult) -> None:
+        """Store a single result in the database (upsert)."""
+        nonlocal stored_count
+        if not result.success:
+            return
+
+        repo_info = result.repository
+
+        # Create Repo object for database
+        db_repo = Repo(
+            repo_path=None,  # Not a local repo
+            repo=repo_info.full_name,
+            settings={
+                "source": "github",
+                "repo_id": repo_info.id,
+                "url": repo_info.url,
+                "default_branch": repo_info.default_branch,
+                "batch_processed": True,
+            },
+            tags=["github", repo_info.language] if repo_info.language else ["github"],
+        )
+
+        await store.insert_repo(db_repo)
+        stored_count += 1
+        logging.debug(f"Stored repository ({stored_count}): {db_repo.repo}")
+
+        # Store stats if available
+        if result.stats:
+            # Create commit stats entries from aggregated data
+            stat = GitCommitStat(
+                repo_id=db_repo.id,
+                commit_hash=AGGREGATE_STATS_MARKER,
+                file_path=AGGREGATE_STATS_MARKER,
+                additions=result.stats.additions,
+                deletions=result.stats.deletions,
+                old_file_mode="unknown",
+                new_file_mode="unknown",
+            )
+            await store.insert_git_commit_stats([stat])
+
     def on_repo_complete(result: BatchResult) -> None:
-        """Callback for when each repository is processed."""
+        """Callback for when each repository is processed - logs and queues for storage."""
+        all_results.append(result)
         if result.success:
             stats_info = ""
             if result.stats:
@@ -845,7 +890,7 @@ async def process_github_repos_batch(
     try:
         # Choose async or sync processing
         if use_async:
-            logging.info("Using async batch processing...")
+            logging.info("Using async batch processing with incremental storage...")
             results = await connector.get_repos_with_stats_async(
                 org_name=org_name,
                 user_name=user_name,
@@ -857,8 +902,12 @@ async def process_github_repos_batch(
                 max_repos=max_repos,
                 on_repo_complete=on_repo_complete,
             )
+            # Store results incrementally after async processing completes each batch
+            for result in results:
+                await store_result(result)
         else:
-            logging.info("Using sync batch processing...")
+            logging.info("Using sync batch processing with incremental storage...")
+            # For sync processing, we process and store in smaller chunks
             results = connector.get_repos_with_stats(
                 org_name=org_name,
                 user_name=user_name,
@@ -870,53 +919,18 @@ async def process_github_repos_batch(
                 max_repos=max_repos,
                 on_repo_complete=on_repo_complete,
             )
-
-        # Store results in database
-        logging.info(f"Storing {len(results)} repository results...")
-        for result in results:
-            if not result.success:
-                continue
-
-            repo_info = result.repository
-
-            # Create Repo object for database
-            db_repo = Repo(
-                repo_path=None,  # Not a local repo
-                repo=repo_info.full_name,
-                settings={
-                    "source": "github",
-                    "repo_id": repo_info.id,
-                    "url": repo_info.url,
-                    "default_branch": repo_info.default_branch,
-                    "batch_processed": True,
-                },
-                tags=["github", repo_info.language] if repo_info.language else ["github"],
-            )
-
-            await store.insert_repo(db_repo)
-            logging.debug(f"Stored repository: {db_repo.repo}")
-
-            # Store stats if available
-            if result.stats:
-                # Create commit stats entries from aggregated data
-                stat = GitCommitStat(
-                    repo_id=db_repo.id,
-                    commit_hash=AGGREGATE_STATS_MARKER,
-                    file_path=AGGREGATE_STATS_MARKER,
-                    additions=result.stats.additions,
-                    deletions=result.stats.deletions,
-                    old_file_mode="unknown",
-                    new_file_mode="unknown",
-                )
-                await store.insert_git_commit_stats([stat])
+            # Store results incrementally
+            for result in results:
+                await store_result(result)
 
         # Summary
-        successful = sum(1 for r in results if r.success)
-        failed = sum(1 for r in results if not r.success)
+        successful = sum(1 for r in all_results if r.success)
+        failed = sum(1 for r in all_results if not r.success)
         logging.info("=== Batch Processing Complete ===")
         logging.info(f"  Successful: {successful}")
         logging.info(f"  Failed: {failed}")
-        logging.info(f"  Total: {len(results)}")
+        logging.info(f"  Total: {len(all_results)}")
+        logging.info(f"  Stored: {stored_count}")
 
         # Log rate limit status
         try:
@@ -987,8 +1001,53 @@ async def process_gitlab_projects_batch(
 
     connector = GitLabConnector(url=gitlab_url, private_token=token)
 
+    # Track results for summary and incremental storage
+    all_results: List[GitLabBatchResult] = []
+    stored_count = 0
+
+    async def store_result(result: GitLabBatchResult) -> None:
+        """Store a single result in the database (upsert)."""
+        nonlocal stored_count
+        if not result.success:
+            return
+
+        project_info = result.project
+
+        # Create Repo object for database
+        db_repo = Repo(
+            repo_path=None,  # Not a local repo
+            repo=project_info.full_name,
+            settings={
+                "source": "gitlab",
+                "project_id": project_info.id,
+                "url": project_info.url,
+                "default_branch": project_info.default_branch,
+                "batch_processed": True,
+            },
+            tags=["gitlab"],
+        )
+
+        await store.insert_repo(db_repo)
+        stored_count += 1
+        logging.debug(f"Stored project ({stored_count}): {db_repo.repo}")
+
+        # Store stats if available
+        if result.stats:
+            # Create commit stats entries from aggregated data
+            stat = GitCommitStat(
+                repo_id=db_repo.id,
+                commit_hash=AGGREGATE_STATS_MARKER,
+                file_path=AGGREGATE_STATS_MARKER,
+                additions=result.stats.additions,
+                deletions=result.stats.deletions,
+                old_file_mode="unknown",
+                new_file_mode="unknown",
+            )
+            await store.insert_git_commit_stats([stat])
+
     def on_project_complete(result: GitLabBatchResult) -> None:
-        """Callback for when each project is processed."""
+        """Callback for when each project is processed - logs and queues for storage."""
+        all_results.append(result)
         if result.success:
             stats_info = ""
             if result.stats:
@@ -1000,7 +1059,7 @@ async def process_gitlab_projects_batch(
     try:
         # Choose async or sync processing
         if use_async:
-            logging.info("Using async batch processing...")
+            logging.info("Using async batch processing with incremental storage...")
             results = await connector.get_projects_with_stats_async(
                 group_name=group_name,
                 pattern=pattern,
@@ -1011,8 +1070,11 @@ async def process_gitlab_projects_batch(
                 max_projects=max_projects,
                 on_project_complete=on_project_complete,
             )
+            # Store results incrementally after async processing completes
+            for result in results:
+                await store_result(result)
         else:
-            logging.info("Using sync batch processing...")
+            logging.info("Using sync batch processing with incremental storage...")
             results = connector.get_projects_with_stats(
                 group_name=group_name,
                 pattern=pattern,
@@ -1023,53 +1085,18 @@ async def process_gitlab_projects_batch(
                 max_projects=max_projects,
                 on_project_complete=on_project_complete,
             )
-
-        # Store results in database
-        logging.info(f"Storing {len(results)} project results...")
-        for result in results:
-            if not result.success:
-                continue
-
-            project_info = result.project
-
-            # Create Repo object for database
-            db_repo = Repo(
-                repo_path=None,  # Not a local repo
-                repo=project_info.full_name,
-                settings={
-                    "source": "gitlab",
-                    "project_id": project_info.id,
-                    "url": project_info.url,
-                    "default_branch": project_info.default_branch,
-                    "batch_processed": True,
-                },
-                tags=["gitlab"],
-            )
-
-            await store.insert_repo(db_repo)
-            logging.debug(f"Stored project: {db_repo.repo}")
-
-            # Store stats if available
-            if result.stats:
-                # Create commit stats entries from aggregated data
-                stat = GitCommitStat(
-                    repo_id=db_repo.id,
-                    commit_hash=AGGREGATE_STATS_MARKER,
-                    file_path=AGGREGATE_STATS_MARKER,
-                    additions=result.stats.additions,
-                    deletions=result.stats.deletions,
-                    old_file_mode="unknown",
-                    new_file_mode="unknown",
-                )
-                await store.insert_git_commit_stats([stat])
+            # Store results incrementally
+            for result in results:
+                await store_result(result)
 
         # Summary
-        successful = sum(1 for r in results if r.success)
-        failed = sum(1 for r in results if not r.success)
+        successful = sum(1 for r in all_results if r.success)
+        failed = sum(1 for r in all_results if not r.success)
         logging.info("=== Batch Processing Complete ===")
         logging.info(f"  Successful: {successful}")
         logging.info(f"  Failed: {failed}")
-        logging.info(f"  Total: {len(results)}")
+        logging.info(f"  Total: {len(all_results)}")
+        logging.info(f"  Stored: {stored_count}")
 
     except ConnectorException as e:
         logging.error(f"Connector error: {e}")
@@ -1086,9 +1113,44 @@ def parse_args():
     Parse command-line arguments.
     """
     parser = argparse.ArgumentParser(
-        description="Process git repository data from local repo or GitHub/GitLab."
+        description="Process git repository data from local repo or GitHub/GitLab.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Local repository processing
+  python git_mergestat.py --db="postgresql://..." --connector=local --repo-path=/path/to/repo
+
+  # GitHub repository processing
+  python git_mergestat.py --db="postgresql://..." --connector=github --auth=$GITHUB_TOKEN \\
+      --github-owner=myorg --github-repo=myrepo
+
+  # GitLab repository processing
+  python git_mergestat.py --db="mongodb://..." --connector=gitlab --auth=$GITLAB_TOKEN \\
+      --gitlab-project-id=12345
+
+  # Batch processing with search pattern
+  python git_mergestat.py --db="postgresql://..." --connector=github --auth=$GITHUB_TOKEN \\
+      --search-pattern="myorg/api-*" --group=myorg --batch-size=5
+
+  # Auto-detect database type from connection string
+  python git_mergestat.py --db="mongodb://localhost:27017/mydb" --connector=local
+        """,
     )
+
+    # Simplified interface arguments
     parser.add_argument("--db", required=False, help="Database connection string.")
+    parser.add_argument(
+        "--connector",
+        required=False,
+        default="local",
+        choices=["local", "github", "gitlab"],
+        help="Connector type to use (local, github, or gitlab).",
+    )
+    parser.add_argument(
+        "--auth",
+        required=False,
+        help="Authentication token (GitHub or GitLab token).",
+    )
     parser.add_argument(
         "--repo-path", required=False, help="Path to the local git repository."
     )
@@ -1096,7 +1158,7 @@ def parse_args():
         "--db-type",
         required=False,
         choices=["postgres", "mongo", "sqlite"],
-        help="Database backend to use (postgres, mongo, or sqlite).",
+        help="Database backend to use (auto-detected from --db if not specified).",
     )
     parser.add_argument(
         "--start-date",
@@ -1111,11 +1173,6 @@ def parse_args():
 
     # GitHub connector options
     parser.add_argument(
-        "--github-token",
-        required=False,
-        help="GitHub personal access token (or set GITHUB_TOKEN env var).",
-    )
-    parser.add_argument(
         "--github-owner",
         required=False,
         help="GitHub repository owner/organization.",
@@ -1127,11 +1184,6 @@ def parse_args():
     )
 
     # GitLab connector options
-    parser.add_argument(
-        "--gitlab-token",
-        required=False,
-        help="GitLab private token (or set GITLAB_TOKEN env var).",
-    )
     parser.add_argument(
         "--gitlab-url",
         required=False,
@@ -1145,37 +1197,23 @@ def parse_args():
         help="GitLab project ID.",
     )
 
-    # GitHub batch processing options (PR 31)
+    # Batch processing options (unified for both GitHub and GitLab)
     parser.add_argument(
-        "--github-pattern",
+        "-s", "--search-pattern",
         required=False,
-        help="fnmatch-style pattern to filter repositories (e.g., 'chrisgeo/m*').",
+        help="fnmatch-style pattern to filter repositories/projects (e.g., 'owner/repo*').",
     )
     parser.add_argument(
-        "--github-batch-size",
+        "--batch-size",
         required=False,
         type=int,
         default=10,
-        help="Number of repositories to process in each batch (default: 10).",
-    )
-
-    # GitLab batch processing options (PR 31)
-    parser.add_argument(
-        "--gitlab-pattern",
-        required=False,
-        help="fnmatch-style pattern to filter GitLab projects (e.g., 'group/p*').",
+        help="Number of repositories/projects to process in each batch (default: 10).",
     )
     parser.add_argument(
-        "--gitlab-group",
+        "--group",
         required=False,
-        help="GitLab group name/path to fetch projects from.",
-    )
-    parser.add_argument(
-        "--gitlab-batch-size",
-        required=False,
-        type=int,
-        default=10,
-        help="Number of GitLab projects to process in each batch (default: 10).",
+        help="Organization/group name to fetch repositories/projects from.",
     )
 
     # Shared batch processing options (used by both GitHub and GitLab)
@@ -1214,6 +1252,67 @@ def parse_args():
     return parser.parse_args()
 
 
+def _determine_mode(args, github_token: str, gitlab_token: str) -> Tuple[bool, bool, bool, bool]:
+    """
+    Determine the operating mode based on CLI arguments.
+
+    :param args: Parsed command-line arguments.
+    :param github_token: GitHub authentication token.
+    :param gitlab_token: GitLab authentication token.
+    :return: Tuple of (use_github, use_github_batch, use_gitlab, use_gitlab_batch).
+    :raises ValueError: If connector type specified but required arguments missing.
+    """
+    connector_type = args.connector
+
+    if connector_type == "github":
+        if not github_token:
+            raise ValueError(
+                "GitHub connector requires authentication. "
+                "Use --auth or set GITHUB_TOKEN environment variable."
+            )
+        if args.search_pattern:
+            return (False, True, False, False)
+        elif args.github_owner and args.github_repo:
+            return (True, False, False, False)
+        else:
+            raise ValueError(
+                "GitHub connector requires --github-owner and --github-repo, "
+                "or --search-pattern for batch processing."
+            )
+    elif connector_type == "gitlab":
+        if not gitlab_token:
+            raise ValueError(
+                "GitLab connector requires authentication. "
+                "Use --auth or set GITLAB_TOKEN environment variable."
+            )
+        if args.search_pattern:
+            return (False, False, False, True)
+        elif args.gitlab_project_id:
+            return (False, False, True, False)
+        else:
+            raise ValueError(
+                "GitLab connector requires --gitlab-project-id, "
+                "or --search-pattern for batch processing."
+            )
+    elif connector_type == "local":
+        return (False, False, False, False)
+    else:
+        # Legacy mode detection (no --connector specified)
+        use_github = bool(github_token and args.github_owner and args.github_repo)
+        use_github_batch = bool(github_token and args.search_pattern)
+        use_gitlab = bool(gitlab_token and args.gitlab_project_id)
+        use_gitlab_batch = bool(gitlab_token and args.search_pattern)
+        
+        # Check for ambiguity when both tokens are available and --search-pattern is set
+        if use_github_batch and use_gitlab_batch:
+            raise ValueError(
+                "Ambiguous batch mode: both GitHub and GitLab tokens are available "
+                "and --search-pattern is set. Please specify --connector to disambiguate."
+            )
+        
+        return (use_github, use_github_batch, use_gitlab, use_gitlab_batch)
+
+
 async def main() -> None:
     """
     Main entry point for the script.
@@ -1226,8 +1325,16 @@ async def main() -> None:
         DB_CONN_STRING = args.db
     if args.repo_path:
         REPO_PATH = args.repo_path
+
+    # Auto-detect database type from connection string if not specified
     if args.db_type:
         DB_TYPE = args.db_type.lower()
+    elif DB_CONN_STRING:
+        try:
+            DB_TYPE = detect_db_type(DB_CONN_STRING)
+            logging.info(f"Auto-detected database type: {DB_TYPE}")
+        except ValueError:
+            pass  # Fall back to environment variable
 
     if DB_TYPE not in {"postgres", "mongo", "sqlite"}:
         raise ValueError("DB_TYPE must be 'postgres', 'mongo', or 'sqlite'")
@@ -1236,14 +1343,15 @@ async def main() -> None:
             "Database connection string is required (set DB_CONN_STRING or use --db)"
         )
 
-    # Determine mode: local repo, GitHub, GitHub batch, GitLab, or GitLab batch
-    github_token = args.github_token or os.getenv("GITHUB_TOKEN")
-    gitlab_token = args.gitlab_token or os.getenv("GITLAB_TOKEN")
+    # Determine authentication token (--auth or environment variables)
+    auth_token = args.auth
+    github_token = auth_token or os.getenv("GITHUB_TOKEN")
+    gitlab_token = auth_token or os.getenv("GITLAB_TOKEN")
 
-    use_github = github_token and args.github_owner and args.github_repo
-    use_github_batch = github_token and args.github_pattern
-    use_gitlab = gitlab_token and args.gitlab_project_id
-    use_gitlab_batch = gitlab_token and args.gitlab_pattern
+    # Determine operating mode
+    use_github, use_github_batch, use_gitlab, use_gitlab_batch = _determine_mode(
+        args, github_token, gitlab_token
+    )
 
     modes_active = sum([use_github, use_github_batch, use_gitlab, use_gitlab_batch])
     if modes_active > 1:
@@ -1255,12 +1363,13 @@ async def main() -> None:
             "or GitLab batch (--gitlab-pattern)."
         )
 
-    # Initialize storage
-    if DB_TYPE == "mongo":
-        store: DataStore = MongoStore(DB_CONN_STRING, db_name=MONGO_DB_NAME)
-    else:
-        # Both postgres and sqlite use SQLAlchemyStore
-        store = SQLAlchemyStore(DB_CONN_STRING, echo=DB_ECHO)
+    # Initialize storage using factory function
+    store: DataStore = create_store(
+        DB_CONN_STRING,
+        db_type=DB_TYPE,
+        db_name=MONGO_DB_NAME,
+        echo=DB_ECHO,
+    )
 
     async with store as storage:
         if use_github_batch:
@@ -1268,9 +1377,9 @@ async def main() -> None:
             await process_github_repos_batch(
                 store=storage,
                 token=github_token,
-                org_name=args.github_owner,  # Can be used as org or user
-                pattern=args.github_pattern,
-                batch_size=args.github_batch_size,
+                org_name=args.group,  # Can be used as org or user
+                pattern=args.search_pattern,
+                batch_size=args.batch_size,
                 max_concurrent=args.max_concurrent,
                 rate_limit_delay=args.rate_limit_delay,
                 max_commits_per_repo=args.max_commits_per_repo,
@@ -1283,9 +1392,9 @@ async def main() -> None:
                 store=storage,
                 token=gitlab_token,
                 gitlab_url=args.gitlab_url,
-                group_name=args.gitlab_group,
-                pattern=args.gitlab_pattern,
-                batch_size=args.gitlab_batch_size,
+                group_name=args.group,
+                pattern=args.search_pattern,
+                batch_size=args.batch_size,
                 max_concurrent=args.max_concurrent,
                 rate_limit_delay=args.rate_limit_delay,
                 max_commits_per_project=args.max_commits_per_repo,

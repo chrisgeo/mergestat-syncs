@@ -1,10 +1,17 @@
 # Using git_mergestat.py with GitHub and GitLab Connectors
 
-The `git_mergestat.py` script now supports three modes of operation:
+The `git_mergestat.py` script supports three modes of operation:
 
 1. **Local Repository Mode** (default) - Analyzes a local git repository
 2. **GitHub Connector Mode** - Fetches data from GitHub API
 3. **GitLab Connector Mode** - Fetches data from GitLab API
+
+## Simplified CLI Interface
+
+The CLI now supports:
+- **Unified authentication** with `--auth` (works for both GitHub and GitLab)
+- **Auto-detection of database type** from connection string URL scheme
+- **Consolidated batch processing arguments** that work with both connectors
 
 ## Local Repository Mode
 
@@ -16,8 +23,11 @@ export DB_CONN_STRING="postgresql+asyncpg://localhost:5432/mergestat"
 export REPO_PATH="/path/to/repo"
 python git_mergestat.py
 
-# Using command-line arguments
+# Using command-line arguments (auto-detects database type from URL)
 python git_mergestat.py --db "postgresql+asyncpg://localhost:5432/mergestat" --repo-path "/path/to/repo"
+
+# Explicit connector type
+python git_mergestat.py --db "postgresql://..." --connector local --repo-path "/path/to/repo"
 ```
 
 ## GitHub Connector Mode
@@ -34,24 +44,46 @@ Fetch repository data directly from GitHub without cloning. **Fully supports bot
 ### Usage
 
 ```bash
-# Public repository
-export DB_CONN_STRING="postgresql+asyncpg://localhost:5432/mergestat"
+# Public repository with unified auth
 export GITHUB_TOKEN="ghp_xxxxxxxxxxxx"
-python git_mergestat.py --github-owner torvalds --github-repo linux
-
-# Private repository (token must have 'repo' scope)
-export GITHUB_TOKEN="ghp_xxxxxxxxxxxx"  # Token with 'repo' scope
 python git_mergestat.py \
   --db "postgresql+asyncpg://localhost:5432/mergestat" \
+  --connector github \
+  --auth "$GITHUB_TOKEN" \
+  --github-owner torvalds \
+  --github-repo linux
+
+# Private repository (token must have 'repo' scope)
+python git_mergestat.py \
+  --db "postgresql+asyncpg://localhost:5432/mergestat" \
+  --connector github \
+  --auth "$GITHUB_TOKEN" \
   --github-owner your-org \
   --github-repo your-private-repo
 
-# Using command-line arguments
+# Token from environment variable (GITHUB_TOKEN) - no --auth needed
+export GITHUB_TOKEN="ghp_xxxxxxxxxxxx"
 python git_mergestat.py \
-  --db "postgresql+asyncpg://localhost:5432/mergestat" \
-  --github-token "ghp_xxxxxxxxxxxx" \
+  --db "postgresql://..." \
+  --connector github \
   --github-owner torvalds \
   --github-repo linux
+```
+
+### Batch Processing Multiple Repositories
+
+```bash
+# Process repositories matching a pattern
+python git_mergestat.py \
+  --db "sqlite+aiosqlite:///mergestat.db" \
+  --connector github \
+  --auth "$GITHUB_TOKEN" \
+  --search-pattern "myorg/api-*" \
+  --group myorg \
+  --batch-size 10 \
+  --max-concurrent 4 \
+  --max-repos 50 \
+  --use-async
 ```
 
 ### What Gets Stored
@@ -59,17 +91,6 @@ python git_mergestat.py \
 - Repository metadata (name, URL, default branch)
 - Commits (up to 100 most recent)
 - Commit statistics (additions, deletions per file for last 50 commits)
-
-### Example with MongoDB
-
-```bash
-python git_mergestat.py \
-  --db-type mongo \
-  --db "mongodb://localhost:27017" \
-  --github-token "ghp_xxxxxxxxxxxx" \
-  --github-owner kubernetes \
-  --github-repo kubernetes
-```
 
 ## GitLab Connector Mode
 
@@ -85,23 +106,51 @@ Fetch project data directly from GitLab (including self-hosted instances). **Ful
 ### Usage
 
 ```bash
-# Public project on GitLab.com
-export DB_CONN_STRING="postgresql+asyncpg://localhost:5432/mergestat"
-export GITLAB_TOKEN="glpat-xxxxxxxxxxxx"
-python git_mergestat.py --gitlab-project-id 278964
-
-# Private project (token must have 'read_api' and 'read_repository' scopes)
-export GITLAB_TOKEN="glpat-xxxxxxxxxxxx"  # Token with required scopes
+# Public project on GitLab.com with unified auth
 python git_mergestat.py \
   --db "postgresql+asyncpg://localhost:5432/mergestat" \
+  --connector gitlab \
+  --auth "$GITLAB_TOKEN" \
+  --gitlab-project-id 278964
+
+# Private project (token must have required scopes)
+python git_mergestat.py \
+  --db "postgresql://..." \
+  --connector gitlab \
+  --auth "$GITLAB_TOKEN" \
   --gitlab-project-id 12345
 
 # Self-hosted GitLab
 python git_mergestat.py \
-  --db "postgresql+asyncpg://localhost:5432/mergestat" \
-  --gitlab-token "glpat-xxxxxxxxxxxx" \
+  --db "postgresql://..." \
+  --connector gitlab \
+  --auth "$GITLAB_TOKEN" \
   --gitlab-url "https://gitlab.example.com" \
   --gitlab-project-id 123
+
+# Token from environment variable (GITLAB_TOKEN)
+export GITLAB_TOKEN="glpat-xxxxxxxxxxxx"
+python git_mergestat.py \
+  --db "mongodb://localhost:27017" \
+  --connector gitlab \
+  --gitlab-project-id 278964
+```
+
+### Batch Processing Multiple Projects
+
+```bash
+# Process projects matching a pattern
+python git_mergestat.py \
+  --db "sqlite+aiosqlite:///mergestat.db" \
+  --connector gitlab \
+  --auth "$GITLAB_TOKEN" \
+  --gitlab-url "https://gitlab.com" \
+  --group mygroup \
+  --search-pattern "mygroup/api-*" \
+  --batch-size 10 \
+  --max-concurrent 4 \
+  --max-repos 50 \
+  --use-async
 ```
 
 ### What Gets Stored
@@ -125,7 +174,7 @@ All modes support these environment variables:
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `DB_CONN_STRING` | Database connection string | None (required) |
-| `DB_TYPE` | Database type (`postgres` or `mongo`) | `postgres` |
+| `DB_TYPE` | Database type (`postgres`, `mongo`, or `sqlite`) | Auto-detected from URL |
 | `DB_ECHO` | Enable SQL logging | `false` |
 | `MONGO_DB_NAME` | MongoDB database name | None |
 | `BATCH_SIZE` | Records per batch insert | `100` |
@@ -137,23 +186,40 @@ All modes support these environment variables:
 ## Command-Line Arguments
 
 ```
-usage: git_mergestat.py [-h] [--db DB] [--repo-path REPO_PATH] 
-                        [--db-type {postgres,mongo}] [--start-date START_DATE]
-                        [--end-date END_DATE] [--github-token GITHUB_TOKEN] 
+usage: git_mergestat.py [-h] [--db DB] [--connector {local,github,gitlab}]
+                        [--auth AUTH] [--repo-path REPO_PATH]
+                        [--db-type {postgres,mongo,sqlite}]
                         [--github-owner GITHUB_OWNER] [--github-repo GITHUB_REPO]
-                        [--gitlab-token GITLAB_TOKEN] [--gitlab-url GITLAB_URL]
-                        [--gitlab-project-id GITLAB_PROJECT_ID]
+                        [--gitlab-url GITLAB_URL] [--gitlab-project-id GITLAB_PROJECT_ID]
+                        [-s SEARCH_PATTERN] [--batch-size BATCH_SIZE] [--group GROUP]
+                        [--max-concurrent MAX_CONCURRENT] [--rate-limit-delay RATE_LIMIT_DELAY]
+                        [--max-commits-per-repo MAX_COMMITS_PER_REPO] [--max-repos MAX_REPOS]
+                        [--use-async]
 
-Options:
-  --db DB                       Database connection string
+Core Options:
+  --db DB                       Database connection string (auto-detects type from URL)
+  --connector {local,github,gitlab}  Connector type to use
+  --auth AUTH                   Authentication token (GitHub or GitLab)
   --repo-path REPO_PATH        Path to the local git repository
-  --db-type {postgres,mongo}   Database backend to use
-  --github-token TOKEN         GitHub personal access token
+  --db-type {postgres,mongo,sqlite}  Database backend (optional, auto-detected)
+
+GitHub Options:
   --github-owner OWNER         GitHub repository owner/organization
   --github-repo REPO           GitHub repository name
-  --gitlab-token TOKEN         GitLab private token
+
+GitLab Options:
   --gitlab-url URL             GitLab instance URL (default: https://gitlab.com)
   --gitlab-project-id ID       GitLab project ID (numeric)
+
+Batch Processing Options (work with both connectors):
+  -s, --search-pattern PATTERN fnmatch-style pattern to filter repositories/projects
+  --batch-size SIZE            Number of repos/projects per batch (default: 10)
+  --group NAME                 Organization/group name to fetch from
+  --max-concurrent N           Maximum concurrent workers (default: 4)
+  --rate-limit-delay SECONDS   Delay between batches (default: 1.0)
+  --max-commits-per-repo N     Maximum commits to analyze per repo
+  --max-repos N                Maximum repos/projects to process
+  --use-async                  Use async processing for better performance
 ```
 
 ## Examples
@@ -163,7 +229,8 @@ Options:
 ```bash
 python git_mergestat.py \
   --db "postgresql+asyncpg://localhost:5432/mergestat" \
-  --github-token "$GITHUB_TOKEN" \
+  --connector github \
+  --auth "$GITHUB_TOKEN" \
   --github-owner torvalds \
   --github-repo linux
 ```
@@ -173,16 +240,44 @@ python git_mergestat.py \
 ```bash
 python git_mergestat.py \
   --db "postgresql+asyncpg://localhost:5432/mergestat" \
-  --gitlab-token "$GITLAB_TOKEN" \
+  --connector gitlab \
+  --auth "$GITLAB_TOKEN" \
   --gitlab-project-id 278964
 ```
 
-### Analyze Local Repository (Original Mode)
+### Analyze Local Repository
 
 ```bash
 python git_mergestat.py \
   --db "postgresql+asyncpg://localhost:5432/mergestat" \
+  --connector local \
   --repo-path "/home/user/my-project"
+```
+
+### Batch Process Multiple Repositories
+
+```bash
+# GitHub batch processing
+python git_mergestat.py \
+  --db "sqlite+aiosqlite:///mergestat.db" \
+  --connector github \
+  --auth "$GITHUB_TOKEN" \
+  --group myorg \
+  --search-pattern "myorg/api-*" \
+  --batch-size 5 \
+  --max-repos 20 \
+  --use-async
+
+# GitLab batch processing
+python git_mergestat.py \
+  --db "sqlite+aiosqlite:///mergestat.db" \
+  --connector gitlab \
+  --auth "$GITLAB_TOKEN" \
+  --group mygroup \
+  --search-pattern "mygroup/service-*" \
+  --batch-size 5 \
+  --max-repos 20 \
+  --use-async
 ```
 
 ## Limitations

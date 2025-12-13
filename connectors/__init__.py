@@ -5,15 +5,18 @@ This package provides production-grade connectors for GitHub and GitLab
 with automatic pagination, rate limiting, and error handling.
 """
 
+from .base import BatchResult, GitConnector
 from .exceptions import (APIException, AuthenticationException,
                          ConnectorException, NotFoundException,
                          PaginationException, RateLimitException)
-from .github import BatchResult, GitHubConnector, match_repo_pattern
+from .github import GitHubConnector, match_repo_pattern
 from .gitlab import GitLabBatchResult, GitLabConnector, match_project_pattern
 from .models import (Author, BlameRange, CommitStats, FileBlame, Organization,
                      PullRequest, Repository, RepoStats)
 
 __all__ = [
+    # Base class
+    "GitConnector",
     # Connectors
     "GitHubConnector",
     "GitLabConnector",

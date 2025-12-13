@@ -1,6 +1,6 @@
 import uuid
 from collections.abc import Iterable
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Union
 
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import UpdateOne
@@ -10,6 +10,78 @@ from sqlalchemy.inspection import inspect
 from sqlalchemy.orm import sessionmaker
 
 from models.git import GitBlame, GitCommit, GitCommitStat, GitFile, Repo
+
+
+def detect_db_type(conn_string: str) -> str:
+    """
+    Detect database type from connection string.
+
+    :param conn_string: Database connection string.
+    :return: Database type ('postgres', 'sqlite', or 'mongo').
+    :raises ValueError: If database type cannot be determined.
+    """
+    if not conn_string:
+        raise ValueError("Connection string is required")
+
+    conn_lower = conn_string.lower()
+
+    # MongoDB connection strings
+    if conn_lower.startswith("mongodb://") or conn_lower.startswith("mongodb+srv://"):
+        return "mongo"
+
+    # PostgreSQL connection strings
+    if conn_lower.startswith("postgresql://") or conn_lower.startswith("postgres://"):
+        return "postgres"
+    if conn_lower.startswith("postgresql+asyncpg://"):
+        return "postgres"
+
+    # SQLite connection strings
+    if conn_lower.startswith("sqlite://") or conn_lower.startswith("sqlite+aiosqlite://"):
+        return "sqlite"
+
+    # Extract scheme for better error reporting
+    scheme = conn_string.split("://", 1)[0] if "://" in conn_string else "unknown"
+    raise ValueError(
+        f"Could not detect database type from connection string. "
+        f"Supported: mongodb://, postgresql://, postgres://, sqlite://, "
+        f"or variations with async drivers. Got scheme: '{scheme}', "
+        f"connection string (first 100 chars): {conn_string[:100]}..."
+    )
+
+
+def create_store(
+    conn_string: str,
+    db_type: Optional[str] = None,
+    db_name: Optional[str] = None,
+    echo: bool = False,
+) -> Union["SQLAlchemyStore", "MongoStore"]:
+    """
+    Create a storage backend based on the connection string.
+
+    This factory function automatically detects the database type from the
+    connection string and returns the appropriate store implementation.
+
+    :param conn_string: Database connection string.
+    :param db_type: Optional explicit database type ('postgres', 'sqlite', 'mongo').
+                   If not provided, it will be auto-detected from conn_string.
+    :param db_name: Optional database name (for MongoDB).
+    :param echo: Whether to echo SQL statements (for SQLAlchemy).
+    :return: Appropriate store instance (SQLAlchemyStore or MongoStore).
+    """
+    if db_type is None:
+        db_type = detect_db_type(conn_string)
+
+    db_type = db_type.lower()
+
+    if db_type == "mongo":
+        return MongoStore(conn_string, db_name=db_name)
+    elif db_type in ("postgres", "postgresql", "sqlite"):
+        return SQLAlchemyStore(conn_string, echo=echo)
+    else:
+        raise ValueError(
+            f"Unsupported database type: {db_type}. "
+            f"Supported types: postgres, sqlite, mongo"
+        )
 
 
 def _serialize_value(value: Any) -> Any:
