@@ -31,6 +31,15 @@ class TestDetectDbType:
         assert detect_db_type("sqlite:///test.db") == "sqlite"
         assert detect_db_type("sqlite+aiosqlite:///:memory:") == "sqlite"
 
+    def test_detect_case_insensitive(self):
+        """Test that detection is case-insensitive."""
+        assert detect_db_type("PostgreSQL://localhost/mydb") == "postgres"
+        assert detect_db_type("POSTGRESQL://localhost/mydb") == "postgres"
+        assert detect_db_type("MongoDB://localhost:27017/mydb") == "mongo"
+        assert detect_db_type("MONGODB://localhost:27017/mydb") == "mongo"
+        assert detect_db_type("SQLite:///test.db") == "sqlite"
+        assert detect_db_type("SQLITE:///test.db") == "sqlite"
+
     def test_detect_empty_string_raises(self):
         """Test that empty connection string raises ValueError."""
         with pytest.raises(ValueError, match="Connection string is required"):

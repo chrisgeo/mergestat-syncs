@@ -605,7 +605,7 @@ class GitLabConnector(GitConnector):
         file_path: str,
         project_id: Optional[int] = None,
         project_name: Optional[str] = None,
-        ref: str = "main",
+        ref: str = "HEAD",
     ) -> FileBlame:
         """
         Get blame information for a file using GitLab REST API.

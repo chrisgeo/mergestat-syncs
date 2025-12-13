@@ -2,13 +2,11 @@
 Tests for the base connector class.
 """
 
-from unittest.mock import Mock, patch
-
 import pytest
 
 from connectors import GitConnector
 from connectors.base import BatchResult
-from connectors.models import Repository, RepoStats, Author
+from connectors.models import Repository, RepoStats
 
 
 class TestBatchResult:

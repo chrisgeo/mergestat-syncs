@@ -1093,13 +1093,17 @@ Examples:
   # Local repository processing
   python git_mergestat.py --db="postgresql://..." --connector=local --repo-path=/path/to/repo
 
-  # GitHub repository processing (simplified)
+  # GitHub repository processing
   python git_mergestat.py --db="postgresql://..." --connector=github --auth=$GITHUB_TOKEN \\
       --github-owner=myorg --github-repo=myrepo
 
-  # GitLab repository processing (simplified)
+  # GitLab repository processing
   python git_mergestat.py --db="mongodb://..." --connector=gitlab --auth=$GITLAB_TOKEN \\
       --gitlab-project-id=12345
+
+  # Batch processing with search pattern
+  python git_mergestat.py --db="postgresql://..." --connector=github --auth=$GITHUB_TOKEN \\
+      --search-pattern="myorg/api-*" --group=myorg --batch-size=5
 
   # Auto-detect database type from connection string
   python git_mergestat.py --db="mongodb://localhost:27017/mydb" --connector=local
@@ -1165,37 +1169,23 @@ Examples:
         help="GitLab project ID.",
     )
 
-    # GitHub batch processing options (PR 31)
+    # Batch processing options (unified for both GitHub and GitLab)
     parser.add_argument(
-        "--github-pattern",
+        "-s", "--search-pattern",
         required=False,
-        help="fnmatch-style pattern to filter repositories (e.g., 'chrisgeo/m*').",
+        help="fnmatch-style pattern to filter repositories/projects (e.g., 'owner/repo*').",
     )
     parser.add_argument(
-        "--github-batch-size",
+        "--batch-size",
         required=False,
         type=int,
         default=10,
-        help="Number of repositories to process in each batch (default: 10).",
-    )
-
-    # GitLab batch processing options (PR 31)
-    parser.add_argument(
-        "--gitlab-pattern",
-        required=False,
-        help="fnmatch-style pattern to filter GitLab projects (e.g., 'group/p*').",
+        help="Number of repositories/projects to process in each batch (default: 10).",
     )
     parser.add_argument(
-        "--gitlab-group",
+        "--group",
         required=False,
-        help="GitLab group name/path to fetch projects from.",
-    )
-    parser.add_argument(
-        "--gitlab-batch-size",
-        required=False,
-        type=int,
-        default=10,
-        help="Number of GitLab projects to process in each batch (default: 10).",
+        help="Organization/group name to fetch repositories/projects from.",
     )
 
     # Shared batch processing options (used by both GitHub and GitLab)
@@ -1234,7 +1224,7 @@ Examples:
     return parser.parse_args()
 
 
-def _determine_mode(args, github_token: str, gitlab_token: str) -> tuple:
+def _determine_mode(args, github_token: str, gitlab_token: str) -> Tuple[bool, bool, bool, bool]:
     """
     Determine the operating mode based on CLI arguments.
 
@@ -1247,33 +1237,43 @@ def _determine_mode(args, github_token: str, gitlab_token: str) -> tuple:
     connector_type = args.connector
 
     if connector_type == "github":
-        if args.github_pattern:
+        if not github_token:
+            raise ValueError(
+                "GitHub connector requires authentication. "
+                "Use --auth or set GITHUB_TOKEN environment variable."
+            )
+        if args.search_pattern:
             return (False, True, False, False)
         elif args.github_owner and args.github_repo:
             return (True, False, False, False)
         else:
             raise ValueError(
                 "GitHub connector requires --github-owner and --github-repo, "
-                "or --github-pattern for batch processing."
+                "or --search-pattern for batch processing."
             )
     elif connector_type == "gitlab":
-        if args.gitlab_pattern:
+        if not gitlab_token:
+            raise ValueError(
+                "GitLab connector requires authentication. "
+                "Use --auth or set GITLAB_TOKEN environment variable."
+            )
+        if args.search_pattern:
             return (False, False, False, True)
         elif args.gitlab_project_id:
             return (False, False, True, False)
         else:
             raise ValueError(
                 "GitLab connector requires --gitlab-project-id, "
-                "or --gitlab-pattern for batch processing."
+                "or --search-pattern for batch processing."
             )
     elif connector_type == "local":
         return (False, False, False, False)
     else:
         # Legacy mode detection (no --connector specified)
         use_github = bool(github_token and args.github_owner and args.github_repo)
-        use_github_batch = bool(github_token and args.github_pattern)
+        use_github_batch = bool(github_token and args.search_pattern)
         use_gitlab = bool(gitlab_token and args.gitlab_project_id)
-        use_gitlab_batch = bool(gitlab_token and args.gitlab_pattern)
+        use_gitlab_batch = bool(gitlab_token and args.search_pattern)
         return (use_github, use_github_batch, use_gitlab, use_gitlab_batch)
 
 
@@ -1341,9 +1341,9 @@ async def main() -> None:
             await process_github_repos_batch(
                 store=storage,
                 token=github_token,
-                org_name=args.github_owner,  # Can be used as org or user
-                pattern=args.github_pattern,
-                batch_size=args.github_batch_size,
+                org_name=args.group,  # Can be used as org or user
+                pattern=args.search_pattern,
+                batch_size=args.batch_size,
                 max_concurrent=args.max_concurrent,
                 rate_limit_delay=args.rate_limit_delay,
                 max_commits_per_repo=args.max_commits_per_repo,
@@ -1356,9 +1356,9 @@ async def main() -> None:
                 store=storage,
                 token=gitlab_token,
                 gitlab_url=args.gitlab_url,
-                group_name=args.gitlab_group,
-                pattern=args.gitlab_pattern,
-                batch_size=args.gitlab_batch_size,
+                group_name=args.group,
+                pattern=args.search_pattern,
+                batch_size=args.batch_size,
                 max_concurrent=args.max_concurrent,
                 rate_limit_delay=args.rate_limit_delay,
                 max_commits_per_project=args.max_commits_per_repo,

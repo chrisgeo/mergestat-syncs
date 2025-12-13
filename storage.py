@@ -39,10 +39,13 @@ def detect_db_type(conn_string: str) -> str:
     if conn_lower.startswith("sqlite://") or conn_lower.startswith("sqlite+aiosqlite://"):
         return "sqlite"
 
+    # Extract scheme for better error reporting
+    scheme = conn_string.split("://", 1)[0] if "://" in conn_string else "unknown"
     raise ValueError(
         f"Could not detect database type from connection string. "
         f"Supported: mongodb://, postgresql://, postgres://, sqlite://, "
-        f"or variations with async drivers. Got: {conn_string[:50]}..."
+        f"or variations with async drivers. Got scheme: '{scheme}', "
+        f"connection string (first 100 chars): {conn_string[:100]}..."
     )
 
 
