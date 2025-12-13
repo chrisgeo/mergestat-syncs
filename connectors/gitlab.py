@@ -5,9 +5,14 @@ This connector provides methods to retrieve groups, projects,
 contributors, statistics, merge requests, and blame information from GitLab.
 """
 
+import asyncio
+import fnmatch
 import logging
+import time
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 import gitlab
 from gitlab.exceptions import GitlabAuthenticationError, GitlabError
@@ -20,6 +25,32 @@ from connectors.models import (Author, BlameRange, CommitStats, FileBlame,
 from connectors.utils import GitLabRESTClient, retry_with_backoff
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class GitLabBatchResult:
+    """Result of a batch project processing operation."""
+
+    project: Repository
+    stats: Optional[RepoStats] = None
+    error: Optional[str] = None
+    success: bool = True
+
+
+def match_project_pattern(full_name: str, pattern: str) -> bool:
+    """
+    Match a project full name against a pattern using fnmatch-style matching.
+
+    :param full_name: Project full name (e.g., 'group/project').
+    :param pattern: Pattern to match (e.g., 'group/p*', '*/sync*', 'group/*').
+    :return: True if the pattern matches, False otherwise.
+
+    Examples:
+        - 'group/p*' matches 'group/project'
+        - '*/sync*' matches 'anygroup/sync-tool'
+        - 'group/project' matches exactly 'group/project'
+    """
+    return fnmatch.fnmatch(full_name.lower(), pattern.lower())
 
 
 class GitLabConnector:
@@ -142,6 +173,7 @@ class GitLabConnector:
         group_id: Optional[int] = None,
         group_name: Optional[str] = None,
         search: Optional[str] = None,
+        pattern: Optional[str] = None,
         max_projects: Optional[int] = None,
     ) -> List[Repository]:
         """
@@ -151,8 +183,15 @@ class GitLabConnector:
         :param group_name: Optional group name/path. If provided, lists group projects.
                           Takes precedence over group_id if both are provided.
         :param search: Optional search query to filter projects by name.
+        :param pattern: Optional fnmatch-style pattern to filter projects by full name
+                       (e.g., 'group/p*', '*/api-*'). Pattern matching is performed
+                       client-side after fetching projects. Case-insensitive.
         :param max_projects: Maximum number of projects to retrieve. If None, retrieves all.
         :return: List of Repository objects (representing GitLab projects).
+
+        Examples:
+            - pattern='group/p*' matches 'group/project'
+            - pattern='*/sync*' matches 'anygroup/sync-tool'
         """
         try:
             projects = []
@@ -183,6 +222,10 @@ class GitLabConnector:
                     full_name = gl_project.name
                 else:
                     full_name = str(gl_project.id)
+
+                # Apply pattern filter early to avoid unnecessary object creation
+                if pattern and not match_project_pattern(full_name, pattern):
+                    continue
 
                 project = Repository(
                     id=gl_project.id,
@@ -233,7 +276,8 @@ class GitLabConnector:
                 projects.append(project)
                 logger.debug(f"Retrieved project: {project.full_name}")
 
-            logger.info(f"Retrieved {len(projects)} projects")
+            pattern_msg = f" matching pattern '{pattern}'" if pattern else ""
+            logger.info(f"Retrieved {len(projects)} projects{pattern_msg}")
             return projects
 
         except Exception as e:
@@ -638,6 +682,269 @@ class GitLabConnector:
 
         except Exception as e:
             self._handle_gitlab_exception(e)
+
+    def _get_projects_for_processing(
+        self,
+        group_id: Optional[int] = None,
+        group_name: Optional[str] = None,
+        pattern: Optional[str] = None,
+        max_projects: Optional[int] = None,
+    ) -> List[Repository]:
+        """
+        Get projects for batch processing, optionally filtered by pattern.
+
+        :param group_id: Optional group ID.
+        :param group_name: Optional group name/path.
+        :param pattern: Optional fnmatch-style pattern.
+        :param max_projects: Maximum number of projects to retrieve.
+        :return: List of Repository objects.
+        """
+        return self.list_projects(
+            group_id=group_id,
+            group_name=group_name,
+            pattern=pattern,
+            max_projects=max_projects,
+        )
+
+    def _process_single_project_stats(
+        self,
+        project: Repository,
+        max_commits: Optional[int] = None,
+    ) -> GitLabBatchResult:
+        """
+        Process a single project and get its stats.
+
+        :param project: Repository object to process.
+        :param max_commits: Maximum number of commits to analyze.
+        :return: GitLabBatchResult containing project and stats.
+        """
+        try:
+            stats = self.get_repo_stats(
+                project_name=project.full_name,
+                max_commits=max_commits,
+            )
+
+            return GitLabBatchResult(
+                project=project,
+                stats=stats,
+                success=True,
+            )
+
+        except Exception as e:
+            logger.warning(f"Failed to get stats for {project.full_name}: {e}")
+            return GitLabBatchResult(
+                project=project,
+                error=str(e),
+                success=False,
+            )
+
+    def get_projects_with_stats(
+        self,
+        group_id: Optional[int] = None,
+        group_name: Optional[str] = None,
+        pattern: Optional[str] = None,
+        batch_size: int = 10,
+        max_concurrent: int = 4,
+        rate_limit_delay: float = 1.0,
+        max_commits_per_project: Optional[int] = None,
+        max_projects: Optional[int] = None,
+        on_project_complete: Optional[Callable[[GitLabBatchResult], None]] = None,
+    ) -> List[GitLabBatchResult]:
+        """
+        Get projects and their stats with batch processing and rate limiting.
+
+        This method retrieves projects from a group or all accessible projects,
+        optionally filtering by pattern, and collects statistics for each
+        project with configurable batch processing and rate limiting.
+
+        :param group_id: Optional group ID to fetch projects from.
+        :param group_name: Optional group name/path to fetch projects from.
+        :param pattern: Optional fnmatch-style pattern to filter projects (e.g., 'group/p*').
+        :param batch_size: Number of projects to process in each batch.
+        :param max_concurrent: Maximum number of concurrent workers for processing.
+        :param rate_limit_delay: Delay in seconds between batches for rate limiting.
+        :param max_commits_per_project: Maximum commits to analyze per project.
+        :param max_projects: Maximum number of projects to process.
+        :param on_project_complete: Optional callback called after each project is processed.
+        :return: List of GitLabBatchResult objects with project and stats.
+
+        Example:
+            >>> results = connector.get_projects_with_stats(
+            ...     group_name='mygroup',
+            ...     pattern='mygroup/api-*',
+            ...     batch_size=5,
+            ...     max_concurrent=2,
+            ...     rate_limit_delay=2.0,
+            ... )
+            >>> for result in results:
+            ...     if result.success:
+            ...         print(f"{result.project.full_name}: {result.stats}")
+        """
+        # Step 1: Get projects
+        projects = self._get_projects_for_processing(
+            group_id=group_id,
+            group_name=group_name,
+            pattern=pattern,
+            max_projects=max_projects,
+        )
+
+        logger.info(f"Processing {len(projects)} projects with batch_size={batch_size}")
+
+        results = []
+
+        # Step 2: Process in batches
+        for batch_start in range(0, len(projects), batch_size):
+            batch_end = min(batch_start + batch_size, len(projects))
+            batch = projects[batch_start:batch_end]
+
+            logger.info(
+                f"Processing batch {batch_start // batch_size + 1}: "
+                f"projects {batch_start + 1}-{batch_end} of {len(projects)}"
+            )
+
+            # Process batch concurrently using ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=max_concurrent) as executor:
+                futures = [
+                    executor.submit(
+                        self._process_single_project_stats,
+                        project,
+                        max_commits_per_project,
+                    )
+                    for project in batch
+                ]
+
+                for future in futures:
+                    try:
+                        result = future.result()
+                        results.append(result)
+
+                        # Call callback if provided
+                        if on_project_complete:
+                            on_project_complete(result)
+
+                    except Exception as e:
+                        logger.error(f"Unexpected error in batch processing: {e}")
+
+            # Rate limiting delay between batches
+            if batch_end < len(projects) and rate_limit_delay > 0:
+                logger.debug(f"Rate limiting: waiting {rate_limit_delay}s")
+                time.sleep(rate_limit_delay)
+
+        logger.info(
+            f"Completed processing {len(results)} projects, "
+            f"{sum(1 for r in results if r.success)} successful"
+        )
+        return results
+
+    async def get_projects_with_stats_async(
+        self,
+        group_id: Optional[int] = None,
+        group_name: Optional[str] = None,
+        pattern: Optional[str] = None,
+        batch_size: int = 10,
+        max_concurrent: int = 4,
+        rate_limit_delay: float = 1.0,
+        max_commits_per_project: Optional[int] = None,
+        max_projects: Optional[int] = None,
+        on_project_complete: Optional[Callable[[GitLabBatchResult], None]] = None,
+    ) -> List[GitLabBatchResult]:
+        """
+        Async version of get_projects_with_stats for better concurrent processing.
+
+        This method retrieves projects from a group or all accessible projects,
+        optionally filtering by pattern, and collects statistics for each
+        project with configurable async batch processing and rate limiting.
+
+        :param group_id: Optional group ID to fetch projects from.
+        :param group_name: Optional group name/path to fetch projects from.
+        :param pattern: Optional fnmatch-style pattern to filter projects (e.g., 'group/p*').
+        :param batch_size: Number of projects to process in each batch.
+        :param max_concurrent: Maximum number of concurrent workers for processing.
+        :param rate_limit_delay: Delay in seconds between batches for rate limiting.
+        :param max_commits_per_project: Maximum commits to analyze per project.
+        :param max_projects: Maximum number of projects to process.
+        :param on_project_complete: Optional callback called after each project is processed.
+        :return: List of GitLabBatchResult objects with project and stats.
+
+        Example:
+            >>> import asyncio
+            >>> async def main():
+            ...     results = await connector.get_projects_with_stats_async(
+            ...         group_name='mygroup',
+            ...         pattern='mygroup/*',
+            ...         batch_size=5,
+            ...         max_concurrent=2,
+            ...     )
+            ...     for result in results:
+            ...         if result.success:
+            ...             print(f"{result.project.full_name}: {result.stats}")
+            >>> asyncio.run(main())
+        """
+        # Step 1: Get projects (using sync method via run_in_executor)
+        loop = asyncio.get_running_loop()
+
+        projects = await loop.run_in_executor(
+            None,
+            lambda: self._get_projects_for_processing(
+                group_id=group_id,
+                group_name=group_name,
+                pattern=pattern,
+                max_projects=max_projects,
+            ),
+        )
+
+        logger.info(f"Processing {len(projects)} projects asynchronously")
+
+        results = []
+        semaphore = asyncio.Semaphore(max_concurrent)
+
+        async def process_project_async(project: Repository) -> GitLabBatchResult:
+            """Process a single project asynchronously."""
+            async with semaphore:
+                result = await loop.run_in_executor(
+                    None,
+                    lambda: self._process_single_project_stats(
+                        project, max_commits_per_project
+                    ),
+                )
+
+                if on_project_complete:
+                    on_project_complete(result)
+
+                return result
+
+        # Step 2: Process in batches with rate limiting
+        for batch_start in range(0, len(projects), batch_size):
+            batch_end = min(batch_start + batch_size, len(projects))
+            batch = projects[batch_start:batch_end]
+
+            logger.info(
+                f"Processing async batch {batch_start // batch_size + 1}: "
+                f"projects {batch_start + 1}-{batch_end} of {len(projects)}"
+            )
+
+            # Process batch concurrently
+            batch_results = await asyncio.gather(
+                *[process_project_async(project) for project in batch],
+                return_exceptions=True,
+            )
+
+            for result in batch_results:
+                if isinstance(result, Exception):
+                    logger.error(f"Unexpected error in async batch processing: {result}")
+                else:
+                    results.append(result)
+
+            # Rate limiting delay between batches
+            if batch_end < len(projects) and rate_limit_delay > 0:
+                logger.debug(f"Rate limiting: waiting {rate_limit_delay}s before next batch")
+                await asyncio.sleep(rate_limit_delay)
+
+        logger.info(
+            f"Completed async processing {len(results)} projects, "
+            f"{sum(1 for r in results if r.success)} successful"
+        )
+        return results
 
     def close(self) -> None:
         """Close the connector and cleanup resources."""

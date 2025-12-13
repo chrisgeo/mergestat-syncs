@@ -116,6 +116,31 @@ You can also configure the database using command-line arguments, which will ove
 - **`--db`**: Database connection string
 - **`--repo-path`**: Path to the git repository
 
+#### GitHub Batch Processing (PR 31)
+
+The following arguments enable batch processing of multiple GitHub repositories:
+
+- **`--github-pattern`**: fnmatch-style pattern to filter repositories (e.g., `chrisgeo/m*`, `*/api-*`)
+- **`--github-batch-size`**: Number of repositories to process in each batch (default: 10)
+
+#### GitLab Batch Processing (PR 31)
+
+The following arguments enable batch processing of multiple GitLab projects:
+
+- **`--gitlab-pattern`**: fnmatch-style pattern to filter projects (e.g., `group/p*`, `*/api-*`)
+- **`--gitlab-group`**: GitLab group name/path to fetch projects from
+- **`--gitlab-batch-size`**: Number of projects to process in each batch (default: 10)
+
+#### Shared Batch Processing Options
+
+These options work with both GitHub and GitLab batch processing:
+
+- **`--max-concurrent`**: Maximum concurrent workers for batch processing (default: 4)
+- **`--rate-limit-delay`**: Delay in seconds between batches for rate limiting (default: 1.0)
+- **`--max-commits-per-repo`**: Maximum commits to analyze per repository/project
+- **`--max-repos`**: Maximum number of repositories/projects to process
+- **`--use-async`**: Use async processing for better performance
+
 Example usage:
 
 ```bash
@@ -130,6 +155,29 @@ python git_mergestat.py --db-type sqlite --db "sqlite+aiosqlite:///mergestat.db"
 
 # Using SQLite (in-memory)
 python git_mergestat.py --db-type sqlite --db "sqlite+aiosqlite:///:memory:"
+
+# Batch process GitHub repositories matching a pattern
+python git_mergestat.py \
+  --db-type sqlite --db "sqlite+aiosqlite:///mergestat.db" \
+  --github-token "$GITHUB_TOKEN" \
+  --github-owner "chrisgeo" \
+  --github-pattern "chrisgeo/merge*" \
+  --github-batch-size 5 \
+  --max-concurrent 2 \
+  --max-repos 10 \
+  --use-async
+
+# Batch process GitLab projects matching a pattern
+python git_mergestat.py \
+  --db-type sqlite --db "sqlite+aiosqlite:///mergestat.db" \
+  --gitlab-token "$GITLAB_TOKEN" \
+  --gitlab-url "https://gitlab.com" \
+  --gitlab-group "mygroup" \
+  --gitlab-pattern "mygroup/api-*" \
+  --gitlab-batch-size 5 \
+  --max-concurrent 2 \
+  --max-repos 10 \
+  --use-async
 ```
 
 ### MongoDB Connection String Format

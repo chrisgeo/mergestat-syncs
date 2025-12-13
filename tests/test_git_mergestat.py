@@ -259,3 +259,177 @@ class TestDBEchoConfiguration:
         with patch.dict(os.environ, {"DB_ECHO": ""}):
             result = os.getenv("DB_ECHO", "false").lower() in ("true", "1", "yes")
             assert result is False
+
+
+class TestBatchProcessingCLIArguments:
+    """Test cases for batch processing CLI argument parsing.
+
+    Note: These tests re-implement the argument parsing logic rather than importing
+    parse_args() from git_mergestat.py directly. This avoids module-level database
+    connection issues when importing git_mergestat.py (see comment at top of this file).
+    """
+
+    def test_github_pattern_argument(self):
+        """Test that --github-pattern argument is parsed correctly."""
+        import argparse
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--db", required=False)
+        parser.add_argument("--github-pattern", required=False)
+        parser.add_argument("--github-batch-size", type=int, default=10)
+        parser.add_argument("--max-concurrent", type=int, default=4)
+        parser.add_argument("--rate-limit-delay", type=float, default=1.0)
+        parser.add_argument("--max-commits-per-repo", type=int)
+        parser.add_argument("--max-repos", type=int)
+        parser.add_argument("--use-async", action="store_true")
+
+        test_args = [
+            "--github-pattern",
+            "chrisgeo/m*",
+            "--db",
+            "sqlite+aiosqlite:///:memory:",
+        ]
+        args = parser.parse_args(test_args)
+
+        assert args.github_pattern == "chrisgeo/m*"
+        assert args.github_batch_size == 10
+        assert args.max_concurrent == 4
+        assert args.rate_limit_delay == 1.0
+        assert args.max_commits_per_repo is None
+        assert args.max_repos is None
+        assert args.use_async is False
+
+    def test_batch_processing_arguments_with_custom_values(self):
+        """Test that batch processing arguments accept custom values."""
+        import argparse
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--github-pattern", required=False)
+        parser.add_argument("--github-batch-size", type=int, default=10)
+        parser.add_argument("--max-concurrent", type=int, default=4)
+        parser.add_argument("--rate-limit-delay", type=float, default=1.0)
+        parser.add_argument("--max-commits-per-repo", type=int)
+        parser.add_argument("--max-repos", type=int)
+        parser.add_argument("--use-async", action="store_true")
+
+        test_args = [
+            "--github-pattern",
+            "org/*",
+            "--github-batch-size",
+            "20",
+            "--max-concurrent",
+            "8",
+            "--rate-limit-delay",
+            "2.5",
+            "--max-commits-per-repo",
+            "100",
+            "--max-repos",
+            "50",
+            "--use-async",
+        ]
+
+        args = parser.parse_args(test_args)
+
+        assert args.github_pattern == "org/*"
+        assert args.github_batch_size == 20
+        assert args.max_concurrent == 8
+        assert args.rate_limit_delay == 2.5
+        assert args.max_commits_per_repo == 100
+        assert args.max_repos == 50
+        assert args.use_async is True
+
+    def test_use_async_flag_default_is_false(self):
+        """Test that --use-async flag defaults to False."""
+        import argparse
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--use-async", action="store_true")
+
+        args = parser.parse_args([])
+
+        assert args.use_async is False
+
+    def test_use_async_flag_when_provided(self):
+        """Test that --use-async flag is True when provided."""
+        import argparse
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--use-async", action="store_true")
+
+        args = parser.parse_args(["--use-async"])
+
+        assert args.use_async is True
+
+    def test_gitlab_pattern_argument(self):
+        """Test that --gitlab-pattern argument is parsed correctly."""
+        import argparse
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--db", required=False)
+        parser.add_argument("--gitlab-pattern", required=False)
+        parser.add_argument("--gitlab-group", required=False)
+        parser.add_argument("--gitlab-batch-size", type=int, default=10)
+        parser.add_argument("--max-concurrent", type=int, default=4)
+        parser.add_argument("--rate-limit-delay", type=float, default=1.0)
+        parser.add_argument("--max-commits-per-repo", type=int)
+        parser.add_argument("--max-repos", type=int)
+        parser.add_argument("--use-async", action="store_true")
+
+        test_args = [
+            "--gitlab-pattern",
+            "group/p*",
+            "--db",
+            "sqlite+aiosqlite:///:memory:",
+        ]
+        args = parser.parse_args(test_args)
+
+        assert args.gitlab_pattern == "group/p*"
+        assert args.gitlab_batch_size == 10
+        assert args.max_concurrent == 4
+        assert args.rate_limit_delay == 1.0
+        assert args.max_commits_per_repo is None
+        assert args.max_repos is None
+        assert args.use_async is False
+
+    def test_gitlab_batch_processing_arguments_with_custom_values(self):
+        """Test that GitLab batch processing arguments accept custom values."""
+        import argparse
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--gitlab-pattern", required=False)
+        parser.add_argument("--gitlab-group", required=False)
+        parser.add_argument("--gitlab-batch-size", type=int, default=10)
+        parser.add_argument("--max-concurrent", type=int, default=4)
+        parser.add_argument("--rate-limit-delay", type=float, default=1.0)
+        parser.add_argument("--max-commits-per-repo", type=int)
+        parser.add_argument("--max-repos", type=int)
+        parser.add_argument("--use-async", action="store_true")
+
+        test_args = [
+            "--gitlab-pattern",
+            "mygroup/*",
+            "--gitlab-group",
+            "mygroup",
+            "--gitlab-batch-size",
+            "15",
+            "--max-concurrent",
+            "6",
+            "--rate-limit-delay",
+            "1.5",
+            "--max-commits-per-repo",
+            "50",
+            "--max-repos",
+            "25",
+            "--use-async",
+        ]
+
+        args = parser.parse_args(test_args)
+
+        assert args.gitlab_pattern == "mygroup/*"
+        assert args.gitlab_group == "mygroup"
+        assert args.gitlab_batch_size == 15
+        assert args.max_concurrent == 6
+        assert args.rate_limit_delay == 1.5
+        assert args.max_commits_per_repo == 50
+        assert args.max_repos == 25
+        assert args.use_async is True
