@@ -81,8 +81,18 @@ def _parse_since(value: Optional[str]) -> Optional[datetime]:
     return parsed
 
 
-def _normalize_datetime(dt: datetime) -> datetime:
+def _normalize_datetime(dt: Union[datetime, str, None]) -> datetime:
     """Ensure datetime values are timezone-aware and normalized to UTC."""
+    if dt is None:
+        return datetime.now(timezone.utc)
+
+    if isinstance(dt, str):
+        try:
+            dt = datetime.fromisoformat(dt)
+        except ValueError:
+            # Fall back to current time if the string cannot be parsed
+            return datetime.now(timezone.utc)
+
     if dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc)
@@ -761,15 +771,18 @@ async def process_git_commits(
 
 
 async def process_single_file_blame(
-    filepath: Path, repo: Repo, repo_uuid: uuid.UUID, semaphore: asyncio.Semaphore
+    filepath: Path,
+    repo: Union[Repo, str, Path],
+    semaphore: asyncio.Semaphore,
+    repo_uuid: Optional[uuid.UUID] = None,
 ) -> List[GitBlame]:
     """
     Process a single file for blame data with concurrency control.
 
     :param filepath: Path to the file.
-    :param repo: Git repository object (thread-safe if used correctly).
-    :param repo_uuid: UUID of the repository.
+    :param repo: Git repository object or path (thread-safe if used correctly).
     :param semaphore: Semaphore to control concurrent file processing.
+    :param repo_uuid: Optional UUID of the repository (falls back to repo.id or a random UUID).
     :return: List of GitBlame objects.
     """
     async with semaphore:
@@ -777,6 +790,11 @@ async def process_single_file_blame(
         loop = asyncio.get_event_loop()
 
         def process_blame():
+            repo_obj = repo if hasattr(repo, "working_dir") else None
+            repo_path = getattr(repo_obj, "working_dir", None) if repo_obj else str(repo)
+            effective_repo_uuid = (
+                repo_uuid if repo_uuid is not None else getattr(repo_obj, "id", None)
+            ) or uuid.uuid4()
             # Use the existing repo instance - gitpython's blame is generally thread-safe
             # for read operations, or we can rely on the semaphore to limit concurrency
             # if needed. However, to be absolutely safe with gitpython which can have
@@ -793,7 +811,7 @@ async def process_single_file_blame(
             # race conditions. GitPython's `blame` command spawns a subprocess, so
             # it should be fine to call concurrently on the same Repo object.
             return GitBlame.process_file(
-                repo.working_dir, filepath, repo_uuid, repo=repo
+                repo_path, filepath, effective_repo_uuid, repo=repo_obj
             )
 
         blame_objects = await loop.run_in_executor(None, process_blame)
@@ -832,7 +850,9 @@ async def process_git_blame(
         # Process chunk in parallel
         # Pass the repo object directly to avoid re-opening it
         tasks = [
-            process_single_file_blame(filepath, repo, repo.id, semaphore)
+            process_single_file_blame(
+                filepath, repo, semaphore, repo_uuid=getattr(repo, "id", None)
+            )
             for filepath in chunk
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
