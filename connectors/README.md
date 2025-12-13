@@ -2,8 +2,33 @@
 
 Production-grade connectors for retrieving data from GitHub and GitLab APIs with automatic pagination, rate limiting, and error handling.
 
+## Architecture
+
+All connectors inherit from the `GitConnector` abstract base class, which defines a common interface:
+
+```python
+from connectors import GitConnector, GitHubConnector, GitLabConnector, BatchResult
+
+# All connectors implement these methods:
+# - list_organizations()
+# - list_repositories()
+# - get_contributors()
+# - get_commit_stats()
+# - get_repo_stats()
+# - get_pull_requests()
+# - get_file_blame()
+# - get_repos_with_stats()
+# - get_repos_with_stats_async()
+# - close()
+
+# Use as context manager
+with GitHubConnector(token="your_token") as connector:
+    repos = connector.list_repositories(max_repos=10)
+```
+
 ## Features
 
+- **Base Connector Class**: Common interface for all connectors (`GitConnector`)
 - **GitHub Connector**: Uses PyGithub and GraphQL API
   - Fetch repositories for organizations and individual users
   - **Full support for private repositories** with proper token scopes
@@ -15,11 +40,13 @@ Production-grade connectors for retrieving data from GitHub and GitLab APIs with
   - Fetch projects for groups using group names or IDs
   - Search and filter projects by keywords
   - Support for fetching ALL projects or limiting results
+- **Batch Processing**: Process multiple repositories with pattern matching
 - **Automatic Pagination**: Handles paginated responses seamlessly
 - **Rate Limiting**: Exponential backoff for API rate limits
 - **Retry Logic**: Automatic retries with configurable backoff
 - **Type-Safe Models**: Dataclasses for all data structures
 - **Error Handling**: Clear exception types for different errors
+- **Context Manager Support**: Use `with` statement for automatic cleanup
 - **Backward Compatible**: All legacy parameters still supported
 
 ## Installation

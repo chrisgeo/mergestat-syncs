@@ -112,29 +112,28 @@ This project supports PostgreSQL, MongoDB, and SQLite as storage backends. You c
 
 You can also configure the database using command-line arguments, which will override environment variables:
 
-- **`--db-type`**: Database backend to use (`postgres`, `mongo`, or `sqlite`)
-- **`--db`**: Database connection string
-- **`--repo-path`**: Path to the git repository
+#### Core Arguments
 
-#### GitHub Batch Processing (PR 31)
+- **`--db`**: Database connection string (auto-detects database type from URL scheme)
+- **`--db-type`**: Database backend to use (`postgres`, `mongo`, or `sqlite`) - optional if URL scheme is clear
+- **`--connector`**: Connector type (`local`, `github`, or `gitlab`)
+- **`--auth`**: Authentication token (works for both GitHub and GitLab)
+- **`--repo-path`**: Path to the git repository (for local mode)
 
-The following arguments enable batch processing of multiple GitHub repositories:
+#### Connector-Specific Arguments
 
-- **`--github-pattern`**: fnmatch-style pattern to filter repositories (e.g., `chrisgeo/m*`, `*/api-*`)
-- **`--github-batch-size`**: Number of repositories to process in each batch (default: 10)
+- **`--github-owner`**: GitHub repository owner/organization
+- **`--github-repo`**: GitHub repository name
+- **`--gitlab-url`**: GitLab instance URL (default: https://gitlab.com)
+- **`--gitlab-project-id`**: GitLab project ID (numeric)
 
-#### GitLab Batch Processing (PR 31)
+#### Batch Processing Options
 
-The following arguments enable batch processing of multiple GitLab projects:
+These unified options work with both GitHub and GitLab connectors:
 
-- **`--gitlab-pattern`**: fnmatch-style pattern to filter projects (e.g., `group/p*`, `*/api-*`)
-- **`--gitlab-group`**: GitLab group name/path to fetch projects from
-- **`--gitlab-batch-size`**: Number of projects to process in each batch (default: 10)
-
-#### Shared Batch Processing Options
-
-These options work with both GitHub and GitLab batch processing:
-
+- **`-s, --search-pattern`**: fnmatch-style pattern to filter repositories/projects (e.g., `owner/repo*`, `group/p*`)
+- **`--batch-size`**: Number of repositories/projects to process in each batch (default: 10)
+- **`--group`**: Organization/group name to fetch repositories/projects from
 - **`--max-concurrent`**: Maximum concurrent workers for batch processing (default: 4)
 - **`--rate-limit-delay`**: Delay in seconds between batches for rate limiting (default: 1.0)
 - **`--max-commits-per-repo`**: Maximum commits to analyze per repository/project
@@ -144,37 +143,54 @@ These options work with both GitHub and GitLab batch processing:
 Example usage:
 
 ```bash
-# Using PostgreSQL
-python git_mergestat.py --db-type postgres --db "postgresql+asyncpg://user:pass@localhost:5432/mergestat"
+# Using PostgreSQL (auto-detected from URL)
+python git_mergestat.py --db "postgresql+asyncpg://user:pass@localhost:5432/mergestat"
 
-# Using MongoDB
-python git_mergestat.py --db-type mongo --db "mongodb://localhost:27017"
+# Using MongoDB (auto-detected from URL)
+python git_mergestat.py --db "mongodb://localhost:27017"
 
-# Using SQLite (file-based)
-python git_mergestat.py --db-type sqlite --db "sqlite+aiosqlite:///mergestat.db"
+# Using SQLite (file-based, auto-detected)
+python git_mergestat.py --db "sqlite+aiosqlite:///mergestat.db"
 
 # Using SQLite (in-memory)
-python git_mergestat.py --db-type sqlite --db "sqlite+aiosqlite:///:memory:"
+python git_mergestat.py --db "sqlite+aiosqlite:///:memory:"
 
-# Batch process GitHub repositories matching a pattern
+# GitHub repository with unified auth
 python git_mergestat.py \
-  --db-type sqlite --db "sqlite+aiosqlite:///mergestat.db" \
-  --github-token "$GITHUB_TOKEN" \
-  --github-owner "chrisgeo" \
-  --github-pattern "chrisgeo/merge*" \
-  --github-batch-size 5 \
+  --db "postgresql+asyncpg://user:pass@localhost:5432/mergestat" \
+  --connector github \
+  --auth "$GITHUB_TOKEN" \
+  --github-owner torvalds \
+  --github-repo linux
+
+# GitLab project with unified auth
+python git_mergestat.py \
+  --db "mongodb://localhost:27017" \
+  --connector gitlab \
+  --auth "$GITLAB_TOKEN" \
+  --gitlab-project-id 278964
+
+# Batch process repositories matching a pattern (GitHub)
+python git_mergestat.py \
+  --db "sqlite+aiosqlite:///mergestat.db" \
+  --connector github \
+  --auth "$GITHUB_TOKEN" \
+  --search-pattern "chrisgeo/merge*" \
+  --group "chrisgeo" \
+  --batch-size 5 \
   --max-concurrent 2 \
   --max-repos 10 \
   --use-async
 
-# Batch process GitLab projects matching a pattern
+# Batch process projects matching a pattern (GitLab)
 python git_mergestat.py \
-  --db-type sqlite --db "sqlite+aiosqlite:///mergestat.db" \
-  --gitlab-token "$GITLAB_TOKEN" \
+  --db "sqlite+aiosqlite:///mergestat.db" \
+  --connector gitlab \
+  --auth "$GITLAB_TOKEN" \
   --gitlab-url "https://gitlab.com" \
-  --gitlab-group "mygroup" \
-  --gitlab-pattern "mygroup/api-*" \
-  --gitlab-batch-size 5 \
+  --group "mygroup" \
+  --search-pattern "mygroup/api-*" \
+  --batch-size 5 \
   --max-concurrent 2 \
   --max-repos 10 \
   --use-async
