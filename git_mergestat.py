@@ -1435,6 +1435,19 @@ async def process_github_repos_batch(
             )
             await store.insert_git_commit_stats([stat])
 
+        # Backfill missing file/commit stat/blame details from the integration.
+        try:
+            await _backfill_github_missing_data(
+                store=store,
+                connector=connector,
+                db_repo=db_repo,
+                repo_full_name=repo_info.full_name,
+                default_branch=repo_info.default_branch,
+                max_commits=max_commits_per_repo,
+            )
+        except Exception as e:
+            logging.debug(f"Backfill failed for GitHub repo {repo_info.full_name}: {e}")
+
     def on_repo_complete(result: BatchResult) -> None:
         """Callback for when each repository is processed - logs and queues for storage."""
         all_results.append(result)
@@ -1665,6 +1678,21 @@ async def process_gitlab_projects_batch(
                 new_file_mode="unknown",
             )
             await store.insert_git_commit_stats([stat])
+
+        # Backfill missing file/commit stat/blame details from the integration.
+        try:
+            await _backfill_gitlab_missing_data(
+                store=store,
+                connector=connector,
+                db_repo=db_repo,
+                project_full_name=project_info.full_name,
+                default_branch=project_info.default_branch,
+                max_commits=max_commits_per_project,
+            )
+        except Exception as e:
+            logging.debug(
+                f"Backfill failed for GitLab project {project_info.full_name}: {e}"
+            )
 
     def on_project_complete(result: GitLabBatchResult) -> None:
         """Callback for when each project is processed - logs and queues for storage."""

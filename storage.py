@@ -127,6 +127,14 @@ class SQLAlchemyStore:
 
     async def __aenter__(self) -> "SQLAlchemyStore":
         self.session = self.session_factory()
+
+        # Create tables for SQLite automatically
+        if "sqlite" in str(self.engine.url):
+            from models.git import Base
+
+            async with self.engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
@@ -159,7 +167,9 @@ class SQLAlchemyStore:
     async def has_any_git_blame(self, repo_id) -> bool:
         assert self.session is not None
         result = await self.session.execute(
-            select(func.count()).select_from(GitBlame).where(GitBlame.repo_id == repo_id)
+            select(func.count())
+            .select_from(GitBlame)
+            .where(GitBlame.repo_id == repo_id)
         )
         return (result.scalar() or 0) > 0
 
@@ -238,7 +248,9 @@ class MongoStore:
 
     async def has_any_git_files(self, repo_id) -> bool:
         repo_id_val = _serialize_value(repo_id)
-        count = await self.db["git_files"].count_documents({"repo_id": repo_id_val}, limit=1)
+        count = await self.db["git_files"].count_documents(
+            {"repo_id": repo_id_val}, limit=1
+        )
         return count > 0
 
     async def has_any_git_commit_stats(self, repo_id) -> bool:
@@ -250,7 +262,9 @@ class MongoStore:
 
     async def has_any_git_blame(self, repo_id) -> bool:
         repo_id_val = _serialize_value(repo_id)
-        count = await self.db["git_blame"].count_documents({"repo_id": repo_id_val}, limit=1)
+        count = await self.db["git_blame"].count_documents(
+            {"repo_id": repo_id_val}, limit=1
+        )
         return count > 0
 
     async def insert_git_file_data(self, file_data: List[GitFile]) -> None:
