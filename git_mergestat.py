@@ -1141,11 +1141,6 @@ Examples:
 
     # GitHub connector options
     parser.add_argument(
-        "--github-token",
-        required=False,
-        help="GitHub personal access token (or use --auth or GITHUB_TOKEN env var).",
-    )
-    parser.add_argument(
         "--github-owner",
         required=False,
         help="GitHub repository owner/organization.",
@@ -1157,11 +1152,6 @@ Examples:
     )
 
     # GitLab connector options
-    parser.add_argument(
-        "--gitlab-token",
-        required=False,
-        help="GitLab private token (or use --auth or GITLAB_TOKEN env var).",
-    )
     parser.add_argument(
         "--gitlab-url",
         required=False,
@@ -1317,10 +1307,10 @@ async def main() -> None:
             "Database connection string is required (set DB_CONN_STRING or use --db)"
         )
 
-    # Determine authentication token (--auth takes precedence, then specific tokens)
+    # Determine authentication token (--auth or environment variables)
     auth_token = args.auth
-    github_token = auth_token or args.github_token or os.getenv("GITHUB_TOKEN")
-    gitlab_token = auth_token or args.gitlab_token or os.getenv("GITLAB_TOKEN")
+    github_token = auth_token or os.getenv("GITHUB_TOKEN")
+    gitlab_token = auth_token or os.getenv("GITLAB_TOKEN")
 
     # Determine operating mode
     use_github, use_github_batch, use_gitlab, use_gitlab_batch = _determine_mode(
