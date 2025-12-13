@@ -9,7 +9,75 @@ from sqlalchemy import select
 
 from models import GitBlame, GitCommit, GitCommitStat, GitFile, Repo
 from models.git import Base
-from storage import MongoStore, SQLAlchemyStore, model_to_dict
+from storage import MongoStore, SQLAlchemyStore, create_store, detect_db_type, model_to_dict
+
+
+class TestDetectDbType:
+    """Tests for the detect_db_type function."""
+
+    def test_detect_mongodb(self):
+        """Test detection of MongoDB connection strings."""
+        assert detect_db_type("mongodb://localhost:27017/mydb") == "mongo"
+        assert detect_db_type("mongodb+srv://user:pass@cluster.mongodb.net/db") == "mongo"
+
+    def test_detect_postgresql(self):
+        """Test detection of PostgreSQL connection strings."""
+        assert detect_db_type("postgresql://localhost/mydb") == "postgres"
+        assert detect_db_type("postgres://localhost/mydb") == "postgres"
+        assert detect_db_type("postgresql+asyncpg://localhost/mydb") == "postgres"
+
+    def test_detect_sqlite(self):
+        """Test detection of SQLite connection strings."""
+        assert detect_db_type("sqlite:///test.db") == "sqlite"
+        assert detect_db_type("sqlite+aiosqlite:///:memory:") == "sqlite"
+
+    def test_detect_mysql(self):
+        """Test detection of MySQL connection strings."""
+        assert detect_db_type("mysql://localhost/mydb") == "mysql"
+        assert detect_db_type("mysql+aiomysql://localhost/mydb") == "mysql"
+
+    def test_detect_empty_string_raises(self):
+        """Test that empty connection string raises ValueError."""
+        with pytest.raises(ValueError, match="Connection string is required"):
+            detect_db_type("")
+
+    def test_detect_unknown_raises(self):
+        """Test that unknown connection string raises ValueError."""
+        with pytest.raises(ValueError, match="Could not detect database type"):
+            detect_db_type("unknown://localhost/mydb")
+
+
+class TestCreateStore:
+    """Tests for the create_store factory function."""
+
+    def test_create_mongo_store(self):
+        """Test creation of MongoStore from connection string."""
+        store = create_store("mongodb://localhost:27017/mydb")
+        assert isinstance(store, MongoStore)
+
+    def test_create_sqlalchemy_store_postgres(self):
+        """Test creation of SQLAlchemyStore for PostgreSQL."""
+        store = create_store("postgresql+asyncpg://localhost/mydb")
+        assert isinstance(store, SQLAlchemyStore)
+
+    def test_create_sqlalchemy_store_sqlite(self):
+        """Test creation of SQLAlchemyStore for SQLite."""
+        store = create_store("sqlite+aiosqlite:///:memory:")
+        assert isinstance(store, SQLAlchemyStore)
+
+    def test_create_store_with_explicit_db_type(self):
+        """Test creation with explicit db_type overriding auto-detection."""
+        # Force PostgreSQL even though URL looks like SQLite
+        store = create_store(
+            "postgresql+asyncpg://localhost/mydb",
+            db_type="postgres"
+        )
+        assert isinstance(store, SQLAlchemyStore)
+
+    def test_create_store_unsupported_type_raises(self):
+        """Test that unsupported db_type raises ValueError."""
+        with pytest.raises(ValueError, match="Unsupported database type"):
+            create_store("postgresql://localhost/mydb", db_type="oracle")
 
 
 def test_model_to_dict_serializes_uuid_and_fields(repo_uuid):

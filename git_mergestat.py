@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import List, Tuple, Union
 
 from models.git import GitBlame, GitCommit, GitCommitStat, GitFile, Repo
-from storage import MongoStore, SQLAlchemyStore
+from storage import MongoStore, SQLAlchemyStore, create_store, detect_db_type
 
 # Import connectors (optional - will be None if not available)
 try:
@@ -1086,9 +1086,39 @@ def parse_args():
     Parse command-line arguments.
     """
     parser = argparse.ArgumentParser(
-        description="Process git repository data from local repo or GitHub/GitLab."
+        description="Process git repository data from local repo or GitHub/GitLab.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Local repository processing
+  python git_mergestat.py --db="postgresql://..." --connector=local --repo-path=/path/to/repo
+
+  # GitHub repository processing (simplified)
+  python git_mergestat.py --db="postgresql://..." --connector=github --auth=$GITHUB_TOKEN \\
+      --github-owner=myorg --github-repo=myrepo
+
+  # GitLab repository processing (simplified)
+  python git_mergestat.py --db="mongodb://..." --connector=gitlab --auth=$GITLAB_TOKEN \\
+      --gitlab-project-id=12345
+
+  # Auto-detect database type from connection string
+  python git_mergestat.py --db="mongodb://localhost:27017/mydb" --connector=local
+        """,
     )
+
+    # Simplified interface arguments
     parser.add_argument("--db", required=False, help="Database connection string.")
+    parser.add_argument(
+        "--connector",
+        required=False,
+        choices=["local", "github", "gitlab"],
+        help="Connector type to use (local, github, or gitlab).",
+    )
+    parser.add_argument(
+        "--auth",
+        required=False,
+        help="Authentication token (GitHub or GitLab token).",
+    )
     parser.add_argument(
         "--repo-path", required=False, help="Path to the local git repository."
     )
@@ -1096,7 +1126,7 @@ def parse_args():
         "--db-type",
         required=False,
         choices=["postgres", "mongo", "sqlite"],
-        help="Database backend to use (postgres, mongo, or sqlite).",
+        help="Database backend to use (auto-detected from --db if not specified).",
     )
     parser.add_argument(
         "--start-date",
@@ -1113,7 +1143,7 @@ def parse_args():
     parser.add_argument(
         "--github-token",
         required=False,
-        help="GitHub personal access token (or set GITHUB_TOKEN env var).",
+        help="GitHub personal access token (or use --auth or GITHUB_TOKEN env var).",
     )
     parser.add_argument(
         "--github-owner",
@@ -1130,7 +1160,7 @@ def parse_args():
     parser.add_argument(
         "--gitlab-token",
         required=False,
-        help="GitLab private token (or set GITLAB_TOKEN env var).",
+        help="GitLab private token (or use --auth or GITLAB_TOKEN env var).",
     )
     parser.add_argument(
         "--gitlab-url",
@@ -1226,8 +1256,16 @@ async def main() -> None:
         DB_CONN_STRING = args.db
     if args.repo_path:
         REPO_PATH = args.repo_path
+
+    # Auto-detect database type from connection string if not specified
     if args.db_type:
         DB_TYPE = args.db_type.lower()
+    elif DB_CONN_STRING:
+        try:
+            DB_TYPE = detect_db_type(DB_CONN_STRING)
+            logging.info(f"Auto-detected database type: {DB_TYPE}")
+        except ValueError:
+            pass  # Fall back to environment variable
 
     if DB_TYPE not in {"postgres", "mongo", "sqlite"}:
         raise ValueError("DB_TYPE must be 'postgres', 'mongo', or 'sqlite'")
@@ -1236,14 +1274,58 @@ async def main() -> None:
             "Database connection string is required (set DB_CONN_STRING or use --db)"
         )
 
-    # Determine mode: local repo, GitHub, GitHub batch, GitLab, or GitLab batch
-    github_token = args.github_token or os.getenv("GITHUB_TOKEN")
-    gitlab_token = args.gitlab_token or os.getenv("GITLAB_TOKEN")
+    # Determine authentication token (--auth takes precedence, then specific tokens)
+    auth_token = args.auth
+    github_token = auth_token or args.github_token or os.getenv("GITHUB_TOKEN")
+    gitlab_token = auth_token or args.gitlab_token or os.getenv("GITLAB_TOKEN")
 
-    use_github = github_token and args.github_owner and args.github_repo
-    use_github_batch = github_token and args.github_pattern
-    use_gitlab = gitlab_token and args.gitlab_project_id
-    use_gitlab_batch = gitlab_token and args.gitlab_pattern
+    # Determine mode based on --connector argument or legacy arguments
+    connector_type = args.connector
+
+    # If --connector is specified, use it to determine the mode
+    if connector_type == "github":
+        if args.github_pattern:
+            use_github = False
+            use_github_batch = True
+        elif args.github_owner and args.github_repo:
+            use_github = True
+            use_github_batch = False
+        else:
+            raise ValueError(
+                "GitHub connector requires --github-owner and --github-repo, "
+                "or --github-pattern for batch processing."
+            )
+        use_gitlab = False
+        use_gitlab_batch = False
+        use_local = False
+    elif connector_type == "gitlab":
+        if args.gitlab_pattern:
+            use_gitlab = False
+            use_gitlab_batch = True
+        elif args.gitlab_project_id:
+            use_gitlab = True
+            use_gitlab_batch = False
+        else:
+            raise ValueError(
+                "GitLab connector requires --gitlab-project-id, "
+                "or --gitlab-pattern for batch processing."
+            )
+        use_github = False
+        use_github_batch = False
+        use_local = False
+    elif connector_type == "local":
+        use_github = False
+        use_github_batch = False
+        use_gitlab = False
+        use_gitlab_batch = False
+        use_local = True
+    else:
+        # Legacy mode detection
+        use_github = github_token and args.github_owner and args.github_repo
+        use_github_batch = github_token and args.github_pattern
+        use_gitlab = gitlab_token and args.gitlab_project_id
+        use_gitlab_batch = gitlab_token and args.gitlab_pattern
+        use_local = not any([use_github, use_github_batch, use_gitlab, use_gitlab_batch])
 
     modes_active = sum([use_github, use_github_batch, use_gitlab, use_gitlab_batch])
     if modes_active > 1:
@@ -1255,12 +1337,13 @@ async def main() -> None:
             "or GitLab batch (--gitlab-pattern)."
         )
 
-    # Initialize storage
-    if DB_TYPE == "mongo":
-        store: DataStore = MongoStore(DB_CONN_STRING, db_name=MONGO_DB_NAME)
-    else:
-        # Both postgres and sqlite use SQLAlchemyStore
-        store = SQLAlchemyStore(DB_CONN_STRING, echo=DB_ECHO)
+    # Initialize storage using factory function
+    store: DataStore = create_store(
+        DB_CONN_STRING,
+        db_type=DB_TYPE,
+        db_name=MONGO_DB_NAME,
+        echo=DB_ECHO,
+    )
 
     async with store as storage:
         if use_github_batch:

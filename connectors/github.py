@@ -10,12 +10,12 @@ import fnmatch
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable, List, Optional
 
 from github import Github, GithubException, RateLimitExceededException
 
+from connectors.base import BatchResult, GitConnector
 from connectors.exceptions import (APIException, AuthenticationException,
                                    RateLimitException)
 from connectors.models import (Author, BlameRange, CommitStats, FileBlame,
@@ -24,16 +24,6 @@ from connectors.models import (Author, BlameRange, CommitStats, FileBlame,
 from connectors.utils import GitHubGraphQLClient, retry_with_backoff
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class BatchResult:
-    """Result of a batch repository processing operation."""
-
-    repository: Repository
-    stats: Optional[RepoStats] = None
-    error: Optional[str] = None
-    success: bool = True
 
 
 def match_repo_pattern(full_name: str, pattern: str) -> bool:
@@ -52,7 +42,7 @@ def match_repo_pattern(full_name: str, pattern: str) -> bool:
     return fnmatch.fnmatch(full_name.lower(), pattern.lower())
 
 
-class GitHubConnector:
+class GitHubConnector(GitConnector):
     """
     Production-grade GitHub connector using PyGithub and GraphQL.
 
@@ -75,9 +65,8 @@ class GitHubConnector:
         :param per_page: Number of items per page for pagination.
         :param max_workers: Maximum concurrent workers for operations.
         """
+        super().__init__(per_page=per_page, max_workers=max_workers)
         self.token = token
-        self.per_page = per_page
-        self.max_workers = max_workers
 
         # Initialize PyGithub client
         if base_url:

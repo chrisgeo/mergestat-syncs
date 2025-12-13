@@ -17,6 +17,7 @@ from typing import Callable, List, Optional
 import gitlab
 from gitlab.exceptions import GitlabAuthenticationError, GitlabError
 
+from connectors.base import GitConnector
 from connectors.exceptions import (APIException, AuthenticationException,
                                    RateLimitException)
 from connectors.models import (Author, BlameRange, CommitStats, FileBlame,
@@ -53,7 +54,7 @@ def match_project_pattern(full_name: str, pattern: str) -> bool:
     return fnmatch.fnmatch(full_name.lower(), pattern.lower())
 
 
-class GitLabConnector:
+class GitLabConnector(GitConnector):
     """
     Production-grade GitLab connector using python-gitlab and REST API.
 
@@ -76,10 +77,9 @@ class GitLabConnector:
         :param per_page: Number of items per page for pagination.
         :param max_workers: Maximum concurrent workers for operations.
         """
+        super().__init__(per_page=per_page, max_workers=max_workers)
         self.url = url
         self.private_token = private_token
-        self.per_page = per_page
-        self.max_workers = max_workers
 
         # Initialize python-gitlab client
         self.gitlab = gitlab.Gitlab(url=url, private_token=private_token)
@@ -288,7 +288,7 @@ class GitLabConnector:
         initial_delay=1.0,
         exceptions=(RateLimitException, APIException),
     )
-    def get_contributors(
+    def get_contributors_by_project(
         self,
         project_id: Optional[int] = None,
         project_name: Optional[str] = None,
@@ -343,7 +343,7 @@ class GitLabConnector:
         initial_delay=1.0,
         exceptions=(RateLimitException, APIException),
     )
-    def get_commit_stats(
+    def get_commit_stats_by_project(
         self,
         project_id: Optional[int] = None,
         project_name: Optional[str] = None,
@@ -384,7 +384,7 @@ class GitLabConnector:
         initial_delay=1.0,
         exceptions=(RateLimitException, APIException),
     )
-    def get_repo_stats(
+    def get_repo_stats_by_project(
         self,
         project_id: Optional[int] = None,
         project_name: Optional[str] = None,
@@ -600,7 +600,7 @@ class GitLabConnector:
         initial_delay=1.0,
         exceptions=(RateLimitException, APIException),
     )
-    def get_file_blame(
+    def get_file_blame_by_project(
         self,
         file_path: str,
         project_id: Optional[int] = None,
@@ -719,7 +719,7 @@ class GitLabConnector:
         :return: GitLabBatchResult containing project and stats.
         """
         try:
-            stats = self.get_repo_stats(
+            stats = self.get_repo_stats_by_project(
                 project_name=project.full_name,
                 max_commits=max_commits,
             )
@@ -945,6 +945,158 @@ class GitLabConnector:
             f"{sum(1 for r in results if r.success)} successful"
         )
         return results
+
+    # =========================================================================
+    # Base class interface implementations (adapters for GitLab-style methods)
+    # =========================================================================
+
+    def list_organizations(
+        self,
+        max_orgs: Optional[int] = None,
+    ) -> List[Organization]:
+        """
+        List organizations (GitLab groups) accessible to the authenticated user.
+
+        This is an adapter method that maps to list_groups for base class compatibility.
+
+        :param max_orgs: Maximum number of organizations to retrieve.
+        :return: List of Organization objects.
+        """
+        return self.list_groups(max_groups=max_orgs)
+
+    def list_repositories(
+        self,
+        org_name: Optional[str] = None,
+        user_name: Optional[str] = None,
+        search: Optional[str] = None,
+        pattern: Optional[str] = None,
+        max_repos: Optional[int] = None,
+    ) -> List[Repository]:
+        """
+        List repositories (GitLab projects) for a group or search query.
+
+        This is an adapter method that maps to list_projects for base class compatibility.
+
+        :param org_name: Optional organization/group name.
+        :param user_name: Optional user name (mapped to group search).
+        :param search: Optional search query.
+        :param pattern: Optional fnmatch-style pattern.
+        :param max_repos: Maximum number of repositories to retrieve.
+        :return: List of Repository objects.
+        """
+        return self.list_projects(
+            group_name=org_name or user_name,
+            search=search,
+            pattern=pattern,
+            max_projects=max_repos,
+        )
+
+    def get_contributors(
+        self,
+        owner: str,
+        repo: str,
+        max_contributors: Optional[int] = None,
+    ) -> List[Author]:
+        """
+        Get contributors for a repository using owner/repo style parameters.
+
+        This is an adapter method that maps to get_contributors_by_project.
+
+        :param owner: Repository owner (group name).
+        :param repo: Repository name (project name).
+        :param max_contributors: Maximum number of contributors to retrieve.
+        :return: List of Author objects.
+        """
+        project_name = f"{owner}/{repo}"
+        return self.get_contributors_by_project(
+            project_name=project_name, max_contributors=max_contributors
+        )
+
+    def get_commit_stats(
+        self,
+        owner: str,
+        repo: str,
+        sha: str,
+    ) -> CommitStats:
+        """
+        Get statistics for a specific commit using owner/repo style parameters.
+
+        This is an adapter method that maps to get_commit_stats_by_project.
+
+        :param owner: Repository owner (group name).
+        :param repo: Repository name (project name).
+        :param sha: Commit SHA.
+        :return: CommitStats object.
+        """
+        project_name = f"{owner}/{repo}"
+        return self.get_commit_stats_by_project(project_name=project_name, sha=sha)
+
+    def get_repo_stats(
+        self,
+        owner: str,
+        repo: str,
+        max_commits: Optional[int] = None,
+    ) -> RepoStats:
+        """
+        Get aggregated statistics for a repository using owner/repo style parameters.
+
+        This is an adapter method that maps to get_repo_stats_by_project.
+
+        :param owner: Repository owner (group name).
+        :param repo: Repository name (project name).
+        :param max_commits: Maximum number of commits to analyze.
+        :return: RepoStats object.
+        """
+        project_name = f"{owner}/{repo}"
+        return self.get_repo_stats_by_project(
+            project_name=project_name, max_commits=max_commits
+        )
+
+    def get_pull_requests(
+        self,
+        owner: str,
+        repo: str,
+        state: str = "all",
+        max_prs: Optional[int] = None,
+    ) -> List[PullRequest]:
+        """
+        Get pull requests (merge requests) for a repository.
+
+        This is an adapter method that maps to get_merge_requests for base class.
+
+        :param owner: Repository owner (group name).
+        :param repo: Repository name (project name).
+        :param state: State filter ('open', 'closed', 'all').
+        :param max_prs: Maximum number of pull requests to retrieve.
+        :return: List of PullRequest objects.
+        """
+        project_name = f"{owner}/{repo}"
+        return self.get_merge_requests(
+            project_name=project_name, state=state, max_mrs=max_prs
+        )
+
+    def get_file_blame(
+        self,
+        owner: str,
+        repo: str,
+        path: str,
+        ref: str = "HEAD",
+    ) -> FileBlame:
+        """
+        Get blame information for a file using owner/repo style parameters.
+
+        This is an adapter method for base class compatibility.
+
+        :param owner: Repository owner (group name).
+        :param repo: Repository name (project name).
+        :param path: File path within the repository.
+        :param ref: Git reference (branch, tag, or commit SHA).
+        :return: FileBlame object.
+        """
+        project_name = f"{owner}/{repo}"
+        return self.get_file_blame_by_project(
+            project_name=project_name, file_path=path, ref=ref
+        )
 
     def close(self) -> None:
         """Close the connector and cleanup resources."""

@@ -220,7 +220,7 @@ class TestGitLabConnectorProjects:
         connector = GitLabConnector(
             url="https://gitlab.com", private_token="test_token"
         )
-        contributors = connector.get_contributors(
+        contributors = connector.get_contributors_by_project(
             project_name="mygroup/myproject", max_contributors=10
         )
 
@@ -288,10 +288,10 @@ class TestGitLabConnectorProjects:
 
         error_msg = "Either project_id or project_name must be provided"
         with pytest.raises(ValueError, match=error_msg):
-            connector.get_contributors()
+            connector.get_contributors_by_project()
 
         with pytest.raises(ValueError, match=error_msg):
-            connector.get_commit_stats(sha="abc123")
+            connector.get_commit_stats_by_project(sha="abc123")
 
         with pytest.raises(ValueError, match=error_msg):
-            connector.get_repo_stats()
+            connector.get_repo_stats_by_project()
