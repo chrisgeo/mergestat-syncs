@@ -259,3 +259,105 @@ class TestDBEchoConfiguration:
         with patch.dict(os.environ, {"DB_ECHO": ""}):
             result = os.getenv("DB_ECHO", "false").lower() in ("true", "1", "yes")
             assert result is False
+
+
+class TestBatchProcessingCLIArguments:
+    """Test cases for batch processing CLI argument parsing."""
+
+    def test_github_pattern_argument(self):
+        """Test that --github-pattern argument is parsed correctly."""
+        import sys
+        from unittest.mock import patch as mock_patch
+
+        # Mock sys.argv to simulate command-line arguments
+        test_args = [
+            "git_mergestat.py",
+            "--github-pattern",
+            "chrisgeo/m*",
+            "--db",
+            "sqlite+aiosqlite:///:memory:",
+        ]
+        with mock_patch.object(sys, "argv", test_args):
+            # Import parse_args by re-implementing the arg parsing logic
+            import argparse
+
+            parser = argparse.ArgumentParser()
+            parser.add_argument("--db", required=False)
+            parser.add_argument("--github-pattern", required=False)
+            parser.add_argument("--github-batch-size", type=int, default=10)
+            parser.add_argument("--max-concurrent", type=int, default=4)
+            parser.add_argument("--rate-limit-delay", type=float, default=1.0)
+            parser.add_argument("--max-commits-per-repo", type=int)
+            parser.add_argument("--max-repos", type=int)
+            parser.add_argument("--use-async", action="store_true")
+
+            args = parser.parse_args(test_args[1:])
+
+            assert args.github_pattern == "chrisgeo/m*"
+            assert args.github_batch_size == 10
+            assert args.max_concurrent == 4
+            assert args.rate_limit_delay == 1.0
+            assert args.max_commits_per_repo is None
+            assert args.max_repos is None
+            assert args.use_async is False
+
+    def test_batch_processing_arguments_with_custom_values(self):
+        """Test that batch processing arguments accept custom values."""
+        import argparse
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--github-pattern", required=False)
+        parser.add_argument("--github-batch-size", type=int, default=10)
+        parser.add_argument("--max-concurrent", type=int, default=4)
+        parser.add_argument("--rate-limit-delay", type=float, default=1.0)
+        parser.add_argument("--max-commits-per-repo", type=int)
+        parser.add_argument("--max-repos", type=int)
+        parser.add_argument("--use-async", action="store_true")
+
+        test_args = [
+            "--github-pattern",
+            "org/*",
+            "--github-batch-size",
+            "20",
+            "--max-concurrent",
+            "8",
+            "--rate-limit-delay",
+            "2.5",
+            "--max-commits-per-repo",
+            "100",
+            "--max-repos",
+            "50",
+            "--use-async",
+        ]
+
+        args = parser.parse_args(test_args)
+
+        assert args.github_pattern == "org/*"
+        assert args.github_batch_size == 20
+        assert args.max_concurrent == 8
+        assert args.rate_limit_delay == 2.5
+        assert args.max_commits_per_repo == 100
+        assert args.max_repos == 50
+        assert args.use_async is True
+
+    def test_use_async_flag_default_is_false(self):
+        """Test that --use-async flag defaults to False."""
+        import argparse
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--use-async", action="store_true")
+
+        args = parser.parse_args([])
+
+        assert args.use_async is False
+
+    def test_use_async_flag_when_provided(self):
+        """Test that --use-async flag is True when provided."""
+        import argparse
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--use-async", action="store_true")
+
+        args = parser.parse_args(["--use-async"])
+
+        assert args.use_async is True

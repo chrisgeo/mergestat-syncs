@@ -13,7 +13,7 @@ from storage import MongoStore, SQLAlchemyStore
 
 # Import connectors (optional - will be None if not available)
 try:
-    from connectors import GitHubConnector, GitLabConnector
+    from connectors import GitHubConnector, GitLabConnector, BatchResult
     from connectors.exceptions import ConnectorException
 
     CONNECTORS_AVAILABLE = True
@@ -22,6 +22,7 @@ except ImportError:
     GitHubConnector = None
     GitLabConnector = None
     ConnectorException = Exception
+    BatchResult = None
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
@@ -772,6 +773,158 @@ async def process_gitlab_project(
         connector.close()
 
 
+async def process_github_repos_batch(
+    store: DataStore,
+    token: str,
+    org_name: str = None,
+    user_name: str = None,
+    pattern: str = None,
+    batch_size: int = 10,
+    max_concurrent: int = 4,
+    rate_limit_delay: float = 1.0,
+    max_commits_per_repo: int = None,
+    max_repos: int = None,
+    use_async: bool = False,
+) -> None:
+    """
+    Process multiple GitHub repositories using batch processing with pattern matching.
+
+    This function uses the get_repos_with_stats method from GitHubConnector to
+    retrieve repositories matching a pattern and collect statistics for each.
+
+    :param store: Storage backend.
+    :param token: GitHub token.
+    :param org_name: Optional organization name.
+    :param user_name: Optional user name (github-owner is used for both org and user).
+    :param pattern: fnmatch-style pattern to filter repositories.
+    :param batch_size: Number of repos to process in each batch.
+    :param max_concurrent: Maximum concurrent workers for processing.
+    :param rate_limit_delay: Delay in seconds between batches.
+    :param max_commits_per_repo: Maximum commits to analyze per repository.
+    :param max_repos: Maximum number of repositories to process.
+    :param use_async: Use async processing for better performance.
+    """
+    if not CONNECTORS_AVAILABLE:
+        raise RuntimeError(
+            "Connectors are not available. Please install required dependencies."
+        )
+
+    logging.info("=== GitHub Batch Repository Processing ===")
+    if pattern:
+        logging.info(f"Pattern: {pattern}")
+    if org_name:
+        logging.info(f"Organization: {org_name}")
+    if user_name:
+        logging.info(f"User: {user_name}")
+    logging.info(f"Batch size: {batch_size}, Max concurrent: {max_concurrent}")
+
+    connector = GitHubConnector(token=token)
+
+    def on_repo_complete(result: BatchResult) -> None:
+        """Callback for when each repository is processed."""
+        if result.success:
+            stats_info = ""
+            if result.stats:
+                stats_info = f" ({result.stats.total_commits} commits)"
+            logging.info(f"  ✓ Processed: {result.repository.full_name}{stats_info}")
+        else:
+            logging.warning(f"  ✗ Failed: {result.repository.full_name}: {result.error}")
+
+    try:
+        # Choose async or sync processing
+        if use_async:
+            logging.info("Using async batch processing...")
+            results = await connector.get_repos_with_stats_async(
+                org_name=org_name,
+                user_name=user_name,
+                pattern=pattern,
+                batch_size=batch_size,
+                max_concurrent=max_concurrent,
+                rate_limit_delay=rate_limit_delay,
+                max_commits_per_repo=max_commits_per_repo,
+                max_repos=max_repos,
+                on_repo_complete=on_repo_complete,
+            )
+        else:
+            logging.info("Using sync batch processing...")
+            results = connector.get_repos_with_stats(
+                org_name=org_name,
+                user_name=user_name,
+                pattern=pattern,
+                batch_size=batch_size,
+                max_concurrent=max_concurrent,
+                rate_limit_delay=rate_limit_delay,
+                max_commits_per_repo=max_commits_per_repo,
+                max_repos=max_repos,
+                on_repo_complete=on_repo_complete,
+            )
+
+        # Store results in database
+        logging.info(f"Storing {len(results)} repository results...")
+        for result in results:
+            if not result.success:
+                continue
+
+            repo_info = result.repository
+
+            # Create Repo object for database
+            db_repo = Repo(
+                repo_path=None,  # Not a local repo
+                repo=repo_info.full_name,
+                settings={
+                    "source": "github",
+                    "repo_id": repo_info.id,
+                    "url": repo_info.url,
+                    "default_branch": repo_info.default_branch,
+                    "batch_processed": True,
+                },
+                tags=["github", repo_info.language] if repo_info.language else ["github"],
+            )
+
+            await store.insert_repo(db_repo)
+            logging.debug(f"Stored repository: {db_repo.repo}")
+
+            # Store stats if available
+            if result.stats:
+                # Create commit stats entries from aggregated data
+                stat = GitCommitStat(
+                    repo_id=db_repo.id,
+                    commit_hash="__aggregate__",  # Special marker for aggregate stats
+                    file_path="__aggregate__",
+                    additions=result.stats.additions,
+                    deletions=result.stats.deletions,
+                    old_file_mode="unknown",
+                    new_file_mode="unknown",
+                )
+                await store.insert_git_commit_stats([stat])
+
+        # Summary
+        successful = sum(1 for r in results if r.success)
+        failed = sum(1 for r in results if not r.success)
+        logging.info("=== Batch Processing Complete ===")
+        logging.info(f"  Successful: {successful}")
+        logging.info(f"  Failed: {failed}")
+        logging.info(f"  Total: {len(results)}")
+
+        # Log rate limit status
+        try:
+            rate_limit = connector.get_rate_limit()
+            logging.info(
+                f"  Rate limit: {rate_limit['remaining']}/{rate_limit['limit']} remaining"
+            )
+        except Exception as e:
+            logging.debug(f"Could not get rate limit: {e}")
+
+    except ConnectorException as e:
+        logging.error(f"Connector error: {e}")
+        raise
+    except Exception as e:
+        logging.error(f"Error in batch processing: {e}")
+        raise
+    finally:
+        connector.close()
+
+
 def parse_args():
     """
     Parse command-line arguments.
@@ -836,6 +989,51 @@ def parse_args():
         help="GitLab project ID.",
     )
 
+    # GitHub batch processing options (PR 31)
+    parser.add_argument(
+        "--github-pattern",
+        required=False,
+        help="fnmatch-style pattern to filter repositories (e.g., 'chrisgeo/m*').",
+    )
+    parser.add_argument(
+        "--github-batch-size",
+        required=False,
+        type=int,
+        default=10,
+        help="Number of repositories to process in each batch (default: 10).",
+    )
+    parser.add_argument(
+        "--max-concurrent",
+        required=False,
+        type=int,
+        default=4,
+        help="Maximum concurrent workers for batch processing (default: 4).",
+    )
+    parser.add_argument(
+        "--rate-limit-delay",
+        required=False,
+        type=float,
+        default=1.0,
+        help="Delay in seconds between batches for rate limiting (default: 1.0).",
+    )
+    parser.add_argument(
+        "--max-commits-per-repo",
+        required=False,
+        type=int,
+        help="Maximum commits to analyze per repository in batch mode.",
+    )
+    parser.add_argument(
+        "--max-repos",
+        required=False,
+        type=int,
+        help="Maximum number of repositories to process in batch mode.",
+    )
+    parser.add_argument(
+        "--use-async",
+        action="store_true",
+        help="Use async processing for batch operations (better performance).",
+    )
+
     return parser.parse_args()
 
 
@@ -861,16 +1059,21 @@ async def main() -> None:
             "Database connection string is required (set DB_CONN_STRING or use --db)"
         )
 
-    # Determine mode: local repo, GitHub, or GitLab
+    # Determine mode: local repo, GitHub, GitHub batch, or GitLab
     github_token = args.github_token or os.getenv("GITHUB_TOKEN")
     gitlab_token = args.gitlab_token or os.getenv("GITLAB_TOKEN")
 
     use_github = github_token and args.github_owner and args.github_repo
+    use_github_batch = github_token and args.github_pattern
     use_gitlab = gitlab_token and args.gitlab_project_id
 
-    if use_github and use_gitlab:
+    modes_active = sum([use_github, use_github_batch, use_gitlab])
+    if modes_active > 1:
         raise ValueError(
-            "Cannot use both GitHub and GitLab modes simultaneously. Choose one."
+            "Cannot use multiple modes simultaneously. Choose one of: "
+            "single GitHub repo (--github-owner + --github-repo), "
+            "GitHub batch (--github-pattern), "
+            "or GitLab (--gitlab-project-id)."
         )
 
     # Initialize storage
@@ -881,7 +1084,21 @@ async def main() -> None:
         store = SQLAlchemyStore(DB_CONN_STRING, echo=DB_ECHO)
 
     async with store as storage:
-        if use_github:
+        if use_github_batch:
+            # GitHub batch processing mode (PR 31)
+            await process_github_repos_batch(
+                store=storage,
+                token=github_token,
+                org_name=args.github_owner,  # Can be used as org or user
+                pattern=args.github_pattern,
+                batch_size=args.github_batch_size,
+                max_concurrent=args.max_concurrent,
+                rate_limit_delay=args.rate_limit_delay,
+                max_commits_per_repo=args.max_commits_per_repo,
+                max_repos=args.max_repos,
+                use_async=args.use_async,
+            )
+        elif use_github:
             # GitHub connector mode
             logging.info("=== GitHub Connector Mode ===")
             await process_github_repo(
