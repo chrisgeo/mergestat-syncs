@@ -7,7 +7,6 @@ from unittest.mock import Mock, patch
 import pytest
 
 from connectors import GitHubConnector, BatchResult, match_repo_pattern
-from connectors.github import BatchProcessingConfig
 
 
 class TestPatternMatching:
@@ -91,46 +90,6 @@ class TestBatchResult:
         assert result.stats is None
         assert result.success is False
         assert result.error == "API error"
-
-
-class TestBatchProcessingConfig:
-    """Test BatchProcessingConfig dataclass."""
-
-    def test_default_values(self):
-        """Test default configuration values."""
-        config = BatchProcessingConfig()
-
-        assert config.batch_size == 10
-        assert config.max_concurrent == 4
-        assert config.rate_limit_delay == 1.0
-        assert config.max_retries == 3
-        assert config.pattern is None
-        assert config.max_commits_per_repo is None
-        assert config.include_stats is True
-        assert config.on_repo_complete is None
-
-    def test_custom_values(self):
-        """Test custom configuration values."""
-        callback = Mock()
-        config = BatchProcessingConfig(
-            batch_size=5,
-            max_concurrent=2,
-            rate_limit_delay=2.0,
-            max_retries=5,
-            pattern="org/*",
-            max_commits_per_repo=100,
-            include_stats=False,
-            on_repo_complete=callback,
-        )
-
-        assert config.batch_size == 5
-        assert config.max_concurrent == 2
-        assert config.rate_limit_delay == 2.0
-        assert config.max_retries == 5
-        assert config.pattern == "org/*"
-        assert config.max_commits_per_repo == 100
-        assert config.include_stats is False
-        assert config.on_repo_complete == callback
 
 
 class TestGitHubConnectorBatchProcessing:
@@ -461,3 +420,193 @@ class TestGitHubConnectorAsyncBatchProcessing:
 
         # Callback should be called for each repo
         assert callback.call_count == 2
+
+
+class TestBatchProcessingErrorHandling:
+    """Test error handling in batch repository processing."""
+
+    @pytest.fixture
+    def mock_github_client(self):
+        """Create a mock GitHub client."""
+        with patch("connectors.github.Github") as mock_github:
+            yield mock_github
+
+    @pytest.fixture
+    def mock_graphql_client(self):
+        """Create a mock GraphQL client."""
+        with patch("connectors.github.GitHubGraphQLClient") as mock_graphql:
+            yield mock_graphql
+
+    def _create_mock_repo(self, name: str, full_name: str):
+        """Create a mock repository."""
+        mock_repo = Mock()
+        mock_repo.id = hash(full_name)
+        mock_repo.name = name
+        mock_repo.full_name = full_name
+        mock_repo.default_branch = "main"
+        mock_repo.description = f"Test repository {name}"
+        mock_repo.html_url = f"https://github.com/{full_name}"
+        mock_repo.created_at = None
+        mock_repo.updated_at = None
+        mock_repo.language = "Python"
+        mock_repo.stargazers_count = 10
+        mock_repo.forks_count = 5
+        return mock_repo
+
+    def test_batch_processing_handles_api_error(
+        self, mock_github_client, mock_graphql_client
+    ):
+        """Test batch processing continues when get_repo_stats raises an exception."""
+        # Setup mock repos
+        mock_repos = [
+            self._create_mock_repo("repo1", "user/repo1"),
+            self._create_mock_repo("repo2", "user/repo2"),
+        ]
+
+        mock_user = Mock()
+        mock_user.get_repos.return_value = mock_repos
+
+        mock_github_instance = mock_github_client.return_value
+        mock_github_instance.get_user.return_value = mock_user
+
+        # Setup mock for get_repo to raise an exception
+        mock_github_instance.get_repo.side_effect = Exception("API rate limit exceeded")
+
+        # Test batch processing
+        connector = GitHubConnector(token="test_token")
+        results = connector.get_repos_with_stats(
+            user_name="user",
+            batch_size=2,
+            rate_limit_delay=0.1,
+        )
+
+        # All repos should be processed, but with errors
+        assert len(results) == 2
+        assert all(isinstance(r, BatchResult) for r in results)
+        assert all(r.success is False for r in results)
+        assert all(r.error is not None for r in results)
+        assert all("API rate limit exceeded" in r.error for r in results)
+
+    def test_batch_processing_handles_partial_failure(
+        self, mock_github_client, mock_graphql_client
+    ):
+        """Test batch processing handles some repos failing while others succeed."""
+        from datetime import datetime, timezone
+
+        # Setup mock repos
+        mock_repos = [
+            self._create_mock_repo("repo1", "user/repo1"),
+            self._create_mock_repo("repo2", "user/repo2"),
+            self._create_mock_repo("repo3", "user/repo3"),
+        ]
+
+        mock_user = Mock()
+        mock_user.get_repos.return_value = mock_repos
+
+        mock_github_instance = mock_github_client.return_value
+        mock_github_instance.get_user.return_value = mock_user
+
+        # Setup mock for get_repo - first succeeds, second fails, third succeeds
+        mock_gh_repo_success = Mock()
+        mock_gh_repo_success.get_commits.return_value = []
+        mock_gh_repo_success.created_at = datetime.now(timezone.utc)
+
+        def get_repo_side_effect(repo_name):
+            if "repo2" in repo_name:
+                raise Exception("Repository not found")
+            return mock_gh_repo_success
+
+        mock_github_instance.get_repo.side_effect = get_repo_side_effect
+
+        # Test batch processing
+        connector = GitHubConnector(token="test_token")
+        results = connector.get_repos_with_stats(
+            user_name="user",
+            batch_size=3,
+            rate_limit_delay=0.1,
+        )
+
+        # All repos should be processed
+        assert len(results) == 3
+
+        # Count successes and failures
+        successes = [r for r in results if r.success]
+        failures = [r for r in results if not r.success]
+
+        assert len(successes) == 2
+        assert len(failures) == 1
+
+        # Verify the failed repo has the correct error
+        failed_result = failures[0]
+        assert "Repository not found" in failed_result.error
+        assert failed_result.repository.full_name == "user/repo2"
+
+    def test_batch_processing_invalid_repo_name(
+        self, mock_github_client, mock_graphql_client
+    ):
+        """Test batch processing handles invalid repository names."""
+        # Setup mock repos with invalid name
+        mock_repo_invalid = Mock()
+        mock_repo_invalid.id = 1
+        mock_repo_invalid.name = "invalid"
+        mock_repo_invalid.full_name = "invalid_no_slash"  # Invalid - no owner/repo format
+        mock_repo_invalid.default_branch = "main"
+        mock_repo_invalid.description = "Invalid repo"
+        mock_repo_invalid.html_url = "https://github.com/invalid"
+        mock_repo_invalid.created_at = None
+        mock_repo_invalid.updated_at = None
+        mock_repo_invalid.language = "Python"
+        mock_repo_invalid.stargazers_count = 0
+        mock_repo_invalid.forks_count = 0
+
+        mock_user = Mock()
+        mock_user.get_repos.return_value = [mock_repo_invalid]
+
+        mock_github_instance = mock_github_client.return_value
+        mock_github_instance.get_user.return_value = mock_user
+
+        # Test batch processing
+        connector = GitHubConnector(token="test_token")
+        results = connector.get_repos_with_stats(
+            user_name="user",
+            rate_limit_delay=0.1,
+        )
+
+        # Should have one result with error
+        assert len(results) == 1
+        assert results[0].success is False
+        assert "Invalid repository name" in results[0].error
+
+    @pytest.mark.asyncio
+    async def test_async_batch_processing_handles_api_error(
+        self, mock_github_client, mock_graphql_client
+    ):
+        """Test async batch processing continues when get_repo_stats raises an exception."""
+        # Setup mock repos
+        mock_repos = [
+            self._create_mock_repo("repo1", "user/repo1"),
+            self._create_mock_repo("repo2", "user/repo2"),
+        ]
+
+        mock_user = Mock()
+        mock_user.get_repos.return_value = mock_repos
+
+        mock_github_instance = mock_github_client.return_value
+        mock_github_instance.get_user.return_value = mock_user
+
+        # Setup mock for get_repo to raise an exception
+        mock_github_instance.get_repo.side_effect = Exception("API rate limit exceeded")
+
+        # Test async batch processing
+        connector = GitHubConnector(token="test_token")
+        results = await connector.get_repos_with_stats_async(
+            user_name="user",
+            batch_size=2,
+            rate_limit_delay=0.1,
+        )
+
+        # All repos should be processed, but with errors
+        assert len(results) == 2
+        assert all(isinstance(r, BatchResult) for r in results)
+        assert all(r.success is False for r in results)
+        assert all(r.error is not None for r in results)

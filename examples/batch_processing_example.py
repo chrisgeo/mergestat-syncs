@@ -146,7 +146,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Batch repository processing example")
     parser.add_argument(
-        "--async",
+        "--use-async",
         dest="use_async",
         action="store_true",
         help="Run async version instead of sync version",
@@ -157,5 +157,5 @@ if __name__ == "__main__":
         print("Running async version...")
         asyncio.run(async_main())
     else:
-        print("Running sync version (use --async for async version)...")
+        print("Running sync version (use --use-async for async version)...")
         main()

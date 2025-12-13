@@ -36,20 +36,6 @@ class BatchResult:
     success: bool = True
 
 
-@dataclass
-class BatchProcessingConfig:
-    """Configuration for batch repository processing."""
-
-    batch_size: int = 10
-    max_concurrent: int = 4
-    rate_limit_delay: float = 1.0
-    max_retries: int = 3
-    pattern: Optional[str] = None
-    max_commits_per_repo: Optional[int] = None
-    include_stats: bool = True
-    on_repo_complete: Optional[Callable[[BatchResult], None]] = None
-
-
 def match_repo_pattern(full_name: str, pattern: str) -> bool:
     """
     Match a repository full name against a pattern using fnmatch-style matching.
@@ -744,7 +730,7 @@ class GitHubConnector:
             >>> asyncio.run(main())
         """
         # Step 1: Get repositories (using sync method via run_in_executor)
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         repos = await loop.run_in_executor(
             None,
