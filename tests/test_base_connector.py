@@ -101,6 +101,16 @@ class TestGitConnectorInterface:
             def get_file_blame(self, owner, repo, path, ref="HEAD"):
                 return None
 
+            def get_repos_with_stats(self, org_name=None, user_name=None, pattern=None,
+                                     batch_size=10, max_concurrent=4, rate_limit_delay=1.0,
+                                     max_commits_per_repo=None, max_repos=None, on_repo_complete=None):
+                return []
+
+            async def get_repos_with_stats_async(self, org_name=None, user_name=None, pattern=None,
+                                                  batch_size=10, max_concurrent=4, rate_limit_delay=1.0,
+                                                  max_commits_per_repo=None, max_repos=None, on_repo_complete=None):
+                return []
+
             def close(self):
                 pass
 
@@ -135,151 +145,22 @@ class TestGitConnectorInterface:
             def get_file_blame(self, owner, repo, path, ref="HEAD"):
                 return None
 
+            def get_repos_with_stats(self, org_name=None, user_name=None, pattern=None,
+                                     batch_size=10, max_concurrent=4, rate_limit_delay=1.0,
+                                     max_commits_per_repo=None, max_repos=None, on_repo_complete=None):
+                return []
+
+            async def get_repos_with_stats_async(self, org_name=None, user_name=None, pattern=None,
+                                                  batch_size=10, max_concurrent=4, rate_limit_delay=1.0,
+                                                  max_commits_per_repo=None, max_repos=None, on_repo_complete=None):
+                return []
+
             def close(self):
                 pass
 
         connector = ConcreteConnector(per_page=50, max_workers=8)
         assert connector.per_page == 50
         assert connector.max_workers == 8
-
-
-class TestGitConnectorDefaultBatchProcessing:
-    """Tests for the default batch processing implementation."""
-
-    def test_get_repos_with_stats_default_implementation(self):
-        """Test the default get_repos_with_stats implementation."""
-
-        class TestConnector(GitConnector):
-            """Test connector implementation."""
-
-            def __init__(self):
-                super().__init__()
-                self.repos = [
-                    Repository(id=1, name="repo1", full_name="owner/repo1", default_branch="main"),
-                    Repository(id=2, name="repo2", full_name="owner/repo2", default_branch="main"),
-                ]
-
-            def list_organizations(self, max_orgs=None):
-                return []
-
-            def list_repositories(self, org_name=None, user_name=None, search=None, pattern=None, max_repos=None):
-                return self.repos
-
-            def get_contributors(self, owner, repo, max_contributors=None):
-                return []
-
-            def get_commit_stats(self, owner, repo, sha):
-                return None
-
-            def get_repo_stats(self, owner, repo, max_commits=None):
-                return RepoStats(total_commits=10, additions=100, deletions=50, commits_per_week=2.0, authors=[])
-
-            def get_pull_requests(self, owner, repo, state="all", max_prs=None):
-                return []
-
-            def get_file_blame(self, owner, repo, path, ref="HEAD"):
-                return None
-
-            def close(self):
-                pass
-
-        connector = TestConnector()
-        results = connector.get_repos_with_stats()
-
-        assert len(results) == 2
-        assert all(r.success for r in results)
-        assert all(r.stats.total_commits == 10 for r in results)
-
-    def test_get_repos_with_stats_handles_errors(self):
-        """Test that get_repos_with_stats handles errors gracefully."""
-
-        class TestConnector(GitConnector):
-            """Test connector that raises errors."""
-
-            def __init__(self):
-                super().__init__()
-                self.repos = [
-                    Repository(id=1, name="repo1", full_name="owner/repo1", default_branch="main"),
-                ]
-
-            def list_organizations(self, max_orgs=None):
-                return []
-
-            def list_repositories(self, org_name=None, user_name=None, search=None, pattern=None, max_repos=None):
-                return self.repos
-
-            def get_contributors(self, owner, repo, max_contributors=None):
-                return []
-
-            def get_commit_stats(self, owner, repo, sha):
-                return None
-
-            def get_repo_stats(self, owner, repo, max_commits=None):
-                raise Exception("API error")
-
-            def get_pull_requests(self, owner, repo, state="all", max_prs=None):
-                return []
-
-            def get_file_blame(self, owner, repo, path, ref="HEAD"):
-                return None
-
-            def close(self):
-                pass
-
-        connector = TestConnector()
-        results = connector.get_repos_with_stats()
-
-        assert len(results) == 1
-        assert results[0].success is False
-        assert results[0].error == "API error"
-
-    def test_get_repos_with_stats_callback(self):
-        """Test that the callback is called for each repository."""
-
-        class TestConnector(GitConnector):
-            """Test connector implementation."""
-
-            def __init__(self):
-                super().__init__()
-                self.repos = [
-                    Repository(id=1, name="repo1", full_name="owner/repo1", default_branch="main"),
-                    Repository(id=2, name="repo2", full_name="owner/repo2", default_branch="main"),
-                ]
-
-            def list_organizations(self, max_orgs=None):
-                return []
-
-            def list_repositories(self, org_name=None, user_name=None, search=None, pattern=None, max_repos=None):
-                return self.repos
-
-            def get_contributors(self, owner, repo, max_contributors=None):
-                return []
-
-            def get_commit_stats(self, owner, repo, sha):
-                return None
-
-            def get_repo_stats(self, owner, repo, max_commits=None):
-                return RepoStats(total_commits=10, additions=100, deletions=50, commits_per_week=2.0, authors=[])
-
-            def get_pull_requests(self, owner, repo, state="all", max_prs=None):
-                return []
-
-            def get_file_blame(self, owner, repo, path, ref="HEAD"):
-                return None
-
-            def close(self):
-                pass
-
-        connector = TestConnector()
-        callback_results = []
-
-        def callback(result):
-            callback_results.append(result)
-
-        results = connector.get_repos_with_stats(on_repo_complete=callback)
-
-        assert len(results) == 2
-        assert len(callback_results) == 2
 
 
 class TestGitConnectorContextManager:
@@ -315,6 +196,16 @@ class TestGitConnectorContextManager:
 
             def get_file_blame(self, owner, repo, path, ref="HEAD"):
                 return None
+
+            def get_repos_with_stats(self, org_name=None, user_name=None, pattern=None,
+                                     batch_size=10, max_concurrent=4, rate_limit_delay=1.0,
+                                     max_commits_per_repo=None, max_repos=None, on_repo_complete=None):
+                return []
+
+            async def get_repos_with_stats_async(self, org_name=None, user_name=None, pattern=None,
+                                                  batch_size=10, max_concurrent=4, rate_limit_delay=1.0,
+                                                  max_commits_per_repo=None, max_repos=None, on_repo_complete=None):
+                return []
 
             def close(self):
                 self.closed = True

@@ -17,7 +17,7 @@ from typing import Callable, List, Optional
 import gitlab
 from gitlab.exceptions import GitlabAuthenticationError, GitlabError
 
-from connectors.base import GitConnector
+from connectors.base import BatchResult, GitConnector
 from connectors.exceptions import (APIException, AuthenticationException,
                                    RateLimitException)
 from connectors.models import (Author, BlameRange, CommitStats, FileBlame,
@@ -1097,6 +1097,128 @@ class GitLabConnector(GitConnector):
         return self.get_file_blame_by_project(
             project_name=project_name, file_path=path, ref=ref
         )
+
+    def get_repos_with_stats(
+        self,
+        org_name: Optional[str] = None,
+        user_name: Optional[str] = None,
+        pattern: Optional[str] = None,
+        batch_size: int = 10,
+        max_concurrent: int = 4,
+        rate_limit_delay: float = 1.0,
+        max_commits_per_repo: Optional[int] = None,
+        max_repos: Optional[int] = None,
+        on_repo_complete: Optional[Callable[[BatchResult], None]] = None,
+    ) -> List[BatchResult]:
+        """
+        Get repositories and their stats with batch processing.
+
+        This is an adapter method that maps to get_projects_with_stats for base class.
+
+        :param org_name: Optional organization/group name.
+        :param user_name: Optional user name (mapped to group).
+        :param pattern: Optional fnmatch-style pattern to filter repos.
+        :param batch_size: Number of repos to process in each batch.
+        :param max_concurrent: Maximum concurrent workers for processing.
+        :param rate_limit_delay: Delay in seconds between batches.
+        :param max_commits_per_repo: Maximum commits to analyze per repository.
+        :param max_repos: Maximum number of repositories to process.
+        :param on_repo_complete: Callback function called after each repo.
+        :return: List of BatchResult objects.
+        """
+        # Map the callback to use BatchResult instead of GitLabBatchResult
+        def wrapped_callback(gitlab_result: GitLabBatchResult) -> None:
+            if on_repo_complete:
+                batch_result = BatchResult(
+                    repository=gitlab_result.project,
+                    stats=gitlab_result.stats,
+                    error=gitlab_result.error,
+                    success=gitlab_result.success,
+                )
+                on_repo_complete(batch_result)
+
+        gitlab_results = self.get_projects_with_stats(
+            group_name=org_name or user_name,
+            pattern=pattern,
+            batch_size=batch_size,
+            max_concurrent=max_concurrent,
+            rate_limit_delay=rate_limit_delay,
+            max_commits_per_project=max_commits_per_repo,
+            max_projects=max_repos,
+            on_project_complete=wrapped_callback if on_repo_complete else None,
+        )
+
+        # Convert GitLabBatchResult to BatchResult
+        return [
+            BatchResult(
+                repository=r.project,
+                stats=r.stats,
+                error=r.error,
+                success=r.success,
+            )
+            for r in gitlab_results
+        ]
+
+    async def get_repos_with_stats_async(
+        self,
+        org_name: Optional[str] = None,
+        user_name: Optional[str] = None,
+        pattern: Optional[str] = None,
+        batch_size: int = 10,
+        max_concurrent: int = 4,
+        rate_limit_delay: float = 1.0,
+        max_commits_per_repo: Optional[int] = None,
+        max_repos: Optional[int] = None,
+        on_repo_complete: Optional[Callable[[BatchResult], None]] = None,
+    ) -> List[BatchResult]:
+        """
+        Async version of get_repos_with_stats.
+
+        This is an adapter method that maps to get_projects_with_stats_async.
+
+        :param org_name: Optional organization/group name.
+        :param user_name: Optional user name (mapped to group).
+        :param pattern: Optional fnmatch-style pattern to filter repos.
+        :param batch_size: Number of repos to process in each batch.
+        :param max_concurrent: Maximum concurrent workers for processing.
+        :param rate_limit_delay: Delay in seconds between batches.
+        :param max_commits_per_repo: Maximum commits to analyze per repository.
+        :param max_repos: Maximum number of repositories to process.
+        :param on_repo_complete: Callback function called after each repo.
+        :return: List of BatchResult objects.
+        """
+        # Map the callback to use BatchResult instead of GitLabBatchResult
+        def wrapped_callback(gitlab_result: GitLabBatchResult) -> None:
+            if on_repo_complete:
+                batch_result = BatchResult(
+                    repository=gitlab_result.project,
+                    stats=gitlab_result.stats,
+                    error=gitlab_result.error,
+                    success=gitlab_result.success,
+                )
+                on_repo_complete(batch_result)
+
+        gitlab_results = await self.get_projects_with_stats_async(
+            group_name=org_name or user_name,
+            pattern=pattern,
+            batch_size=batch_size,
+            max_concurrent=max_concurrent,
+            rate_limit_delay=rate_limit_delay,
+            max_commits_per_project=max_commits_per_repo,
+            max_projects=max_repos,
+            on_project_complete=wrapped_callback if on_repo_complete else None,
+        )
+
+        # Convert GitLabBatchResult to BatchResult
+        return [
+            BatchResult(
+                repository=r.project,
+                stats=r.stats,
+                error=r.error,
+                success=r.success,
+            )
+            for r in gitlab_results
+        ]
 
     def close(self) -> None:
         """Close the connector and cleanup resources."""

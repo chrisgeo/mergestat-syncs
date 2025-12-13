@@ -178,6 +178,7 @@ class GitConnector(ABC):
         """
         pass
 
+    @abstractmethod
     def get_repos_with_stats(
         self,
         org_name: Optional[str] = None,
@@ -193,7 +194,7 @@ class GitConnector(ABC):
         """
         Get repositories and their stats with batch processing.
 
-        This is a default implementation that can be overridden by subclasses.
+        Each connector must implement its own filtering and processing logic.
 
         :param org_name: Optional organization name.
         :param user_name: Optional user name.
@@ -206,41 +207,9 @@ class GitConnector(ABC):
         :param on_repo_complete: Callback function called after each repo.
         :return: List of BatchResult objects.
         """
-        # Default implementation - subclasses should override for better performance
-        repos = self.list_repositories(
-            org_name=org_name,
-            user_name=user_name,
-            pattern=pattern,
-            max_repos=max_repos,
-        )
+        pass
 
-        results = []
-        for repo in repos:
-            try:
-                parts = repo.full_name.split("/")
-                if len(parts) >= 2:
-                    owner = parts[0]
-                    repo_name = "/".join(parts[1:])
-                    stats = self.get_repo_stats(
-                        owner, repo_name, max_commits=max_commits_per_repo
-                    )
-                    result = BatchResult(repository=repo, stats=stats, success=True)
-                else:
-                    result = BatchResult(
-                        repository=repo,
-                        error=f"Invalid repository name: {repo.full_name}",
-                        success=False,
-                    )
-            except Exception as e:
-                logger.warning(f"Failed to get stats for {repo.full_name}: {e}")
-                result = BatchResult(repository=repo, error=str(e), success=False)
-
-            results.append(result)
-            if on_repo_complete:
-                on_repo_complete(result)
-
-        return results
-
+    @abstractmethod
     async def get_repos_with_stats_async(
         self,
         org_name: Optional[str] = None,
@@ -256,20 +225,20 @@ class GitConnector(ABC):
         """
         Async version of get_repos_with_stats.
 
-        Default implementation falls back to sync version.
-        Subclasses should override for better performance.
+        Each connector must implement its own async filtering and processing logic.
+
+        :param org_name: Optional organization name.
+        :param user_name: Optional user name.
+        :param pattern: Optional fnmatch-style pattern to filter repos.
+        :param batch_size: Number of repos to process in each batch.
+        :param max_concurrent: Maximum concurrent workers for processing.
+        :param rate_limit_delay: Delay in seconds between batches.
+        :param max_commits_per_repo: Maximum commits to analyze per repository.
+        :param max_repos: Maximum number of repositories to process.
+        :param on_repo_complete: Callback function called after each repo.
+        :return: List of BatchResult objects.
         """
-        return self.get_repos_with_stats(
-            org_name=org_name,
-            user_name=user_name,
-            pattern=pattern,
-            batch_size=batch_size,
-            max_concurrent=max_concurrent,
-            rate_limit_delay=rate_limit_delay,
-            max_commits_per_repo=max_commits_per_repo,
-            max_repos=max_repos,
-            on_repo_complete=on_repo_complete,
-        )
+        pass
 
     @abstractmethod
     def close(self) -> None:
