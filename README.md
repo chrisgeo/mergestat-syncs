@@ -17,15 +17,16 @@ See [`PRIVATE_REPO_TESTING.md`](./PRIVATE_REPO_TESTING.md) for detailed instruct
 
 ## Database Configuration
 
-This project supports both PostgreSQL and MongoDB as storage backends. You can configure the database backend using environment variables or command-line arguments.
+This project supports PostgreSQL, MongoDB, and SQLite as storage backends. You can configure the database backend using environment variables or command-line arguments.
 
 ### Environment Variables
 
-- **`DB_TYPE`** (optional): Specifies the database backend to use. Valid values are `postgres` or `mongo`. Default: `postgres`
+- **`DB_TYPE`** (optional): Specifies the database backend to use. Valid values are `postgres`, `mongo`, or `sqlite`. Default: `postgres`
 - **`DB_CONN_STRING`** (required): The connection string for your database.
   - For PostgreSQL: `postgresql+asyncpg://user:password@host:port/database`
   - For MongoDB: `mongodb://host:port` or `mongodb://user:password@host:port`
-- **`DB_ECHO`** (optional): Enable SQL query logging for PostgreSQL. Set to `true`, `1`, or `yes` (case-insensitive) to enable. Any other value (including `false`, `0`, `no`, or unset) disables it. Default: `false`. Note: Enabling this in production can expose sensitive data and impact performance.
+  - For SQLite: `sqlite+aiosqlite:///path/to/database.db` or `sqlite+aiosqlite:///:memory:` for in-memory
+- **`DB_ECHO`** (optional): Enable SQL query logging for PostgreSQL and SQLite. Set to `true`, `1`, or `yes` (case-insensitive) to enable. Any other value (including `false`, `0`, `no`, or unset) disables it. Default: `false`. Note: Enabling this in production can expose sensitive data and impact performance.
 - **`MONGO_DB_NAME`** (optional): The name of the MongoDB database to use. If not specified, the script will use the database specified in the connection string, or default to `mergestat`.
 - **`REPO_PATH`** (optional): Path to the git repository to analyze. Default: `.` (current directory)
 - **`REPO_UUID`** (optional): UUID for the repository. If not provided, a deterministic UUID will be derived from the git repository's remote URL (or repository path if no remote exists). This ensures the same repository always gets the same UUID across runs.
@@ -36,7 +37,7 @@ This project supports both PostgreSQL and MongoDB as storage backends. You can c
 
 You can also configure the database using command-line arguments, which will override environment variables:
 
-- **`--db-type`**: Database backend to use (`postgres` or `mongo`)
+- **`--db-type`**: Database backend to use (`postgres`, `mongo`, or `sqlite`)
 - **`--db`**: Database connection string
 - **`--repo-path`**: Path to the git repository
 
@@ -48,6 +49,12 @@ python git_mergestat.py --db-type postgres --db "postgresql+asyncpg://user:pass@
 
 # Using MongoDB
 python git_mergestat.py --db-type mongo --db "mongodb://localhost:27017"
+
+# Using SQLite (file-based)
+python git_mergestat.py --db-type sqlite --db "sqlite+aiosqlite:///mergestat.db"
+
+# Using SQLite (in-memory)
+python git_mergestat.py --db-type sqlite --db "sqlite+aiosqlite:///:memory:"
 ```
 
 ### MongoDB Connection String Format
@@ -60,6 +67,21 @@ MongoDB connection strings follow the standard MongoDB URI format:
 - **With options**: `mongodb://host:port/?authSource=admin&retryWrites=true`
 
 You can also set the database name separately using the `MONGO_DB_NAME` environment variable instead of including it in the connection string.
+
+### SQLite Connection String Format
+
+SQLite connection strings use the following format:
+
+- **File-based**: `sqlite+aiosqlite:///path/to/database.db` (relative path) or `sqlite+aiosqlite:////absolute/path/to/database.db` (absolute path - note the four slashes)
+- **In-memory**: `sqlite+aiosqlite:///:memory:` (data is lost when the process exits)
+
+SQLite is ideal for:
+- Local development and testing
+- Single-user scenarios
+- Small to medium-sized repositories
+- Environments where running a database server is not practical
+
+Note: SQLite does not use connection pooling since it is a file-based database.
 
 ### Performance Tuning
 
@@ -134,7 +156,7 @@ For a typical repository with 1000 files and 10,000 commits:
 
 *Actual performance depends on hardware, repository size, and configuration.*
 
-### PostgreSQL vs MongoDB: Setup and Migration Considerations
+### PostgreSQL vs MongoDB vs SQLite: Setup and Migration Considerations
 
 #### Using PostgreSQL
 
@@ -178,9 +200,34 @@ For a typical repository with 1000 files and 10,000 commits:
   python git_mergestat.py
   ```
 
+#### Using SQLite
+
+- No migrations required - tables are created automatically using SQLAlchemy
+- Simple file-based or in-memory database
+- No external database server required
+- Best for local development, testing, and single-user scenarios
+- Example setup:
+
+  ```bash
+  # Set environment variables for file-based SQLite
+  export DB_TYPE=sqlite
+  export DB_CONN_STRING="sqlite+aiosqlite:///mergestat.db"
+
+  # Run the script
+  python git_mergestat.py
+  ```
+
+  Or for in-memory database (data lost when process exits):
+
+  ```bash
+  export DB_TYPE=sqlite
+  export DB_CONN_STRING="sqlite+aiosqlite:///:memory:"
+  python git_mergestat.py
+  ```
+
 #### Switching Between Databases
 
-- The two backends use different storage mechanisms and are not directly compatible
-- Data is not automatically migrated when switching between PostgreSQL and MongoDB
+- The different backends use different storage mechanisms and are not directly compatible
+- Data is not automatically migrated when switching between PostgreSQL, MongoDB, and SQLite
 - If you need to switch backends, you'll need to re-run the analysis to populate the new database
-- Both databases can run simultaneously on the same machine using different ports (see `compose.yml`)
+- PostgreSQL and MongoDB can run simultaneously on the same machine using different ports (see `compose.yml`)
