@@ -47,6 +47,9 @@ MAX_WORKERS = int(
     os.getenv("MAX_WORKERS", "4")
 )  # Number of parallel workers for file processing
 
+# Marker for aggregate statistics (not tied to a specific commit/file)
+AGGREGATE_STATS_MARKER = "__aggregate__"
+
 DataStore = Union[SQLAlchemyStore, MongoStore]
 
 
@@ -747,7 +750,7 @@ async def process_gitlab_project(
                     stat = GitCommitStat(
                         repo_id=db_repo.id,
                         commit_hash=commit.id,
-                        file_path="__aggregate__",  # Special marker for aggregate stats
+                        file_path=AGGREGATE_STATS_MARKER,
                         additions=detailed_commit.stats.get("additions", 0),
                         deletions=detailed_commit.stats.get("deletions", 0),
                         old_file_mode="unknown",
@@ -789,20 +792,26 @@ async def process_github_repos_batch(
     """
     Process multiple GitHub repositories using batch processing with pattern matching.
 
-    This function uses the get_repos_with_stats method from GitHubConnector to
-    retrieve repositories matching a pattern and collect statistics for each.
+    This function uses the GitHubConnector's batch processing methods to retrieve
+    repositories matching a pattern and collect statistics for each. When use_async
+    is True, it uses get_repos_with_stats_async for concurrent processing; otherwise,
+    it uses get_repos_with_stats for synchronous processing.
 
     :param store: Storage backend.
     :param token: GitHub token.
-    :param org_name: Optional organization name.
-    :param user_name: Optional user name (github-owner is used for both org and user).
+    :param org_name: Optional organization name. When the --github-owner CLI argument
+                     is provided, it is passed as org_name. The connector will treat
+                     this as an organization and fetch its repositories.
+    :param user_name: Optional user name. If you want to fetch a user's repos instead
+                      of an organization's, provide this parameter directly.
     :param pattern: fnmatch-style pattern to filter repositories.
     :param batch_size: Number of repos to process in each batch.
     :param max_concurrent: Maximum concurrent workers for processing.
     :param rate_limit_delay: Delay in seconds between batches.
     :param max_commits_per_repo: Maximum commits to analyze per repository.
     :param max_repos: Maximum number of repositories to process.
-    :param use_async: Use async processing for better performance.
+    :param use_async: Use async processing (get_repos_with_stats_async) for better
+                      performance, otherwise use sync processing (get_repos_with_stats).
     """
     if not CONNECTORS_AVAILABLE:
         raise RuntimeError(
@@ -889,8 +898,8 @@ async def process_github_repos_batch(
                 # Create commit stats entries from aggregated data
                 stat = GitCommitStat(
                     repo_id=db_repo.id,
-                    commit_hash="__aggregate__",  # Special marker for aggregate stats
-                    file_path="__aggregate__",
+                    commit_hash=AGGREGATE_STATS_MARKER,
+                    file_path=AGGREGATE_STATS_MARKER,
                     additions=result.stats.additions,
                     deletions=result.stats.deletions,
                     old_file_mode="unknown",

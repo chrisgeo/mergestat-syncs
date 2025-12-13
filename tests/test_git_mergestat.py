@@ -262,44 +262,42 @@ class TestDBEchoConfiguration:
 
 
 class TestBatchProcessingCLIArguments:
-    """Test cases for batch processing CLI argument parsing."""
+    """Test cases for batch processing CLI argument parsing.
+
+    Note: These tests re-implement the argument parsing logic rather than importing
+    parse_args() from git_mergestat.py directly. This avoids module-level database
+    connection issues when importing git_mergestat.py (see comment at top of this file).
+    """
 
     def test_github_pattern_argument(self):
         """Test that --github-pattern argument is parsed correctly."""
-        import sys
-        from unittest.mock import patch as mock_patch
+        import argparse
 
-        # Mock sys.argv to simulate command-line arguments
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--db", required=False)
+        parser.add_argument("--github-pattern", required=False)
+        parser.add_argument("--github-batch-size", type=int, default=10)
+        parser.add_argument("--max-concurrent", type=int, default=4)
+        parser.add_argument("--rate-limit-delay", type=float, default=1.0)
+        parser.add_argument("--max-commits-per-repo", type=int)
+        parser.add_argument("--max-repos", type=int)
+        parser.add_argument("--use-async", action="store_true")
+
         test_args = [
-            "git_mergestat.py",
             "--github-pattern",
             "chrisgeo/m*",
             "--db",
             "sqlite+aiosqlite:///:memory:",
         ]
-        with mock_patch.object(sys, "argv", test_args):
-            # Import parse_args by re-implementing the arg parsing logic
-            import argparse
+        args = parser.parse_args(test_args)
 
-            parser = argparse.ArgumentParser()
-            parser.add_argument("--db", required=False)
-            parser.add_argument("--github-pattern", required=False)
-            parser.add_argument("--github-batch-size", type=int, default=10)
-            parser.add_argument("--max-concurrent", type=int, default=4)
-            parser.add_argument("--rate-limit-delay", type=float, default=1.0)
-            parser.add_argument("--max-commits-per-repo", type=int)
-            parser.add_argument("--max-repos", type=int)
-            parser.add_argument("--use-async", action="store_true")
-
-            args = parser.parse_args(test_args[1:])
-
-            assert args.github_pattern == "chrisgeo/m*"
-            assert args.github_batch_size == 10
-            assert args.max_concurrent == 4
-            assert args.rate_limit_delay == 1.0
-            assert args.max_commits_per_repo is None
-            assert args.max_repos is None
-            assert args.use_async is False
+        assert args.github_pattern == "chrisgeo/m*"
+        assert args.github_batch_size == 10
+        assert args.max_concurrent == 4
+        assert args.rate_limit_delay == 1.0
+        assert args.max_commits_per_repo is None
+        assert args.max_repos is None
+        assert args.use_async is False
 
     def test_batch_processing_arguments_with_custom_values(self):
         """Test that batch processing arguments accept custom values."""
