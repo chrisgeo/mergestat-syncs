@@ -832,8 +832,53 @@ async def process_github_repos_batch(
 
     connector = GitHubConnector(token=token)
 
+    # Track results for summary and incremental storage
+    all_results: List[BatchResult] = []
+    stored_count = 0
+
+    async def store_result(result: BatchResult) -> None:
+        """Store a single result in the database (upsert)."""
+        nonlocal stored_count
+        if not result.success:
+            return
+
+        repo_info = result.repository
+
+        # Create Repo object for database
+        db_repo = Repo(
+            repo_path=None,  # Not a local repo
+            repo=repo_info.full_name,
+            settings={
+                "source": "github",
+                "repo_id": repo_info.id,
+                "url": repo_info.url,
+                "default_branch": repo_info.default_branch,
+                "batch_processed": True,
+            },
+            tags=["github", repo_info.language] if repo_info.language else ["github"],
+        )
+
+        await store.insert_repo(db_repo)
+        stored_count += 1
+        logging.debug(f"Stored repository ({stored_count}): {db_repo.repo}")
+
+        # Store stats if available
+        if result.stats:
+            # Create commit stats entries from aggregated data
+            stat = GitCommitStat(
+                repo_id=db_repo.id,
+                commit_hash=AGGREGATE_STATS_MARKER,
+                file_path=AGGREGATE_STATS_MARKER,
+                additions=result.stats.additions,
+                deletions=result.stats.deletions,
+                old_file_mode="unknown",
+                new_file_mode="unknown",
+            )
+            await store.insert_git_commit_stats([stat])
+
     def on_repo_complete(result: BatchResult) -> None:
-        """Callback for when each repository is processed."""
+        """Callback for when each repository is processed - logs and queues for storage."""
+        all_results.append(result)
         if result.success:
             stats_info = ""
             if result.stats:
@@ -845,7 +890,7 @@ async def process_github_repos_batch(
     try:
         # Choose async or sync processing
         if use_async:
-            logging.info("Using async batch processing...")
+            logging.info("Using async batch processing with incremental storage...")
             results = await connector.get_repos_with_stats_async(
                 org_name=org_name,
                 user_name=user_name,
@@ -857,8 +902,12 @@ async def process_github_repos_batch(
                 max_repos=max_repos,
                 on_repo_complete=on_repo_complete,
             )
+            # Store results incrementally after async processing completes each batch
+            for result in results:
+                await store_result(result)
         else:
-            logging.info("Using sync batch processing...")
+            logging.info("Using sync batch processing with incremental storage...")
+            # For sync processing, we process and store in smaller chunks
             results = connector.get_repos_with_stats(
                 org_name=org_name,
                 user_name=user_name,
@@ -870,53 +919,18 @@ async def process_github_repos_batch(
                 max_repos=max_repos,
                 on_repo_complete=on_repo_complete,
             )
-
-        # Store results in database
-        logging.info(f"Storing {len(results)} repository results...")
-        for result in results:
-            if not result.success:
-                continue
-
-            repo_info = result.repository
-
-            # Create Repo object for database
-            db_repo = Repo(
-                repo_path=None,  # Not a local repo
-                repo=repo_info.full_name,
-                settings={
-                    "source": "github",
-                    "repo_id": repo_info.id,
-                    "url": repo_info.url,
-                    "default_branch": repo_info.default_branch,
-                    "batch_processed": True,
-                },
-                tags=["github", repo_info.language] if repo_info.language else ["github"],
-            )
-
-            await store.insert_repo(db_repo)
-            logging.debug(f"Stored repository: {db_repo.repo}")
-
-            # Store stats if available
-            if result.stats:
-                # Create commit stats entries from aggregated data
-                stat = GitCommitStat(
-                    repo_id=db_repo.id,
-                    commit_hash=AGGREGATE_STATS_MARKER,
-                    file_path=AGGREGATE_STATS_MARKER,
-                    additions=result.stats.additions,
-                    deletions=result.stats.deletions,
-                    old_file_mode="unknown",
-                    new_file_mode="unknown",
-                )
-                await store.insert_git_commit_stats([stat])
+            # Store results incrementally
+            for result in results:
+                await store_result(result)
 
         # Summary
-        successful = sum(1 for r in results if r.success)
-        failed = sum(1 for r in results if not r.success)
+        successful = sum(1 for r in all_results if r.success)
+        failed = sum(1 for r in all_results if not r.success)
         logging.info("=== Batch Processing Complete ===")
         logging.info(f"  Successful: {successful}")
         logging.info(f"  Failed: {failed}")
-        logging.info(f"  Total: {len(results)}")
+        logging.info(f"  Total: {len(all_results)}")
+        logging.info(f"  Stored: {stored_count}")
 
         # Log rate limit status
         try:
@@ -987,8 +1001,53 @@ async def process_gitlab_projects_batch(
 
     connector = GitLabConnector(url=gitlab_url, private_token=token)
 
+    # Track results for summary and incremental storage
+    all_results: List[GitLabBatchResult] = []
+    stored_count = 0
+
+    async def store_result(result: GitLabBatchResult) -> None:
+        """Store a single result in the database (upsert)."""
+        nonlocal stored_count
+        if not result.success:
+            return
+
+        project_info = result.project
+
+        # Create Repo object for database
+        db_repo = Repo(
+            repo_path=None,  # Not a local repo
+            repo=project_info.full_name,
+            settings={
+                "source": "gitlab",
+                "project_id": project_info.id,
+                "url": project_info.url,
+                "default_branch": project_info.default_branch,
+                "batch_processed": True,
+            },
+            tags=["gitlab"],
+        )
+
+        await store.insert_repo(db_repo)
+        stored_count += 1
+        logging.debug(f"Stored project ({stored_count}): {db_repo.repo}")
+
+        # Store stats if available
+        if result.stats:
+            # Create commit stats entries from aggregated data
+            stat = GitCommitStat(
+                repo_id=db_repo.id,
+                commit_hash=AGGREGATE_STATS_MARKER,
+                file_path=AGGREGATE_STATS_MARKER,
+                additions=result.stats.additions,
+                deletions=result.stats.deletions,
+                old_file_mode="unknown",
+                new_file_mode="unknown",
+            )
+            await store.insert_git_commit_stats([stat])
+
     def on_project_complete(result: GitLabBatchResult) -> None:
-        """Callback for when each project is processed."""
+        """Callback for when each project is processed - logs and queues for storage."""
+        all_results.append(result)
         if result.success:
             stats_info = ""
             if result.stats:
@@ -1000,7 +1059,7 @@ async def process_gitlab_projects_batch(
     try:
         # Choose async or sync processing
         if use_async:
-            logging.info("Using async batch processing...")
+            logging.info("Using async batch processing with incremental storage...")
             results = await connector.get_projects_with_stats_async(
                 group_name=group_name,
                 pattern=pattern,
@@ -1011,8 +1070,11 @@ async def process_gitlab_projects_batch(
                 max_projects=max_projects,
                 on_project_complete=on_project_complete,
             )
+            # Store results incrementally after async processing completes
+            for result in results:
+                await store_result(result)
         else:
-            logging.info("Using sync batch processing...")
+            logging.info("Using sync batch processing with incremental storage...")
             results = connector.get_projects_with_stats(
                 group_name=group_name,
                 pattern=pattern,
@@ -1023,53 +1085,18 @@ async def process_gitlab_projects_batch(
                 max_projects=max_projects,
                 on_project_complete=on_project_complete,
             )
-
-        # Store results in database
-        logging.info(f"Storing {len(results)} project results...")
-        for result in results:
-            if not result.success:
-                continue
-
-            project_info = result.project
-
-            # Create Repo object for database
-            db_repo = Repo(
-                repo_path=None,  # Not a local repo
-                repo=project_info.full_name,
-                settings={
-                    "source": "gitlab",
-                    "project_id": project_info.id,
-                    "url": project_info.url,
-                    "default_branch": project_info.default_branch,
-                    "batch_processed": True,
-                },
-                tags=["gitlab"],
-            )
-
-            await store.insert_repo(db_repo)
-            logging.debug(f"Stored project: {db_repo.repo}")
-
-            # Store stats if available
-            if result.stats:
-                # Create commit stats entries from aggregated data
-                stat = GitCommitStat(
-                    repo_id=db_repo.id,
-                    commit_hash=AGGREGATE_STATS_MARKER,
-                    file_path=AGGREGATE_STATS_MARKER,
-                    additions=result.stats.additions,
-                    deletions=result.stats.deletions,
-                    old_file_mode="unknown",
-                    new_file_mode="unknown",
-                )
-                await store.insert_git_commit_stats([stat])
+            # Store results incrementally
+            for result in results:
+                await store_result(result)
 
         # Summary
-        successful = sum(1 for r in results if r.success)
-        failed = sum(1 for r in results if not r.success)
+        successful = sum(1 for r in all_results if r.success)
+        failed = sum(1 for r in all_results if not r.success)
         logging.info("=== Batch Processing Complete ===")
         logging.info(f"  Successful: {successful}")
         logging.info(f"  Failed: {failed}")
-        logging.info(f"  Total: {len(results)}")
+        logging.info(f"  Total: {len(all_results)}")
+        logging.info(f"  Stored: {stored_count}")
 
     except ConnectorException as e:
         logging.error(f"Connector error: {e}")
