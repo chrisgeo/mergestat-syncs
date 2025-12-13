@@ -15,6 +15,81 @@ Mostly because using mergestat's syncs are great but take a lot of time to under
 
 See [`PRIVATE_REPO_TESTING.md`](./PRIVATE_REPO_TESTING.md) for detailed instructions on setting up and testing private repository access, or [`VERIFICATION_SUMMARY.md`](./VERIFICATION_SUMMARY.md) for a comprehensive overview.
 
+## Batch Repository Processing ✅
+
+The GitHub connector supports batch processing of repositories with:
+
+- **Pattern matching** - Filter repositories using fnmatch-style patterns (e.g., `chrisgeo/m*`, `*/api-*`)
+- **Configurable batch size** - Process repositories in batches to manage memory and API usage
+- **Rate limiting** - Configurable delays between batches to avoid hitting API limits
+- **Async processing** - Process multiple repositories concurrently for better performance
+- **Callbacks** - Get notified as each repository is processed
+
+### Example Usage
+
+```python
+from connectors import GitHubConnector
+
+connector = GitHubConnector(token="your_token")
+
+# List repos with pattern matching (integrated into list_repositories)
+repos = connector.list_repositories(
+    org_name="myorg",
+    pattern="myorg/api-*",      # Filter repos matching this pattern
+    max_repos=50,
+)
+
+# Get all repos matching a pattern with stats
+results = connector.get_repos_with_stats(
+    org_name="myorg",
+    pattern="myorg/api-*",      # Filter repos matching this pattern
+    batch_size=10,              # Process 10 repos at a time
+    max_concurrent=4,           # Use 4 concurrent workers
+    rate_limit_delay=1.0,       # Wait 1 second between batches
+    max_commits_per_repo=100,   # Limit commits analyzed per repo
+    max_repos=50,               # Maximum repos to process
+)
+
+for result in results:
+    if result.success:
+        print(f"{result.repository.full_name}: {result.stats.total_commits} commits")
+```
+
+### Async Processing
+
+For even better performance, use the async version:
+
+```python
+import asyncio
+from connectors import GitHubConnector
+
+async def main():
+    connector = GitHubConnector(token="your_token")
+    
+    results = await connector.get_repos_with_stats_async(
+        org_name="myorg",
+        pattern="myorg/*",
+        batch_size=10,
+        max_concurrent=4,
+    )
+    
+    for result in results:
+        if result.success:
+            print(f"{result.repository.full_name}: {result.stats.total_commits} commits")
+
+asyncio.run(main())
+```
+
+### Pattern Matching Examples
+
+| Pattern | Matches |
+|---------|---------|
+| `chrisgeo/m*` | `chrisgeo/mergestat-syncs`, `chrisgeo/my-app` |
+| `*/api-*` | `anyorg/api-service`, `myuser/api-gateway` |
+| `org/repo` | Exactly `org/repo` |
+| `chrisgeo/*` | All repositories owned by `chrisgeo` |
+| `*sync*` | Any repository with `sync` in the name |
+
 ## Database Configuration
 
 This project supports PostgreSQL, MongoDB, and SQLite as storage backends. You can configure the database backend using environment variables or command-line arguments.

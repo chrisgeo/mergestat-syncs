@@ -5,9 +5,14 @@ This connector provides methods to retrieve organizations, repositories,
 contributors, statistics, pull requests, and blame information from GitHub.
 """
 
+import asyncio
+import fnmatch
 import logging
+import time
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 from github import Github, GithubException, RateLimitExceededException
 
@@ -19,6 +24,32 @@ from connectors.models import (Author, BlameRange, CommitStats, FileBlame,
 from connectors.utils import GitHubGraphQLClient, retry_with_backoff
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class BatchResult:
+    """Result of a batch repository processing operation."""
+
+    repository: Repository
+    stats: Optional[RepoStats] = None
+    error: Optional[str] = None
+    success: bool = True
+
+
+def match_repo_pattern(full_name: str, pattern: str) -> bool:
+    """
+    Match a repository full name against a pattern using fnmatch-style matching.
+
+    :param full_name: Repository full name (e.g., 'chrisgeo/mergestat-syncs').
+    :param pattern: Pattern to match (e.g., 'chrisgeo/m*', '*/sync*', 'chrisgeo/*').
+    :return: True if the pattern matches, False otherwise.
+
+    Examples:
+        - 'chrisgeo/m*' matches 'chrisgeo/mergestat-syncs'
+        - '*/sync*' matches 'anyorg/sync-tool'
+        - 'org/repo' matches exactly 'org/repo'
+    """
+    return fnmatch.fnmatch(full_name.lower(), pattern.lower())
 
 
 class GitHubConnector:
@@ -126,6 +157,7 @@ class GitHubConnector:
         org_name: Optional[str] = None,
         user_name: Optional[str] = None,
         search: Optional[str] = None,
+        pattern: Optional[str] = None,
         max_repos: Optional[int] = None,
     ) -> List[Repository]:
         """
@@ -136,8 +168,15 @@ class GitHubConnector:
         :param search: Optional search query to filter repositories.
                       If provided with org_name/user_name, searches within that scope.
                       If provided alone, performs global search.
+        :param pattern: Optional fnmatch-style pattern to filter repositories by full name
+                       (e.g., 'chrisgeo/m*', '*/api-*'). Pattern matching is performed
+                       client-side after fetching repositories. Case-insensitive.
         :param max_repos: Maximum number of repositories to retrieve. If None, retrieves all.
         :return: List of Repository objects.
+
+        Examples:
+            - pattern='chrisgeo/m*' matches 'chrisgeo/mergestat-syncs'
+            - pattern='*/sync*' matches 'anyorg/sync-tool'
         """
         try:
             repos = []
@@ -165,6 +204,10 @@ class GitHubConnector:
                 if max_repos and len(repos) >= max_repos:
                     break
 
+                # Apply pattern filter early to avoid unnecessary object creation
+                if pattern and not match_repo_pattern(gh_repo.full_name, pattern):
+                    continue
+
                 repo = Repository(
                     id=gh_repo.id,
                     name=gh_repo.name,
@@ -178,10 +221,12 @@ class GitHubConnector:
                     stars=gh_repo.stargazers_count,
                     forks=gh_repo.forks_count,
                 )
+
                 repos.append(repo)
                 logger.debug(f"Retrieved repository: {repo.full_name}")
 
-            logger.info(f"Retrieved {len(repos)} repositories")
+            pattern_msg = f" matching pattern '{pattern}'" if pattern else ""
+            logger.info(f"Retrieved {len(repos)} repositories{pattern_msg}")
             return repos
 
         except Exception as e:
@@ -480,6 +525,273 @@ class GitHubConnector:
             }
         except Exception as e:
             self._handle_github_exception(e)
+
+    def _get_repositories_for_processing(
+        self,
+        org_name: Optional[str] = None,
+        user_name: Optional[str] = None,
+        pattern: Optional[str] = None,
+        max_repos: Optional[int] = None,
+    ) -> List[Repository]:
+        """
+        Get repositories for batch processing, optionally filtered by pattern.
+
+        :param org_name: Optional organization name.
+        :param user_name: Optional user name.
+        :param pattern: Optional fnmatch-style pattern.
+        :param max_repos: Maximum number of repos to retrieve.
+        :return: List of Repository objects.
+        """
+        return self.list_repositories(
+            org_name=org_name,
+            user_name=user_name,
+            pattern=pattern,
+            max_repos=max_repos,
+        )
+
+    def _process_single_repo_stats(
+        self,
+        repo: Repository,
+        max_commits: Optional[int] = None,
+    ) -> BatchResult:
+        """
+        Process a single repository and get its stats.
+
+        :param repo: Repository object to process.
+        :param max_commits: Maximum number of commits to analyze.
+        :return: BatchResult containing repository and stats.
+        """
+        try:
+            parts = repo.full_name.split("/")
+            if len(parts) != 2:
+                return BatchResult(
+                    repository=repo,
+                    error=f"Invalid repository name: {repo.full_name}",
+                    success=False,
+                )
+
+            owner, repo_name = parts
+            stats = self.get_repo_stats(owner, repo_name, max_commits=max_commits)
+
+            return BatchResult(
+                repository=repo,
+                stats=stats,
+                success=True,
+            )
+
+        except Exception as e:
+            logger.warning(f"Failed to get stats for {repo.full_name}: {e}")
+            return BatchResult(
+                repository=repo,
+                error=str(e),
+                success=False,
+            )
+
+    def get_repos_with_stats(
+        self,
+        org_name: Optional[str] = None,
+        user_name: Optional[str] = None,
+        pattern: Optional[str] = None,
+        batch_size: int = 10,
+        max_concurrent: int = 4,
+        rate_limit_delay: float = 1.0,
+        max_commits_per_repo: Optional[int] = None,
+        max_repos: Optional[int] = None,
+        on_repo_complete: Optional[Callable[[BatchResult], None]] = None,
+    ) -> List[BatchResult]:
+        """
+        Get repositories and their stats with batch processing and rate limiting.
+
+        This method retrieves repositories from an organization or user,
+        optionally filtering by pattern, and collects statistics for each
+        repository with configurable batch processing and rate limiting.
+
+        :param org_name: Optional organization name to fetch repos from.
+        :param user_name: Optional user name to fetch repos from.
+        :param pattern: Optional fnmatch-style pattern to filter repos (e.g., 'chrisgeo/m*').
+        :param batch_size: Number of repos to process in each batch.
+        :param max_concurrent: Maximum number of concurrent workers for processing.
+        :param rate_limit_delay: Delay in seconds between batches for rate limiting.
+        :param max_commits_per_repo: Maximum commits to analyze per repository.
+        :param max_repos: Maximum number of repositories to process.
+        :param on_repo_complete: Optional callback function called after each repo is processed.
+        :return: List of BatchResult objects with repository and stats.
+
+        Example:
+            >>> results = connector.get_repos_with_stats(
+            ...     org_name='myorg',
+            ...     pattern='myorg/api-*',
+            ...     batch_size=5,
+            ...     max_concurrent=2,
+            ...     rate_limit_delay=2.0,
+            ... )
+            >>> for result in results:
+            ...     if result.success:
+            ...         print(f"{result.repository.full_name}: {result.stats}")
+        """
+        # Step 1: Get repositories
+        repos = self._get_repositories_for_processing(
+            org_name=org_name,
+            user_name=user_name,
+            pattern=pattern,
+            max_repos=max_repos,
+        )
+
+        logger.info(f"Processing {len(repos)} repositories with batch_size={batch_size}")
+
+        results = []
+
+        # Step 2: Process in batches
+        for batch_start in range(0, len(repos), batch_size):
+            batch_end = min(batch_start + batch_size, len(repos))
+            batch = repos[batch_start:batch_end]
+
+            logger.info(
+                f"Processing batch {batch_start // batch_size + 1}: "
+                f"repos {batch_start + 1}-{batch_end} of {len(repos)}"
+            )
+
+            # Process batch concurrently using ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=max_concurrent) as executor:
+                futures = [
+                    executor.submit(
+                        self._process_single_repo_stats,
+                        repo,
+                        max_commits_per_repo,
+                    )
+                    for repo in batch
+                ]
+
+                for future in futures:
+                    try:
+                        result = future.result()
+                        results.append(result)
+
+                        # Call callback if provided
+                        if on_repo_complete:
+                            on_repo_complete(result)
+
+                    except Exception as e:
+                        logger.error(f"Unexpected error in batch processing: {e}")
+
+            # Rate limiting delay between batches
+            if batch_end < len(repos) and rate_limit_delay > 0:
+                logger.debug(f"Rate limiting: waiting {rate_limit_delay}s")
+                time.sleep(rate_limit_delay)
+
+        logger.info(
+            f"Completed processing {len(results)} repositories, "
+            f"{sum(1 for r in results if r.success)} successful"
+        )
+        return results
+
+    async def get_repos_with_stats_async(
+        self,
+        org_name: Optional[str] = None,
+        user_name: Optional[str] = None,
+        pattern: Optional[str] = None,
+        batch_size: int = 10,
+        max_concurrent: int = 4,
+        rate_limit_delay: float = 1.0,
+        max_commits_per_repo: Optional[int] = None,
+        max_repos: Optional[int] = None,
+        on_repo_complete: Optional[Callable[[BatchResult], None]] = None,
+    ) -> List[BatchResult]:
+        """
+        Async version of get_repos_with_stats for better concurrent processing.
+
+        This method retrieves repositories from an organization or user,
+        optionally filtering by pattern, and collects statistics for each
+        repository with configurable async batch processing and rate limiting.
+
+        :param org_name: Optional organization name to fetch repos from.
+        :param user_name: Optional user name to fetch repos from.
+        :param pattern: Optional fnmatch-style pattern to filter repos (e.g., 'chrisgeo/m*').
+        :param batch_size: Number of repos to process in each batch.
+        :param max_concurrent: Maximum number of concurrent workers for processing.
+        :param rate_limit_delay: Delay in seconds between batches for rate limiting.
+        :param max_commits_per_repo: Maximum commits to analyze per repository.
+        :param max_repos: Maximum number of repositories to process.
+        :param on_repo_complete: Optional callback function called after each repo is processed.
+        :return: List of BatchResult objects with repository and stats.
+
+        Example:
+            >>> import asyncio
+            >>> async def main():
+            ...     results = await connector.get_repos_with_stats_async(
+            ...         org_name='myorg',
+            ...         pattern='myorg/api-*',
+            ...         batch_size=5,
+            ...         max_concurrent=2,
+            ...     )
+            ...     for result in results:
+            ...         if result.success:
+            ...             print(f"{result.repository.full_name}: {result.stats}")
+            >>> asyncio.run(main())
+        """
+        # Step 1: Get repositories (using sync method via run_in_executor)
+        loop = asyncio.get_running_loop()
+
+        repos = await loop.run_in_executor(
+            None,
+            lambda: self._get_repositories_for_processing(
+                org_name=org_name,
+                user_name=user_name,
+                pattern=pattern,
+                max_repos=max_repos,
+            ),
+        )
+
+        logger.info(f"Processing {len(repos)} repositories asynchronously")
+
+        results = []
+        semaphore = asyncio.Semaphore(max_concurrent)
+
+        async def process_repo_async(repo: Repository) -> BatchResult:
+            """Process a single repository asynchronously."""
+            async with semaphore:
+                result = await loop.run_in_executor(
+                    None,
+                    lambda: self._process_single_repo_stats(repo, max_commits_per_repo),
+                )
+
+                if on_repo_complete:
+                    on_repo_complete(result)
+
+                return result
+
+        # Step 2: Process in batches with rate limiting
+        for batch_start in range(0, len(repos), batch_size):
+            batch_end = min(batch_start + batch_size, len(repos))
+            batch = repos[batch_start:batch_end]
+
+            logger.info(
+                f"Processing async batch {batch_start // batch_size + 1}: "
+                f"repos {batch_start + 1}-{batch_end} of {len(repos)}"
+            )
+
+            # Process batch concurrently
+            batch_results = await asyncio.gather(
+                *[process_repo_async(repo) for repo in batch],
+                return_exceptions=True,
+            )
+
+            for result in batch_results:
+                if isinstance(result, Exception):
+                    logger.error(f"Unexpected error in async batch processing: {result}")
+                else:
+                    results.append(result)
+
+            # Rate limiting delay between batches
+            if batch_end < len(repos) and rate_limit_delay > 0:
+                logger.debug(f"Rate limiting: waiting {rate_limit_delay}s before next batch")
+                await asyncio.sleep(rate_limit_delay)
+
+        logger.info(
+            f"Completed async processing {len(results)} repositories, "
+            f"{sum(1 for r in results if r.success)} successful"
+        )
+        return results
 
     def close(self) -> None:
         """Close the connector and cleanup resources."""

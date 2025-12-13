@@ -8,7 +8,7 @@ with automatic pagination, rate limiting, and error handling.
 from .exceptions import (APIException, AuthenticationException,
                          ConnectorException, NotFoundException,
                          PaginationException, RateLimitException)
-from .github import GitHubConnector
+from .github import BatchResult, GitHubConnector, match_repo_pattern
 from .gitlab import GitLabConnector
 from .models import (Author, BlameRange, CommitStats, FileBlame, Organization,
                      PullRequest, Repository, RepoStats)
@@ -17,6 +17,9 @@ __all__ = [
     # Connectors
     "GitHubConnector",
     "GitLabConnector",
+    # Batch processing
+    "BatchResult",
+    "match_repo_pattern",
     # Models
     "Organization",
     "Repository",
