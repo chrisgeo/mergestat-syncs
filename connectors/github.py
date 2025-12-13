@@ -16,11 +16,21 @@ from typing import Callable, List, Optional
 from github import Github, GithubException, RateLimitExceededException
 
 from connectors.base import BatchResult, GitConnector
-from connectors.exceptions import (APIException, AuthenticationException,
-                                   RateLimitException)
-from connectors.models import (Author, BlameRange, CommitStats, FileBlame,
-                               Organization, PullRequest, Repository,
-                               RepoStats)
+from connectors.exceptions import (
+    APIException,
+    AuthenticationException,
+    RateLimitException,
+)
+from connectors.models import (
+    Author,
+    BlameRange,
+    CommitStats,
+    FileBlame,
+    Organization,
+    PullRequest,
+    Repository,
+    RepoStats,
+)
 from connectors.utils import GitHubGraphQLClient, retry_with_backoff
 
 logger = logging.getLogger(__name__)
@@ -538,7 +548,7 @@ class GitHubConnector(GitConnector):
         # Extract owner from pattern if not explicitly provided
         effective_org = org_name
         effective_user = user_name
-        
+
         if not org_name and not user_name and pattern:
             # Check if pattern has a specific owner prefix (e.g., 'chrisgeo/*')
             if "/" in pattern:
@@ -548,8 +558,10 @@ class GitHubConnector(GitConnector):
                 if owner_part and "*" not in owner_part and "?" not in owner_part:
                     # Try as user first (works for both users and orgs via search)
                     effective_user = owner_part
-                    logger.info(f"Extracted owner '{owner_part}' from pattern '{pattern}'")
-        
+                    logger.info(
+                        f"Extracted owner '{owner_part}' from pattern '{pattern}'"
+                    )
+
         return self.list_repositories(
             org_name=effective_org,
             user_name=effective_user,
@@ -645,7 +657,9 @@ class GitHubConnector(GitConnector):
             max_repos=max_repos,
         )
 
-        logger.info(f"Processing {len(repos)} repositories with batch_size={batch_size}")
+        logger.info(
+            f"Processing {len(repos)} repositories with batch_size={batch_size}"
+        )
 
         results = []
 
@@ -778,21 +792,22 @@ class GitHubConnector(GitConnector):
                 f"repos {batch_start + 1}-{batch_end} of {len(repos)}"
             )
 
-            # Process batch concurrently
-            batch_results = await asyncio.gather(
-                *[process_repo_async(repo) for repo in batch],
-                return_exceptions=True,
-            )
+            # Process batch concurrently and consume results as they complete.
+            tasks = [asyncio.create_task(process_repo_async(repo)) for repo in batch]
+            for fut in asyncio.as_completed(tasks):
+                try:
+                    result = await fut
+                except Exception as e:
+                    logger.error(f"Unexpected error in async batch processing: {e}")
+                    continue
 
-            for result in batch_results:
-                if isinstance(result, Exception):
-                    logger.error(f"Unexpected error in async batch processing: {result}")
-                else:
-                    results.append(result)
+                results.append(result)
 
             # Rate limiting delay between batches
             if batch_end < len(repos) and rate_limit_delay > 0:
-                logger.debug(f"Rate limiting: waiting {rate_limit_delay}s before next batch")
+                logger.debug(
+                    f"Rate limiting: waiting {rate_limit_delay}s before next batch"
+                )
                 await asyncio.sleep(rate_limit_delay)
 
         logger.info(

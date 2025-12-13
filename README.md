@@ -138,7 +138,9 @@ These unified options work with both GitHub and GitLab connectors:
 - **`--rate-limit-delay`**: Delay in seconds between batches for rate limiting (default: 1.0)
 - **`--max-commits-per-repo`**: Maximum commits to analyze per repository/project
 - **`--max-repos`**: Maximum number of repositories/projects to process
+- **`--max-repos`**: Maximum number of repositories/projects to process
 - **`--use-async`**: Use async processing for better performance
+- **`--fetch-blame`**: Fetch blame data (warning: slow and rate-limited)
 
 Example usage:
 

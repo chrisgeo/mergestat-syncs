@@ -18,11 +18,21 @@ import gitlab
 from gitlab.exceptions import GitlabAuthenticationError, GitlabError
 
 from connectors.base import BatchResult, GitConnector
-from connectors.exceptions import (APIException, AuthenticationException,
-                                   RateLimitException)
-from connectors.models import (Author, BlameRange, CommitStats, FileBlame,
-                               Organization, PullRequest, Repository,
-                               RepoStats)
+from connectors.exceptions import (
+    APIException,
+    AuthenticationException,
+    RateLimitException,
+)
+from connectors.models import (
+    Author,
+    BlameRange,
+    CommitStats,
+    FileBlame,
+    Organization,
+    PullRequest,
+    Repository,
+    RepoStats,
+)
 from connectors.utils import GitLabRESTClient, retry_with_backoff
 
 logger = logging.getLogger(__name__)
@@ -721,7 +731,7 @@ class GitLabConnector(GitConnector):
         # Extract owner from pattern if not explicitly provided
         effective_group_name = group_name
         effective_user_name = user_name
-        
+
         if not group_id and not group_name and not user_name and pattern:
             # Check if pattern has a specific owner prefix (e.g., 'mygroup/*' or 'username/*')
             if "/" in pattern:
@@ -733,12 +743,16 @@ class GitLabConnector(GitConnector):
                     try:
                         self.gitlab.groups.get(owner_part)
                         effective_group_name = owner_part
-                        logger.info(f"Extracted group '{owner_part}' from pattern '{pattern}'")
+                        logger.info(
+                            f"Extracted group '{owner_part}' from pattern '{pattern}'"
+                        )
                     except Exception:
                         # Not a group, try as user
                         effective_user_name = owner_part
-                        logger.info(f"Extracted user '{owner_part}' from pattern '{pattern}'")
-        
+                        logger.info(
+                            f"Extracted user '{owner_part}' from pattern '{pattern}'"
+                        )
+
         return self.list_projects(
             group_id=group_id,
             group_name=effective_group_name,
@@ -970,21 +984,24 @@ class GitLabConnector(GitConnector):
                 f"projects {batch_start + 1}-{batch_end} of {len(projects)}"
             )
 
-            # Process batch concurrently
-            batch_results = await asyncio.gather(
-                *[process_project_async(project) for project in batch],
-                return_exceptions=True,
-            )
+            # Process batch concurrently and consume results as they complete.
+            tasks = [
+                asyncio.create_task(process_project_async(project)) for project in batch
+            ]
+            for fut in asyncio.as_completed(tasks):
+                try:
+                    result = await fut
+                except Exception as e:
+                    logger.error(f"Unexpected error in async batch processing: {e}")
+                    continue
 
-            for result in batch_results:
-                if isinstance(result, Exception):
-                    logger.error(f"Unexpected error in async batch processing: {result}")
-                else:
-                    results.append(result)
+                results.append(result)
 
             # Rate limiting delay between batches
             if batch_end < len(projects) and rate_limit_delay > 0:
-                logger.debug(f"Rate limiting: waiting {rate_limit_delay}s before next batch")
+                logger.debug(
+                    f"Rate limiting: waiting {rate_limit_delay}s before next batch"
+                )
                 await asyncio.sleep(rate_limit_delay)
 
         logger.info(
@@ -1173,6 +1190,7 @@ class GitLabConnector(GitConnector):
         :param on_repo_complete: Callback function called after each repo.
         :return: List of BatchResult objects.
         """
+
         # Map the callback to use BatchResult instead of GitLabBatchResult
         def wrapped_callback(gitlab_result: GitLabBatchResult) -> None:
             if on_repo_complete:
@@ -1235,6 +1253,7 @@ class GitLabConnector(GitConnector):
         :param on_repo_complete: Callback function called after each repo.
         :return: List of BatchResult objects.
         """
+
         # Map the callback to use BatchResult instead of GitLabBatchResult
         def wrapped_callback(gitlab_result: GitLabBatchResult) -> None:
             if on_repo_complete:

@@ -4,8 +4,16 @@ import uuid
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
-from models.git import (GitBlame, GitCommit, GitCommitStat, GitFile, GitRef,
-                        Repo, get_repo_uuid)
+from models.git import (
+    GitBlame,
+    GitCommit,
+    GitCommitStat,
+    GitFile,
+    GitRef,
+    Repo,
+    get_repo_uuid,
+    get_repo_uuid_from_repo,
+)
 
 
 class TestRepoUUID:
@@ -99,6 +107,29 @@ class TestRepoUUID:
 
             assert repo.id == explicit_uuid
             mock_get_uuid.assert_not_called()
+
+    def test_repo_id_is_set_from_repo_identifier(self):
+        """Repo.id should be set when initialized with repo=... (no repo_path)."""
+        repo_name = "group/project"
+        repo = Repo(repo=repo_name, settings={}, tags=[])
+
+        assert repo.id == get_repo_uuid_from_repo(repo_name)
+        assert isinstance(repo.id, uuid.UUID)
+
+    def test_repo_id_from_repo_identifier_is_deterministic(self):
+        """Same repo identifier should yield same UUID across instances."""
+        repo_name = "group/project"
+        repo1 = Repo(repo=repo_name, settings={}, tags=[])
+        repo2 = Repo(repo=repo_name, settings={}, tags=[])
+
+        assert repo1.id == repo2.id
+
+    def test_repo_id_from_repo_identifier_is_unique_per_repo(self):
+        """Different repo identifiers should yield different UUIDs."""
+        repo1 = Repo(repo="group/project1", settings={}, tags=[])
+        repo2 = Repo(repo="group/project2", settings={}, tags=[])
+
+        assert repo1.id != repo2.id
 
     def test_git_commit_uses_repo_id(self):
         """Test that GitCommit can be created with repo.id."""
@@ -244,9 +275,9 @@ class TestBackwardCompatibility:
         for model, column_name in models_and_columns:
             column = model.__table__.columns[column_name]
             # Check that the column type has timezone=True
-            assert (
-                column.type.timezone is True
-            ), f"{model.__name__}.{column_name} should have timezone=True"
+            assert column.type.timezone is True, (
+                f"{model.__name__}.{column_name} should have timezone=True"
+            )
 
     def test_datetime_defaults_are_callable(self):
         """Test that all datetime defaults are callable (lambdas)."""
@@ -261,9 +292,9 @@ class TestBackwardCompatibility:
 
         for model, column_name in models_and_columns:
             column = model.__table__.columns[column_name]
-            assert (
-                column.default is not None
-            ), f"{model.__name__}.{column_name} should have a default"
-            assert callable(
-                column.default.arg
-            ), f"{model.__name__}.{column_name} default should be callable"
+            assert column.default is not None, (
+                f"{model.__name__}.{column_name} should have a default"
+            )
+            assert callable(column.default.arg), (
+                f"{model.__name__}.{column_name} default should be callable"
+            )

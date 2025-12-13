@@ -9,12 +9,267 @@ import pytest
 from connectors import GitHubConnector, BatchResult, match_repo_pattern
 
 
+@pytest.mark.asyncio
+async def test_github_async_batch_callback_fires_as_completed(monkeypatch):
+    """Fast repos should invoke callback before slow repos in same batch."""
+    import time
+    from unittest.mock import patch
+
+    from connectors.models import Repository
+
+    with (
+        patch("connectors.github.Github"),
+        patch("connectors.github.GitHubGraphQLClient"),
+    ):
+        connector = GitHubConnector(token="test_token")
+
+    slow = Repository(
+        id=1,
+        name="slow",
+        full_name="org/slow",
+        default_branch="main",
+        url="https://example.com/org/slow",
+    )
+    fast = Repository(
+        id=2,
+        name="fast",
+        full_name="org/fast",
+        default_branch="main",
+        url="https://example.com/org/fast",
+    )
+
+    # Ensure input ordering doesn't accidentally match completion ordering.
+    monkeypatch.setattr(
+        connector,
+        "_get_repositories_for_processing",
+        lambda **kwargs: [slow, fast],
+    )
+
+    def fake_process(repo, max_commits):
+        if repo.name == "slow":
+            time.sleep(0.15)
+        else:
+            time.sleep(0.01)
+        return BatchResult(repository=repo, stats=None, success=True)
+
+    monkeypatch.setattr(connector, "_process_single_repo_stats", fake_process)
+
+    callback_order = []
+
+    await connector.get_repos_with_stats_async(
+        org_name="org",
+        batch_size=2,
+        max_concurrent=2,
+        rate_limit_delay=0,
+        on_repo_complete=lambda r: callback_order.append(r.repository.name),
+    )
+
+    assert callback_order[0] == "fast"
+    assert callback_order[1] == "slow"
+
+
+@pytest.mark.asyncio
+async def test_gitlab_async_batch_callback_fires_as_completed(monkeypatch):
+    """Fast projects should invoke callback before slow projects in same batch."""
+    import time
+    from unittest.mock import patch
+
+    from connectors.gitlab import GitLabBatchResult, GitLabConnector
+    from connectors.models import Repository
+
+    with patch("connectors.gitlab.gitlab.Gitlab"):
+        connector = GitLabConnector(url="https://gitlab.com", private_token="test")
+
+    slow = Repository(
+        id=1,
+        name="slow",
+        full_name="group/slow",
+        default_branch="main",
+        url="https://example.com/group/slow",
+    )
+    fast = Repository(
+        id=2,
+        name="fast",
+        full_name="group/fast",
+        default_branch="main",
+        url="https://example.com/group/fast",
+    )
+
+    monkeypatch.setattr(
+        connector,
+        "_get_projects_for_processing",
+        lambda **kwargs: [slow, fast],
+    )
+
+    def fake_process(project, max_commits):
+        if project.name == "slow":
+            time.sleep(0.15)
+        else:
+            time.sleep(0.01)
+        return GitLabBatchResult(project=project, stats=None, success=True)
+
+    monkeypatch.setattr(connector, "_process_single_project_stats", fake_process)
+
+    callback_order = []
+
+    await connector.get_projects_with_stats_async(
+        group_name="group",
+        batch_size=2,
+        max_concurrent=2,
+        rate_limit_delay=0,
+        on_project_complete=lambda r: callback_order.append(r.project.name),
+    )
+
+    assert callback_order[0] == "fast"
+    assert callback_order[1] == "slow"
+
+
+@pytest.mark.asyncio
+async def test_process_gitlab_projects_batch_upserts_during_sync_processing(
+    monkeypatch,
+):
+    """Default (sync) batch mode should still upsert before processing ends."""
+    import threading
+    import time
+
+    import git_mergestat
+    from connectors.gitlab import GitLabBatchResult
+
+    # Force connectors availability for this test.
+    monkeypatch.setattr(git_mergestat, "CONNECTORS_AVAILABLE", True)
+
+    inserted = threading.Event()
+
+    class DummyStore:
+        async def insert_repo(self, repo):
+            inserted.set()
+
+        async def insert_git_commit_stats(self, commit_stats):
+            return
+
+    store = DummyStore()
+
+    project = Mock()
+    project.id = 123
+    project.full_name = "group/proj"
+    project.url = "https://example.com/group/proj"
+    project.default_branch = "main"
+
+    result = GitLabBatchResult(project=project, stats=None, success=True)
+
+    class DummyConnector:
+        def __init__(self, url: str, private_token: str):
+            self.url = url
+            self.private_token = private_token
+
+        def get_projects_with_stats(self, **kwargs):
+            on_project_complete = kwargs.get("on_project_complete")
+            if on_project_complete:
+                on_project_complete(result)
+
+            # Give the event loop time to upsert while we're still running.
+            deadline = time.time() + 2
+            while time.time() < deadline and not inserted.is_set():
+                time.sleep(0.01)
+
+            assert inserted.is_set(), "Expected upsert during sync processing"
+            return [result]
+
+        def close(self):
+            return
+
+    monkeypatch.setattr(git_mergestat, "GitLabConnector", DummyConnector)
+
+    await git_mergestat.process_gitlab_projects_batch(
+        store=store,
+        token="test_token",
+        gitlab_url="https://gitlab.com",
+        group_name="group",
+        pattern="group/*",
+        batch_size=1,
+        max_concurrent=1,
+        rate_limit_delay=0,
+        use_async=False,
+    )
+
+
+@pytest.mark.asyncio
+async def test_process_github_repos_batch_upserts_during_async_processing(monkeypatch):
+    """Ensure git_mergestat async batch mode upserts as repos complete."""
+    import asyncio
+
+    import git_mergestat
+
+    # Force connectors availability for this test.
+    monkeypatch.setattr(git_mergestat, "CONNECTORS_AVAILABLE", True)
+
+    # A store stub that records when insert_repo is called.
+    inserted_event = asyncio.Event()
+
+    class DummyStore:
+        async def insert_repo(self, repo):
+            inserted_event.set()
+
+        async def insert_git_commit_stats(self, commit_stats):
+            return
+
+    store = DummyStore()
+
+    repo = Mock()
+    repo.id = 123
+    repo.full_name = "org/repo"
+    repo.url = "https://example.com/org/repo"
+    repo.default_branch = "main"
+    repo.language = "Python"
+
+    stats = Mock()
+    stats.total_commits = 1
+    stats.additions = 2
+    stats.deletions = 1
+
+    result = BatchResult(repository=repo, stats=stats, success=True)
+
+    class DummyConnector:
+        def __init__(self, token: str):
+            self.token = token
+
+        async def get_repos_with_stats_async(self, **kwargs):
+            on_repo_complete = kwargs.get("on_repo_complete")
+            if on_repo_complete:
+                on_repo_complete(result)
+
+            # Wait for the consumer to store the result.
+            await asyncio.wait_for(inserted_event.wait(), timeout=2)
+            return [result]
+
+        def get_rate_limit(self):
+            return {"remaining": 0, "limit": 0}
+
+        def close(self):
+            return
+
+    monkeypatch.setattr(git_mergestat, "GitHubConnector", DummyConnector)
+
+    await git_mergestat.process_github_repos_batch(
+        store=store,
+        token="test_token",
+        org_name="org",
+        pattern="org/*",
+        batch_size=1,
+        max_concurrent=1,
+        rate_limit_delay=0,
+        use_async=True,
+    )
+
+
 class TestPatternMatching:
     """Test repository pattern matching functionality."""
 
     def test_exact_match(self):
         """Test exact repository name matching."""
-        assert match_repo_pattern("chrisgeo/mergestat-syncs", "chrisgeo/mergestat-syncs")
+        assert match_repo_pattern(
+            "chrisgeo/mergestat-syncs", "chrisgeo/mergestat-syncs"
+        )
 
     def test_wildcard_suffix(self):
         """Test pattern with wildcard suffix."""
@@ -178,9 +433,7 @@ class TestGitHubConnectorBatchProcessing:
 
         assert len(repos) == 3
 
-    def test_get_repos_with_stats_sync(
-        self, mock_github_client, mock_graphql_client
-    ):
+    def test_get_repos_with_stats_sync(self, mock_github_client, mock_graphql_client):
         """Test synchronous batch processing of repositories with stats."""
         # Setup mock repos
         mock_repos = [
@@ -549,7 +802,9 @@ class TestBatchProcessingErrorHandling:
         mock_repo_invalid = Mock()
         mock_repo_invalid.id = 1
         mock_repo_invalid.name = "invalid"
-        mock_repo_invalid.full_name = "invalid_no_slash"  # Invalid - no owner/repo format
+        mock_repo_invalid.full_name = (
+            "invalid_no_slash"  # Invalid - no owner/repo format
+        )
         mock_repo_invalid.default_branch = "main"
         mock_repo_invalid.description = "Invalid repo"
         mock_repo_invalid.html_url = "https://github.com/invalid"
@@ -618,11 +873,13 @@ class TestGitLabPatternMatching:
     def test_exact_match(self):
         """Test exact project name matching."""
         from connectors import match_project_pattern
+
         assert match_project_pattern("group/project", "group/project")
 
     def test_wildcard_suffix(self):
         """Test pattern with wildcard suffix."""
         from connectors import match_project_pattern
+
         assert match_project_pattern("group/api-service", "group/api-*")
         assert match_project_pattern("group/api-v2", "group/api-*")
         assert not match_project_pattern("group/web-service", "group/api-*")
@@ -630,24 +887,28 @@ class TestGitLabPatternMatching:
     def test_wildcard_prefix(self):
         """Test pattern with wildcard prefix."""
         from connectors import match_project_pattern
+
         assert match_project_pattern("mygroup/api-service", "*-service")
         assert match_project_pattern("other/web-service", "*-service")
 
     def test_wildcard_group(self):
         """Test pattern with wildcard group."""
         from connectors import match_project_pattern
+
         assert match_project_pattern("group1/sync-tool", "*/sync-tool")
         assert match_project_pattern("group2/sync-tool", "*/sync-tool")
 
     def test_wildcard_project(self):
         """Test pattern with wildcard project."""
         from connectors import match_project_pattern
+
         assert match_project_pattern("mygroup/anything", "mygroup/*")
         assert match_project_pattern("mygroup/another", "mygroup/*")
 
     def test_case_insensitive(self):
         """Test case insensitive matching."""
         from connectors import match_project_pattern
+
         assert match_project_pattern("MyGroup/MyProject", "mygroup/myproject*")
         assert match_project_pattern("MYGROUP/PROJECT", "mygroup/*")
 
@@ -658,6 +919,7 @@ class TestGitLabBatchResult:
     def test_successful_result(self):
         """Test creating a successful batch result."""
         from connectors import GitLabBatchResult
+
         project = Mock()
         project.full_name = "group/project"
         stats = Mock()
@@ -672,6 +934,7 @@ class TestGitLabBatchResult:
     def test_failed_result(self):
         """Test creating a failed batch result."""
         from connectors import GitLabBatchResult
+
         project = Mock()
         project.full_name = "group/project"
 
@@ -735,7 +998,9 @@ class TestGitLabConnectorBatchProcessing:
         mock_gitlab_instance.projects.list.return_value = mock_projects
 
         # Test pattern matching
-        connector = GitLabConnector(url="https://gitlab.com", private_token="test_token")
+        connector = GitLabConnector(
+            url="https://gitlab.com", private_token="test_token"
+        )
         projects = connector.list_projects(pattern="group/api-*")
 
         # Should only return projects matching the pattern
@@ -762,7 +1027,9 @@ class TestGitLabConnectorBatchProcessing:
         mock_gitlab_instance.projects.get.return_value = mock_gl_project
 
         # Test batch processing
-        connector = GitLabConnector(url="https://gitlab.com", private_token="test_token")
+        connector = GitLabConnector(
+            url="https://gitlab.com", private_token="test_token"
+        )
         results = connector.get_projects_with_stats(
             batch_size=2,
             max_concurrent=2,
@@ -772,7 +1039,9 @@ class TestGitLabConnectorBatchProcessing:
         assert len(results) == 2
         assert all(isinstance(r, GitLabBatchResult) for r in results)
 
-    def test_get_projects_with_stats_with_pattern(self, mock_gitlab_client, mock_rest_client):
+    def test_get_projects_with_stats_with_pattern(
+        self, mock_gitlab_client, mock_rest_client
+    ):
         """Test batch processing with pattern filtering."""
         from connectors import GitLabConnector
 
@@ -785,7 +1054,7 @@ class TestGitLabConnectorBatchProcessing:
 
         mock_gitlab_instance = mock_gitlab_client.return_value
         mock_gitlab_instance.projects.list.return_value = mock_projects
-        
+
         # Setup mock group for pattern extraction (org/api-* -> group='org')
         mock_group = Mock()
         mock_group.projects.list.return_value = mock_projects
@@ -798,7 +1067,9 @@ class TestGitLabConnectorBatchProcessing:
         mock_gitlab_instance.projects.get.return_value = mock_gl_project
 
         # Test with pattern
-        connector = GitLabConnector(url="https://gitlab.com", private_token="test_token")
+        connector = GitLabConnector(
+            url="https://gitlab.com", private_token="test_token"
+        )
         results = connector.get_projects_with_stats(
             pattern="org/api-*",
             batch_size=5,
@@ -809,7 +1080,9 @@ class TestGitLabConnectorBatchProcessing:
         assert len(results) == 2
         assert all("api-" in r.project.full_name for r in results)
 
-    def test_get_projects_with_stats_callback(self, mock_gitlab_client, mock_rest_client):
+    def test_get_projects_with_stats_callback(
+        self, mock_gitlab_client, mock_rest_client
+    ):
         """Test callback is called for each processed project."""
         from connectors import GitLabConnector
 
@@ -830,7 +1103,9 @@ class TestGitLabConnectorBatchProcessing:
 
         # Test callback
         callback = Mock()
-        connector = GitLabConnector(url="https://gitlab.com", private_token="test_token")
+        connector = GitLabConnector(
+            url="https://gitlab.com", private_token="test_token"
+        )
         _ = connector.get_projects_with_stats(
             on_project_complete=callback,
             rate_limit_delay=0.1,
@@ -873,7 +1148,9 @@ class TestGitLabConnectorAsyncBatchProcessing:
         return mock_project
 
     @pytest.mark.asyncio
-    async def test_get_projects_with_stats_async(self, mock_gitlab_client, mock_rest_client):
+    async def test_get_projects_with_stats_async(
+        self, mock_gitlab_client, mock_rest_client
+    ):
         """Test async batch processing of projects with stats."""
         from connectors import GitLabConnector, GitLabBatchResult
 
@@ -893,7 +1170,9 @@ class TestGitLabConnectorAsyncBatchProcessing:
         mock_gitlab_instance.projects.get.return_value = mock_gl_project
 
         # Test async batch processing
-        connector = GitLabConnector(url="https://gitlab.com", private_token="test_token")
+        connector = GitLabConnector(
+            url="https://gitlab.com", private_token="test_token"
+        )
         results = await connector.get_projects_with_stats_async(
             batch_size=2,
             max_concurrent=2,
@@ -904,7 +1183,9 @@ class TestGitLabConnectorAsyncBatchProcessing:
         assert all(isinstance(r, GitLabBatchResult) for r in results)
 
     @pytest.mark.asyncio
-    async def test_get_projects_with_stats_async_with_pattern(self, mock_gitlab_client, mock_rest_client):
+    async def test_get_projects_with_stats_async_with_pattern(
+        self, mock_gitlab_client, mock_rest_client
+    ):
         """Test async batch processing with pattern filtering."""
         from connectors import GitLabConnector
 
@@ -917,7 +1198,7 @@ class TestGitLabConnectorAsyncBatchProcessing:
 
         mock_gitlab_instance = mock_gitlab_client.return_value
         mock_gitlab_instance.projects.list.return_value = mock_projects
-        
+
         # Setup mock group for pattern extraction (org/api-* -> group='org')
         mock_group = Mock()
         mock_group.projects.list.return_value = mock_projects
@@ -930,7 +1211,9 @@ class TestGitLabConnectorAsyncBatchProcessing:
         mock_gitlab_instance.projects.get.return_value = mock_gl_project
 
         # Test with pattern
-        connector = GitLabConnector(url="https://gitlab.com", private_token="test_token")
+        connector = GitLabConnector(
+            url="https://gitlab.com", private_token="test_token"
+        )
         results = await connector.get_projects_with_stats_async(
             pattern="org/api-*",
             batch_size=5,
@@ -942,7 +1225,9 @@ class TestGitLabConnectorAsyncBatchProcessing:
         assert all("api-" in r.project.full_name for r in results)
 
     @pytest.mark.asyncio
-    async def test_get_projects_with_stats_async_callback(self, mock_gitlab_client, mock_rest_client):
+    async def test_get_projects_with_stats_async_callback(
+        self, mock_gitlab_client, mock_rest_client
+    ):
         """Test async callback is called for each processed project."""
         from connectors import GitLabConnector
 
@@ -963,7 +1248,9 @@ class TestGitLabConnectorAsyncBatchProcessing:
 
         # Test callback
         callback = Mock()
-        connector = GitLabConnector(url="https://gitlab.com", private_token="test_token")
+        connector = GitLabConnector(
+            url="https://gitlab.com", private_token="test_token"
+        )
         _ = await connector.get_projects_with_stats_async(
             on_project_complete=callback,
             rate_limit_delay=0.1,
@@ -1005,7 +1292,9 @@ class TestGitLabBatchProcessingErrorHandling:
         mock_project.forks_count = 5
         return mock_project
 
-    def test_batch_processing_handles_api_error(self, mock_gitlab_client, mock_rest_client):
+    def test_batch_processing_handles_api_error(
+        self, mock_gitlab_client, mock_rest_client
+    ):
         """Test batch processing continues when get_repo_stats raises an exception."""
         from connectors import GitLabConnector, GitLabBatchResult
 
@@ -1019,10 +1308,14 @@ class TestGitLabBatchProcessingErrorHandling:
         mock_gitlab_instance.projects.list.return_value = mock_projects
 
         # Setup mock for projects.get to raise an exception
-        mock_gitlab_instance.projects.get.side_effect = Exception("API rate limit exceeded")
+        mock_gitlab_instance.projects.get.side_effect = Exception(
+            "API rate limit exceeded"
+        )
 
         # Test batch processing
-        connector = GitLabConnector(url="https://gitlab.com", private_token="test_token")
+        connector = GitLabConnector(
+            url="https://gitlab.com", private_token="test_token"
+        )
         results = connector.get_projects_with_stats(
             batch_size=2,
             rate_limit_delay=0.1,
@@ -1034,7 +1327,9 @@ class TestGitLabBatchProcessingErrorHandling:
         assert all(r.success is False for r in results)
         assert all(r.error is not None for r in results)
 
-    def test_batch_processing_handles_partial_failure(self, mock_gitlab_client, mock_rest_client):
+    def test_batch_processing_handles_partial_failure(
+        self, mock_gitlab_client, mock_rest_client
+    ):
         """Test batch processing handles some projects failing while others succeed."""
         from connectors import GitLabConnector
 
@@ -1061,7 +1356,9 @@ class TestGitLabBatchProcessingErrorHandling:
         mock_gitlab_instance.projects.get.side_effect = get_project_side_effect
 
         # Test batch processing
-        connector = GitLabConnector(url="https://gitlab.com", private_token="test_token")
+        connector = GitLabConnector(
+            url="https://gitlab.com", private_token="test_token"
+        )
         results = connector.get_projects_with_stats(
             batch_size=3,
             rate_limit_delay=0.1,
@@ -1083,7 +1380,9 @@ class TestGitLabBatchProcessingErrorHandling:
         assert failed_result.project.full_name == "group/project2"
 
     @pytest.mark.asyncio
-    async def test_async_batch_processing_handles_api_error(self, mock_gitlab_client, mock_rest_client):
+    async def test_async_batch_processing_handles_api_error(
+        self, mock_gitlab_client, mock_rest_client
+    ):
         """Test async batch processing continues when get_repo_stats raises an exception."""
         from connectors import GitLabConnector, GitLabBatchResult
 
@@ -1097,10 +1396,14 @@ class TestGitLabBatchProcessingErrorHandling:
         mock_gitlab_instance.projects.list.return_value = mock_projects
 
         # Setup mock for projects.get to raise an exception
-        mock_gitlab_instance.projects.get.side_effect = Exception("API rate limit exceeded")
+        mock_gitlab_instance.projects.get.side_effect = Exception(
+            "API rate limit exceeded"
+        )
 
         # Test async batch processing
-        connector = GitLabConnector(url="https://gitlab.com", private_token="test_token")
+        connector = GitLabConnector(
+            url="https://gitlab.com", private_token="test_token"
+        )
         results = await connector.get_projects_with_stats_async(
             batch_size=2,
             rate_limit_delay=0.1,
