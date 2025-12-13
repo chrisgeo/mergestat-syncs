@@ -39,13 +39,9 @@ def detect_db_type(conn_string: str) -> str:
     if conn_lower.startswith("sqlite://") or conn_lower.startswith("sqlite+aiosqlite://"):
         return "sqlite"
 
-    # MySQL connection strings (for future support)
-    if conn_lower.startswith("mysql://") or conn_lower.startswith("mysql+aiomysql://"):
-        return "mysql"
-
     raise ValueError(
         f"Could not detect database type from connection string. "
-        f"Expected: mongodb://, postgresql://, postgres://, sqlite://, "
+        f"Supported: mongodb://, postgresql://, postgres://, sqlite://, "
         f"or variations with async drivers. Got: {conn_string[:50]}..."
     )
 
@@ -76,7 +72,7 @@ def create_store(
 
     if db_type == "mongo":
         return MongoStore(conn_string, db_name=db_name)
-    elif db_type in ("postgres", "postgresql", "sqlite", "mysql"):
+    elif db_type in ("postgres", "postgresql", "sqlite"):
         return SQLAlchemyStore(conn_string, echo=echo)
     else:
         raise ValueError(

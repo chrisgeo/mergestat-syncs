@@ -1244,6 +1244,49 @@ Examples:
     return parser.parse_args()
 
 
+def _determine_mode(args, github_token: str, gitlab_token: str) -> tuple:
+    """
+    Determine the operating mode based on CLI arguments.
+
+    :param args: Parsed command-line arguments.
+    :param github_token: GitHub authentication token.
+    :param gitlab_token: GitLab authentication token.
+    :return: Tuple of (use_github, use_github_batch, use_gitlab, use_gitlab_batch).
+    :raises ValueError: If connector type specified but required arguments missing.
+    """
+    connector_type = args.connector
+
+    if connector_type == "github":
+        if args.github_pattern:
+            return (False, True, False, False)
+        elif args.github_owner and args.github_repo:
+            return (True, False, False, False)
+        else:
+            raise ValueError(
+                "GitHub connector requires --github-owner and --github-repo, "
+                "or --github-pattern for batch processing."
+            )
+    elif connector_type == "gitlab":
+        if args.gitlab_pattern:
+            return (False, False, False, True)
+        elif args.gitlab_project_id:
+            return (False, False, True, False)
+        else:
+            raise ValueError(
+                "GitLab connector requires --gitlab-project-id, "
+                "or --gitlab-pattern for batch processing."
+            )
+    elif connector_type == "local":
+        return (False, False, False, False)
+    else:
+        # Legacy mode detection (no --connector specified)
+        use_github = bool(github_token and args.github_owner and args.github_repo)
+        use_github_batch = bool(github_token and args.github_pattern)
+        use_gitlab = bool(gitlab_token and args.gitlab_project_id)
+        use_gitlab_batch = bool(gitlab_token and args.gitlab_pattern)
+        return (use_github, use_github_batch, use_gitlab, use_gitlab_batch)
+
+
 async def main() -> None:
     """
     Main entry point for the script.
@@ -1279,53 +1322,10 @@ async def main() -> None:
     github_token = auth_token or args.github_token or os.getenv("GITHUB_TOKEN")
     gitlab_token = auth_token or args.gitlab_token or os.getenv("GITLAB_TOKEN")
 
-    # Determine mode based on --connector argument or legacy arguments
-    connector_type = args.connector
-
-    # If --connector is specified, use it to determine the mode
-    if connector_type == "github":
-        if args.github_pattern:
-            use_github = False
-            use_github_batch = True
-        elif args.github_owner and args.github_repo:
-            use_github = True
-            use_github_batch = False
-        else:
-            raise ValueError(
-                "GitHub connector requires --github-owner and --github-repo, "
-                "or --github-pattern for batch processing."
-            )
-        use_gitlab = False
-        use_gitlab_batch = False
-        use_local = False
-    elif connector_type == "gitlab":
-        if args.gitlab_pattern:
-            use_gitlab = False
-            use_gitlab_batch = True
-        elif args.gitlab_project_id:
-            use_gitlab = True
-            use_gitlab_batch = False
-        else:
-            raise ValueError(
-                "GitLab connector requires --gitlab-project-id, "
-                "or --gitlab-pattern for batch processing."
-            )
-        use_github = False
-        use_github_batch = False
-        use_local = False
-    elif connector_type == "local":
-        use_github = False
-        use_github_batch = False
-        use_gitlab = False
-        use_gitlab_batch = False
-        use_local = True
-    else:
-        # Legacy mode detection
-        use_github = github_token and args.github_owner and args.github_repo
-        use_github_batch = github_token and args.github_pattern
-        use_gitlab = gitlab_token and args.gitlab_project_id
-        use_gitlab_batch = gitlab_token and args.gitlab_pattern
-        use_local = not any([use_github, use_github_batch, use_gitlab, use_gitlab_batch])
+    # Determine operating mode
+    use_github, use_github_batch, use_gitlab, use_gitlab_batch = _determine_mode(
+        args, github_token, gitlab_token
+    )
 
     modes_active = sum([use_github, use_github_batch, use_gitlab, use_gitlab_batch])
     if modes_active > 1:

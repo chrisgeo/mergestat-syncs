@@ -31,11 +31,6 @@ class TestDetectDbType:
         assert detect_db_type("sqlite:///test.db") == "sqlite"
         assert detect_db_type("sqlite+aiosqlite:///:memory:") == "sqlite"
 
-    def test_detect_mysql(self):
-        """Test detection of MySQL connection strings."""
-        assert detect_db_type("mysql://localhost/mydb") == "mysql"
-        assert detect_db_type("mysql+aiomysql://localhost/mydb") == "mysql"
-
     def test_detect_empty_string_raises(self):
         """Test that empty connection string raises ValueError."""
         with pytest.raises(ValueError, match="Connection string is required"):
