@@ -785,6 +785,11 @@ class TestGitLabConnectorBatchProcessing:
 
         mock_gitlab_instance = mock_gitlab_client.return_value
         mock_gitlab_instance.projects.list.return_value = mock_projects
+        
+        # Setup mock group for pattern extraction (org/api-* -> group='org')
+        mock_group = Mock()
+        mock_group.projects.list.return_value = mock_projects
+        mock_gitlab_instance.groups.get.return_value = mock_group
 
         # Setup mock for get_repo_stats
         mock_gl_project = Mock()
@@ -912,6 +917,11 @@ class TestGitLabConnectorAsyncBatchProcessing:
 
         mock_gitlab_instance = mock_gitlab_client.return_value
         mock_gitlab_instance.projects.list.return_value = mock_projects
+        
+        # Setup mock group for pattern extraction (org/api-* -> group='org')
+        mock_group = Mock()
+        mock_group.projects.list.return_value = mock_projects
+        mock_gitlab_instance.groups.get.return_value = mock_group
 
         # Setup mock for get_repo_stats
         mock_gl_project = Mock()

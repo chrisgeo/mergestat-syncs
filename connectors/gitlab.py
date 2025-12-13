@@ -693,15 +693,32 @@ class GitLabConnector(GitConnector):
         """
         Get projects for batch processing, optionally filtered by pattern.
 
+        If neither group_id nor group_name is provided but pattern contains a group
+        (e.g., 'mygroup/*'), the group is extracted from the pattern and used as
+        the group_name for fetching projects.
+
         :param group_id: Optional group ID.
         :param group_name: Optional group name/path.
         :param pattern: Optional fnmatch-style pattern.
         :param max_projects: Maximum number of projects to retrieve.
         :return: List of Repository objects.
         """
+        # Extract group from pattern if not explicitly provided
+        effective_group_name = group_name
+        
+        if not group_id and not group_name and pattern:
+            # Check if pattern has a specific group prefix (e.g., 'mygroup/*')
+            if "/" in pattern:
+                parts = pattern.split("/", 1)
+                group_part = parts[0]
+                # Only use as group if it's not a wildcard
+                if group_part and "*" not in group_part and "?" not in group_part:
+                    effective_group_name = group_part
+                    logger.info(f"Extracted group '{group_part}' from pattern '{pattern}'")
+        
         return self.list_projects(
             group_id=group_id,
-            group_name=group_name,
+            group_name=effective_group_name,
             pattern=pattern,
             max_projects=max_projects,
         )
