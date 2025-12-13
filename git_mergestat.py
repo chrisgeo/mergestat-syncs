@@ -381,7 +381,7 @@ async def process_git_blame(
     # Process files in chunks to manage memory
     chunk_size = BATCH_SIZE
     for i in range(0, len(all_files), chunk_size):
-        chunk = all_files[i : i + chunk_size]
+        chunk = all_files[i: i + chunk_size]
 
         # Process chunk in parallel
         # Note: Each worker creates its own Repo instance for thread-safety

@@ -1491,12 +1491,12 @@ class TestSQLiteAsyncStorage:
         await store.engine.dispose()
 
     @pytest.mark.asyncio
-    async def test_sqlite_store_concurrent_inserts(self, sqlite_memory_store):
-        """Test that concurrent inserts work correctly with SQLite."""
+    async def test_sqlite_store_batch_inserts(self, sqlite_memory_store):
+        """Test that batch inserts work correctly with SQLite."""
         test_repo_id = uuid.uuid4()
         test_repo = Repo(
             id=test_repo_id,
-            repo="https://github.com/test/concurrent.git",
+            repo="https://github.com/test/batch.git",
             ref="main",
             settings={},
             tags=[],
@@ -1505,7 +1505,7 @@ class TestSQLiteAsyncStorage:
         async with sqlite_memory_store as store:
             await store.insert_repo(test_repo)
 
-            # Create multiple files to insert concurrently
+            # Create multiple files to insert in batches
             files = [
                 GitFile(
                     repo_id=test_repo_id,
