@@ -7,7 +7,7 @@ import os
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional, Tuple, Union
+from typing import Iterable, List, Optional, Tuple, Union
 
 from models.git import GitBlame, GitCommit, GitCommitStat, GitFile, Repo
 from storage import MongoStore, SQLAlchemyStore, create_store, detect_db_type
@@ -58,6 +58,83 @@ MAX_WORKERS = int(
 AGGREGATE_STATS_MARKER = "__aggregate__"
 
 DataStore = Union[SQLAlchemyStore, MongoStore]
+
+
+def _parse_since(value: Optional[str]) -> Optional[datetime]:
+    """
+    Parse a --since/--start-date argument into a timezone-aware datetime.
+
+    :param value: ISO-formatted date or datetime string.
+    :return: A datetime in UTC, or None if no value provided.
+    """
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as e:
+        raise ValueError(f"Invalid --since value '{value}': {e}") from e
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    else:
+        parsed = parsed.astimezone(timezone.utc)
+    return parsed
+
+
+def _normalize_datetime(dt: datetime) -> datetime:
+    """Ensure datetime values are timezone-aware and normalized to UTC."""
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def iter_commits_since(repo: Repo, since: Optional[datetime]) -> Iterable:
+    """
+    Iterate over commits, stopping once we reach commits older than `since`.
+
+    :param repo: Git repository object.
+    :param since: Lower bound (inclusive) for commit committed_datetime.
+    :return: Iterable of commits.
+    """
+    for commit in repo.iter_commits():
+        commit_dt = _normalize_datetime(commit.committed_datetime)
+        if since and commit_dt < since:
+            break
+        yield commit
+
+
+def collect_changed_files(
+    repo_root: Union[str, Path], commits: Iterable
+) -> List[Path]:
+    """
+    Collect unique file paths touched by the provided commits.
+
+    :param repo_root: Root of the repository.
+    :param commits: Iterable of commit objects to inspect.
+    :return: Sorted list of Paths to process for blame.
+    """
+    root_path = Path(repo_root)
+    paths = set()
+
+    for commit in commits:
+        try:
+            diffs = (
+                commit.parents[0].diff(commit, create_patch=False)
+                if commit.parents
+                else commit.diff(None, create_patch=False)
+            )
+        except Exception:
+            continue
+
+        for diff in diffs:
+            file_path = diff.b_path if diff.b_path else diff.a_path
+            if not file_path or is_skippable(file_path):
+                continue
+            candidate = root_path / file_path
+            if candidate.exists():
+                paths.add(candidate)
+
+    return sorted(paths)
 
 
 def _split_full_name(full_name: str) -> Tuple[str, str]:
@@ -621,30 +698,46 @@ async def process_git_files(
             logging.warning(f"  ... and {total_failed - 10} more")
 
 
-async def process_git_commits(repo: Repo, store: DataStore) -> None:
+async def process_git_commits(
+    repo: Repo,
+    store: DataStore,
+    commits: Optional[Iterable] = None,
+    since: Optional[datetime] = None,
+) -> None:
     """
     Process and insert GitCommit data into the database.
 
     :param repo: Git repository object.
     :param store: Storage backend (SQLAlchemy or MongoDB).
+    :param commits: Optional iterable of commits to process (pre-filtered).
+    :param since: Lower bound date for commits (used when commits not pre-filtered).
     """
     logging.info("Processing git commits...")
     commit_batch: List[GitCommit] = []
 
+    commit_iter = commits if commits is not None else iter_commits_since(repo, since)
+
     # Process commits using gitpython
     try:
         commit_count = 0
-        for commit in repo.iter_commits():
+        for commit in commit_iter:
+            if since:
+                commit_dt = _normalize_datetime(commit.committed_datetime)
+                if commit_dt < since:
+                    if commits is None:
+                        break
+                    continue
+
             git_commit = GitCommit(
                 repo_id=repo.id,
                 hash=commit.hexsha,
                 message=commit.message,
                 author_name=commit.author.name,
                 author_email=commit.author.email,
-                author_when=commit.authored_datetime,
+                author_when=_normalize_datetime(commit.authored_datetime),
                 committer_name=commit.committer.name,
                 committer_email=commit.committer.email,
-                committer_when=commit.committed_datetime,
+                committer_when=_normalize_datetime(commit.committed_datetime),
                 parents=len(commit.parents),
             )
             commit_batch.append(git_commit)
@@ -778,19 +871,35 @@ async def process_git_blame(
             logging.warning(f"  ... and {total_failed - 10} more")
 
 
-async def process_git_commit_stats(repo: Repo, store: DataStore) -> None:
+async def process_git_commit_stats(
+    repo: Repo,
+    store: DataStore,
+    commits: Optional[Iterable] = None,
+    since: Optional[datetime] = None,
+) -> None:
     """
     Process and insert GitCommitStat data into the database.
 
     :param repo: Git repository object.
     :param store: Storage backend (SQLAlchemy or MongoDB).
+    :param commits: Optional iterable of commits to process (pre-filtered).
+    :param since: Lower bound date for commits (used when commits not pre-filtered).
     """
     logging.info("Processing git commit stats...")
     commit_stats_batch: List[GitCommitStat] = []
 
+    commit_iter = commits if commits is not None else iter_commits_since(repo, since)
+
     try:
         commit_count = 0
-        for commit in repo.iter_commits():
+        for commit in commit_iter:
+            if since:
+                commit_dt = _normalize_datetime(commit.committed_datetime)
+                if commit_dt < since:
+                    if commits is None:
+                        break
+                    continue
+
             # Get stats for each file changed in this commit
             if commit.parents:
                 # Compare with first parent
@@ -1860,14 +1969,11 @@ Examples:
         help="Database backend to use (auto-detected from --db if not specified).",
     )
     parser.add_argument(
+        "--since",
         "--start-date",
+        dest="since",
         required=False,
-        help="Start date for filtering commits (YYYY-MM-DD).",
-    )
-    parser.add_argument(
-        "--end-date",
-        required=False,
-        help="End date for filtering commits (YYYY-MM-DD).",
+        help="Start date/time for filtering commits (e.g., 2024-01-01 or 2024-01-01T00:00:00).",
     )
 
     # GitHub connector options
@@ -2123,15 +2229,17 @@ async def main() -> None:
         else:
             # Local repository mode
             logging.info("=== Local Repository Mode ===")
-            # TODO: Implement date filtering for commits
-            # start_date = args.start_date
-            # end_date = args.end_date
+            since = _parse_since(args.since)
+            if since:
+                logging.info(f"Filtering commits since {since.isoformat()}")
 
             repo: Repo = Repo(REPO_PATH)
             logging.info(f"Using repository UUID: {repo.id}")
 
             # Ensure the repository is inserted first
             await insert_repo_data(storage, repo)
+
+            commits = list(iter_commits_since(repo, since))
 
             all_files: List[Path] = [
                 Path(REPO_PATH) / f
@@ -2143,14 +2251,24 @@ async def main() -> None:
                 return
             logging.info(f"Found {len(all_files)} files to process.")
 
+            files_for_blame = collect_changed_files(REPO_PATH, commits)
+            if not files_for_blame:
+                logging.info("No files touched in the selected commit range; skipping blame.")
+
             # Process GitFile data first
             await process_git_files(repo, all_files, storage)
 
             # Process other data asynchronously
             await asyncio.gather(
-                process_git_commits(repo, storage),
-                process_git_blame(all_files, storage, repo),
-                process_git_commit_stats(repo, storage),
+                process_git_commits(
+                    repo, storage, commits=commits, since=since
+                ),
+                process_git_blame(files_for_blame, storage, repo)
+                if files_for_blame
+                else asyncio.sleep(0),
+                process_git_commit_stats(
+                    repo, storage, commits=commits, since=since
+                ),
             )
 
 

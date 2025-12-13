@@ -26,9 +26,14 @@ python git_mergestat.py
 # Using command-line arguments (auto-detects database type from URL)
 python git_mergestat.py --db "postgresql+asyncpg://localhost:5432/mergestat" --repo-path "/path/to/repo"
 
+# Limit to commits and blames since a date (ISO date or datetime)
+python git_mergestat.py --db "sqlite+aiosqlite:///mergestat.db" --repo-path "/path/to/repo" --since 2024-01-01
+
 # Explicit connector type
 python git_mergestat.py --db "postgresql://..." --connector local --repo-path "/path/to/repo"
 ```
+
+**How filtering works**: `--since` / `--start-date` restricts commits and commit stats to changes at or after the timestamp, and blame is limited to files touched by those filtered commits.
 
 ## GitHub Connector Mode
 
@@ -194,13 +199,14 @@ usage: git_mergestat.py [-h] [--db DB] [--connector {local,github,gitlab}]
                         [-s SEARCH_PATTERN] [--batch-size BATCH_SIZE] [--group GROUP]
                         [--max-concurrent MAX_CONCURRENT] [--rate-limit-delay RATE_LIMIT_DELAY]
                         [--max-commits-per-repo MAX_COMMITS_PER_REPO] [--max-repos MAX_REPOS]
-                        [--use-async]
+                        [--use-async] [--since SINCE]
 
 Core Options:
   --db DB                       Database connection string (auto-detects type from URL)
   --connector {local,github,gitlab}  Connector type to use
   --auth AUTH                   Authentication token (GitHub or GitLab)
   --repo-path REPO_PATH        Path to the local git repository
+  --since SINCE                 Lower-bound date/time for local mode. Filters commits, per-file stats, and blame to activity at or after this timestamp (ISO date or datetime).
   --db-type {postgres,mongo,sqlite}  Database backend (optional, auto-detected)
 
 GitHub Options:

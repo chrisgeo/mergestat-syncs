@@ -119,6 +119,7 @@ You can also configure the database using command-line arguments, which will ove
 - **`--connector`**: Connector type (`local`, `github`, or `gitlab`)
 - **`--auth`**: Authentication token (works for both GitHub and GitLab)
 - **`--repo-path`**: Path to the git repository (for local mode)
+- **`--since` / `--start-date`**: Lower-bound date/time for local mode. Commits, per-file stats, and blame are limited to changes at or after this timestamp. Uses ISO formats (e.g., `2024-01-01` or `2024-01-01T00:00:00`).
 
 #### Connector-Specific Arguments
 
@@ -138,7 +139,6 @@ These unified options work with both GitHub and GitLab connectors:
 - **`--rate-limit-delay`**: Delay in seconds between batches for rate limiting (default: 1.0)
 - **`--max-commits-per-repo`**: Maximum commits to analyze per repository/project
 - **`--max-repos`**: Maximum number of repositories/projects to process
-- **`--max-repos`**: Maximum number of repositories/projects to process
 - **`--use-async`**: Use async processing for better performance
 - **`--fetch-blame`**: Fetch blame data (warning: slow and rate-limited)
 
@@ -150,6 +150,14 @@ python git_mergestat.py --db "postgresql+asyncpg://user:pass@localhost:5432/merg
 
 # Using MongoDB (auto-detected from URL)
 python git_mergestat.py --db "mongodb://localhost:27017"
+
+# Local repo filtered to recent activity
+python git_mergestat.py \
+  --db "sqlite+aiosqlite:///mergestat.db" \
+  --connector local \
+  --repo-path /path/to/repo \
+  --since 2024-01-01
+  # Blame is limited to files touched by commits on/after this date.
 
 # Using SQLite (file-based, auto-detected)
 python git_mergestat.py --db "sqlite+aiosqlite:///mergestat.db"
