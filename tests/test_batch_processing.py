@@ -610,3 +610,134 @@ class TestBatchProcessingErrorHandling:
         assert all(isinstance(r, BatchResult) for r in results)
         assert all(r.success is False for r in results)
         assert all(r.error is not None for r in results)
+
+
+class TestGitLabPatternMatching:
+    """Test GitLab project pattern matching functionality."""
+
+    def test_exact_match(self):
+        """Test exact project name matching."""
+        from connectors import match_project_pattern
+        assert match_project_pattern("group/project", "group/project")
+
+    def test_wildcard_suffix(self):
+        """Test pattern with wildcard suffix."""
+        from connectors import match_project_pattern
+        assert match_project_pattern("group/api-service", "group/api-*")
+        assert match_project_pattern("group/api-v2", "group/api-*")
+        assert not match_project_pattern("group/web-service", "group/api-*")
+
+    def test_wildcard_prefix(self):
+        """Test pattern with wildcard prefix."""
+        from connectors import match_project_pattern
+        assert match_project_pattern("mygroup/api-service", "*-service")
+        assert match_project_pattern("other/web-service", "*-service")
+
+    def test_wildcard_group(self):
+        """Test pattern with wildcard group."""
+        from connectors import match_project_pattern
+        assert match_project_pattern("group1/sync-tool", "*/sync-tool")
+        assert match_project_pattern("group2/sync-tool", "*/sync-tool")
+
+    def test_wildcard_project(self):
+        """Test pattern with wildcard project."""
+        from connectors import match_project_pattern
+        assert match_project_pattern("mygroup/anything", "mygroup/*")
+        assert match_project_pattern("mygroup/another", "mygroup/*")
+
+    def test_case_insensitive(self):
+        """Test case insensitive matching."""
+        from connectors import match_project_pattern
+        assert match_project_pattern("MyGroup/MyProject", "mygroup/myproject*")
+        assert match_project_pattern("MYGROUP/PROJECT", "mygroup/*")
+
+
+class TestGitLabBatchResult:
+    """Test GitLabBatchResult dataclass."""
+
+    def test_successful_result(self):
+        """Test creating a successful batch result."""
+        from connectors import GitLabBatchResult
+        project = Mock()
+        project.full_name = "group/project"
+        stats = Mock()
+
+        result = GitLabBatchResult(project=project, stats=stats, success=True)
+
+        assert result.project == project
+        assert result.stats == stats
+        assert result.success is True
+        assert result.error is None
+
+    def test_failed_result(self):
+        """Test creating a failed batch result."""
+        from connectors import GitLabBatchResult
+        project = Mock()
+        project.full_name = "group/project"
+
+        result = GitLabBatchResult(
+            project=project,
+            error="API error",
+            success=False,
+        )
+
+        assert result.project == project
+        assert result.stats is None
+        assert result.success is False
+        assert result.error == "API error"
+
+
+class TestGitLabConnectorBatchProcessing:
+    """Test GitLab connector batch processing features."""
+
+    @pytest.fixture
+    def mock_gitlab_client(self):
+        """Create a mock GitLab client."""
+        with patch("connectors.gitlab.gitlab.Gitlab") as mock_gitlab:
+            mock_instance = mock_gitlab.return_value
+            mock_instance.auth.return_value = None
+            yield mock_gitlab
+
+    @pytest.fixture
+    def mock_rest_client(self):
+        """Create a mock REST client."""
+        with patch("connectors.gitlab.GitLabRESTClient") as mock_rest:
+            yield mock_rest
+
+    def _create_mock_project(self, name: str, full_name: str):
+        """Create a mock project."""
+        mock_project = Mock()
+        mock_project.id = hash(full_name)
+        mock_project.name = name
+        mock_project.path_with_namespace = full_name
+        mock_project.default_branch = "main"
+        mock_project.description = f"Test project {name}"
+        mock_project.web_url = f"https://gitlab.com/{full_name}"
+        mock_project.created_at = "2024-01-01T00:00:00Z"
+        mock_project.last_activity_at = "2024-01-01T00:00:00Z"
+        mock_project.star_count = 10
+        mock_project.forks_count = 5
+        return mock_project
+
+    def test_list_projects_with_pattern(self, mock_gitlab_client, mock_rest_client):
+        """Test listing projects with pattern matching."""
+        from connectors import GitLabConnector
+
+        # Setup mock projects
+        mock_projects = [
+            self._create_mock_project("api-service", "group/api-service"),
+            self._create_mock_project("api-v2", "group/api-v2"),
+            self._create_mock_project("web-app", "group/web-app"),
+            self._create_mock_project("cli-tool", "group/cli-tool"),
+        ]
+
+        mock_gitlab_instance = mock_gitlab_client.return_value
+        mock_gitlab_instance.projects.list.return_value = mock_projects
+
+        # Test pattern matching
+        connector = GitLabConnector(url="https://gitlab.com", private_token="test_token")
+        projects = connector.list_projects(pattern="group/api-*")
+
+        # Should only return projects matching the pattern
+        assert len(projects) == 2
+        assert all("api" in proj.full_name.lower() for proj in projects)

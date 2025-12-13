@@ -9,7 +9,7 @@ from .exceptions import (APIException, AuthenticationException,
                          ConnectorException, NotFoundException,
                          PaginationException, RateLimitException)
 from .github import BatchResult, GitHubConnector, match_repo_pattern
-from .gitlab import GitLabConnector
+from .gitlab import GitLabBatchResult, GitLabConnector, match_project_pattern
 from .models import (Author, BlameRange, CommitStats, FileBlame, Organization,
                      PullRequest, Repository, RepoStats)
 
@@ -17,9 +17,12 @@ __all__ = [
     # Connectors
     "GitHubConnector",
     "GitLabConnector",
-    # Batch processing
+    # GitHub Batch processing
     "BatchResult",
     "match_repo_pattern",
+    # GitLab Batch processing
+    "GitLabBatchResult",
+    "match_project_pattern",
     # Models
     "Organization",
     "Repository",
