@@ -1115,6 +1115,7 @@ Examples:
     parser.add_argument(
         "--connector",
         required=False,
+        default="local",
         choices=["local", "github", "gitlab"],
         help="Connector type to use (local, github, or gitlab).",
     )
