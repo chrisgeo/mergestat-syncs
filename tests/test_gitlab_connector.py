@@ -295,3 +295,138 @@ class TestGitLabConnectorProjects:
 
         with pytest.raises(ValueError, match=error_msg):
             connector.get_repo_stats_by_project()
+
+
+class TestGitLabConnectorAdapterMethods:
+    """Tests for GitLab connector adapter methods (base class interface)."""
+
+    @pytest.fixture
+    def mock_gitlab_client(self):
+        """Create a mock GitLab client."""
+        with patch("connectors.gitlab.gitlab.Gitlab") as mock_gitlab:
+            yield mock_gitlab
+
+    @pytest.fixture
+    def mock_rest_client(self):
+        """Create a mock REST client."""
+        with patch("connectors.gitlab.GitLabRESTClient") as mock_rest:
+            yield mock_rest
+
+    def test_get_contributors_adapter(self, mock_gitlab_client, mock_rest_client):
+        """Test get_contributors adapter method formats project_name correctly."""
+        mock_project = Mock()
+        mock_project.id = 123
+        mock_project.repository_contributors.return_value = []
+
+        mock_gitlab_instance = mock_gitlab_client.return_value
+        mock_gitlab_instance.projects = Mock()
+        mock_gitlab_instance.projects.get.return_value = mock_project
+
+        connector = GitLabConnector(
+            url="https://gitlab.com", private_token="test_token"
+        )
+        result = connector.get_contributors("mygroup", "myproject")
+
+        # Verify project_name was formatted correctly
+        mock_gitlab_instance.projects.get.assert_called_once_with("mygroup/myproject")
+        assert result == []
+
+    def test_get_commit_stats_adapter(self, mock_gitlab_client, mock_rest_client):
+        """Test get_commit_stats adapter method formats project_name correctly."""
+        mock_commit = Mock()
+        mock_commit.id = "abc123"
+        mock_commit.stats = {"additions": 10, "deletions": 5, "total": 15}
+
+        mock_project = Mock()
+        mock_project.id = 123
+        mock_project.commits = Mock()
+        mock_project.commits.get.return_value = mock_commit
+
+        mock_gitlab_instance = mock_gitlab_client.return_value
+        mock_gitlab_instance.projects = Mock()
+        mock_gitlab_instance.projects.get.return_value = mock_project
+
+        connector = GitLabConnector(
+            url="https://gitlab.com", private_token="test_token"
+        )
+        result = connector.get_commit_stats("owner", "repo", sha="abc123")
+
+        # Verify project_name was formatted correctly
+        mock_gitlab_instance.projects.get.assert_called_once_with("owner/repo")
+        assert result.additions == 10
+        assert result.deletions == 5
+
+    def test_get_repo_stats_adapter(self, mock_gitlab_client, mock_rest_client):
+        """Test get_repo_stats adapter method formats project_name correctly."""
+        mock_commit = Mock()
+        mock_commit.id = "abc123"
+        mock_commit.author_name = "Test Author"
+        mock_commit.author_email = "test@example.com"
+        mock_commit.committed_date = "2023-01-01T00:00:00.000Z"
+        mock_commit.stats = {"additions": 10, "deletions": 5, "total": 15}
+
+        mock_project = Mock()
+        mock_project.id = 123
+        mock_project.default_branch = "main"
+        mock_project.created_at = "2023-01-01T00:00:00.000Z"
+        mock_project.commits = Mock()
+        mock_project.commits.list.return_value = [mock_commit]
+        mock_project.commits.get.return_value = mock_commit
+        mock_project.repository_contributors.return_value = []
+
+        mock_gitlab_instance = mock_gitlab_client.return_value
+        mock_gitlab_instance.projects = Mock()
+        mock_gitlab_instance.projects.get.return_value = mock_project
+
+        connector = GitLabConnector(
+            url="https://gitlab.com", private_token="test_token"
+        )
+        result = connector.get_repo_stats("mygroup", "myproject", max_commits=10)
+
+        # Verify project_name was formatted correctly
+        mock_gitlab_instance.projects.get.assert_called_with("mygroup/myproject")
+        assert result.total_commits == 1
+
+    def test_get_pull_requests_adapter(self, mock_gitlab_client, mock_rest_client):
+        """Test get_pull_requests adapter method maps to get_merge_requests."""
+        mock_project = Mock()
+        mock_project.id = 123
+
+        mock_gitlab_instance = mock_gitlab_client.return_value
+        mock_gitlab_instance.projects = Mock()
+        mock_gitlab_instance.projects.get.return_value = mock_project
+
+        mock_rest_instance = mock_rest_client.return_value
+        mock_rest_instance.get_merge_requests.return_value = []
+
+        connector = GitLabConnector(
+            url="https://gitlab.com", private_token="test_token"
+        )
+        result = connector.get_pull_requests("owner", "repo", state="open", max_prs=5)
+
+        # Verify project_name was formatted correctly
+        mock_gitlab_instance.projects.get.assert_called_once_with("owner/repo")
+        assert result == []
+
+    def test_get_file_blame_adapter(self, mock_gitlab_client, mock_rest_client):
+        """Test get_file_blame adapter method formats project_name correctly."""
+        mock_project = Mock()
+        mock_project.id = 123
+
+        mock_gitlab_instance = mock_gitlab_client.return_value
+        mock_gitlab_instance.projects = Mock()
+        mock_gitlab_instance.projects.get.return_value = mock_project
+
+        mock_rest_instance = mock_rest_client.return_value
+        mock_rest_instance.get_file_blame.return_value = []
+
+        connector = GitLabConnector(
+            url="https://gitlab.com", private_token="test_token"
+        )
+        result = connector.get_file_blame(
+            "mygroup", "myproject", "path/to/file.py", ref="main"
+        )
+
+        # Verify project_name was formatted correctly
+        mock_gitlab_instance.projects.get.assert_called_once_with("mygroup/myproject")
+        assert result.file_path == "path/to/file.py"

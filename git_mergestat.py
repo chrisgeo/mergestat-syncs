@@ -1274,6 +1274,14 @@ def _determine_mode(args, github_token: str, gitlab_token: str) -> Tuple[bool, b
         use_github_batch = bool(github_token and args.search_pattern)
         use_gitlab = bool(gitlab_token and args.gitlab_project_id)
         use_gitlab_batch = bool(gitlab_token and args.search_pattern)
+        
+        # Check for ambiguity when both tokens are available and --search-pattern is set
+        if use_github_batch and use_gitlab_batch:
+            raise ValueError(
+                "Ambiguous batch mode: both GitHub and GitLab tokens are available "
+                "and --search-pattern is set. Please specify --connector to disambiguate."
+            )
+        
         return (use_github, use_github_batch, use_gitlab, use_gitlab_batch)
 
 
