@@ -26,8 +26,15 @@ from connectors.exceptions import APIException, AuthenticationException
 skip_integration = os.getenv("SKIP_INTEGRATION_TESTS", "0") == "1"
 
 
-def _can_reach_host(url: str, port: int = 443, timeout: float = 1.0) -> bool:
-    hostname = urlparse(url).hostname or url
+def _can_reach_host(url: str, timeout: float = 1.0) -> bool:
+    parsed_url = urlparse(url)
+    hostname = parsed_url.hostname or url
+    if parsed_url.port:
+        port = parsed_url.port
+    elif parsed_url.scheme == "http":
+        port = 80
+    else:
+        port = 443
     try:
         with socket.create_connection((hostname, port), timeout=timeout):
             return True
