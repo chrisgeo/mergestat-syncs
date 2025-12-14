@@ -3,7 +3,6 @@ import logging
 import os
 import uuid
 from datetime import datetime, timezone
-from importlib import import_module
 
 from git import Repo as GitRepo
 from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Integer, Text
@@ -328,8 +327,7 @@ class GitBlameMixin:
         """
         blame_data = []
         if repo is None:
-            repo_cls = import_module("models").Repo
-            repo = repo_cls(repo_path)
+            repo = GitRepo(repo_path)
         rel_path = os.path.relpath(filepath, repo_path)
         try:
             blame_info = repo.blame("HEAD", rel_path)
@@ -348,7 +346,7 @@ class GitBlameMixin:
                     ))
                     line_no += 1
         except Exception as e:
-            print(f"Error processing {rel_path}: {e}")
+            logging.warning(f"Error processing {rel_path}: {e}")
         return blame_data
 
 
