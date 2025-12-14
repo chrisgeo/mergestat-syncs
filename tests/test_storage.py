@@ -239,6 +239,51 @@ async def test_sqlalchemy_store_insert_git_file_data(sqlalchemy_store):
 
 
 @pytest.mark.asyncio
+async def test_sqlalchemy_store_insert_git_file_data_upsert(sqlalchemy_store):
+    """Test that inserting duplicate git file data performs an upsert."""
+    test_repo_id = uuid.uuid4()
+    test_repo = Repo(
+        id=test_repo_id,
+        repo="https://github.com/test/repo.git",
+        ref="main",
+        settings={},
+        tags=[],
+    )
+
+    initial = [
+        GitFile(
+            repo_id=test_repo_id,
+            path="file.txt",
+            executable=False,
+            contents="content1",
+        )
+    ]
+    updated = [
+        GitFile(
+            repo_id=test_repo_id,
+            path="file.txt",
+            executable=True,
+            contents="content2",
+        )
+    ]
+
+    async with sqlalchemy_store as store:
+        await store.insert_repo(test_repo)
+        await store.insert_git_file_data(initial)
+        await store.insert_git_file_data(updated)
+
+        result = await store.session.execute(
+            select(GitFile).where(GitFile.repo_id == test_repo_id)
+        )
+        saved_files = result.scalars().all()
+
+        assert len(saved_files) == 1
+        assert saved_files[0].path == "file.txt"
+        assert saved_files[0].executable
+        assert saved_files[0].contents == "content2"
+
+
+@pytest.mark.asyncio
 async def test_sqlalchemy_store_insert_git_file_data_empty_list(sqlalchemy_store):
     """Test that inserting an empty list does not cause an error."""
     async with sqlalchemy_store as store:
