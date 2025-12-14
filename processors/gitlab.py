@@ -1,0 +1,609 @@
+import asyncio
+import logging
+from datetime import datetime, timezone
+from typing import Any, Tuple, List, Optional
+
+from models.git import GitCommit, GitCommitStat, Repo, GitPullRequest, GitBlame, GitFile
+from connectors.models import Repository
+from connectors import GitLabBatchResult
+from utils import AGGREGATE_STATS_MARKER, is_skippable, CONNECTORS_AVAILABLE, BATCH_SIZE
+
+if CONNECTORS_AVAILABLE:
+    from connectors import GitLabConnector, ConnectorException
+else:
+    GitLabConnector = None
+    ConnectorException = Exception
+
+
+# --- GitLab Sync Helpers ---
+
+
+def _fetch_gitlab_project_info_sync(connector, project_id):
+    """Sync helper to fetch GitLab project info."""
+    gl_project = connector.gitlab.projects.get(project_id)
+    # Access properties to force load if lazy
+    _ = gl_project.name
+    return gl_project
+
+
+def _fetch_gitlab_commits_sync(gl_project, max_commits, repo_id):
+    """Sync helper to fetch GitLab commits."""
+    if max_commits > 100:
+        commits = gl_project.commits.list(per_page=100, as_list=False)
+    else:
+        commits = gl_project.commits.list(per_page=100, get_all=False)
+
+    commit_objects = []
+    count = 0
+    commit_hashes = []
+
+    for commit in commits:
+        if count >= max_commits:
+            break
+
+        git_commit = GitCommit(
+            repo_id=repo_id,
+            hash=commit.id,
+            message=commit.message,
+            author_name=(
+                commit.author_name if hasattr(commit, "author_name") else "Unknown"
+            ),
+            author_email=(
+                commit.author_email if hasattr(commit, "author_email") else ""
+            ),
+            author_when=(
+                datetime.fromisoformat(commit.authored_date.replace("Z", "+00:00"))
+                if hasattr(commit, "authored_date")
+                else datetime.now(timezone.utc)
+            ),
+            committer_name=(
+                commit.committer_name
+                if hasattr(commit, "committer_name")
+                else "Unknown"
+            ),
+            committer_email=(
+                commit.committer_email if hasattr(commit, "committer_email") else ""
+            ),
+            committer_when=(
+                datetime.fromisoformat(commit.committed_date.replace("Z", "+00:00"))
+                if hasattr(commit, "committed_date")
+                else datetime.now(timezone.utc)
+            ),
+            parents=len(commit.parent_ids) if hasattr(commit, "parent_ids") else 0,
+        )
+        commit_objects.append(git_commit)
+        commit_hashes.append(commit.id)
+        count += 1
+
+    return commit_hashes, commit_objects
+
+
+def _fetch_gitlab_commit_stats_sync(gl_project, commit_hashes, repo_id, max_stats):
+    """Sync helper to fetch detailed commit stats from GitLab."""
+    stats_objects = []
+
+    for commit_hash in commit_hashes[:max_stats]:
+        try:
+            detailed_commit = gl_project.commits.get(commit_hash)
+            if hasattr(detailed_commit, "stats"):
+                stat = GitCommitStat(
+                    repo_id=repo_id,
+                    commit_hash=commit_hash,
+                    file_path=AGGREGATE_STATS_MARKER,
+                    additions=detailed_commit.stats.get("additions", 0),
+                    deletions=detailed_commit.stats.get("deletions", 0),
+                    old_file_mode="unknown",
+                    new_file_mode="unknown",
+                )
+                stats_objects.append(stat)
+        except Exception as e:
+            logging.warning(f"Failed to get stats for commit {commit_hash}: {e}")
+    return stats_objects
+
+
+def _fetch_gitlab_mrs_sync(connector, project_id, repo_id, max_mrs):
+    """Sync helper to fetch GitLab Merge Requests."""
+    mrs = connector.get_merge_requests(
+        project_id=project_id, state="all", max_mrs=max_mrs
+    )
+    pr_objects = []
+    for mr in mrs:
+        git_pr = GitPullRequest(
+            repo_id=repo_id,
+            number=mr.number,
+            title=mr.title,
+            state=mr.state,
+            author_name=mr.author.username if mr.author else "Unknown",
+            author_email=mr.author.email if mr.author else None,
+            created_at=mr.created_at,
+            merged_at=mr.merged_at,
+            closed_at=mr.closed_at,
+            head_branch=mr.head_branch,
+            base_branch=mr.base_branch,
+        )
+        pr_objects.append(git_pr)
+    return pr_objects
+
+
+def _fetch_gitlab_blame_sync(gl_project, connector, project_id, repo_id, limit=50):
+    """Sync helper to fetch GitLab blame data."""
+    blame_batch = []
+    try:
+        # Get files from repository tree
+        items = gl_project.repository_tree(
+            ref=gl_project.default_branch, recursive=True, all=True
+        )
+        files_to_process = []
+        for item in items:
+            if item["type"] == "blob" and not is_skippable(item["path"]):
+                files_to_process.append(item["path"])
+
+        # Limit files
+        files_to_process = files_to_process[:limit]
+
+        for file_path in files_to_process:
+            try:
+                blame = connector.get_file_blame(
+                    project_id=project_id,
+                    file_path=file_path,
+                    ref=gl_project.default_branch,
+                )
+                if blame and blame.ranges:
+                    for r in blame.ranges:
+                        blame_obj = GitBlame(
+                            repo_id=repo_id,
+                            path=file_path,
+                            line_no=r.starting_line,
+                            author_name=r.author,
+                            author_email=r.author_email,
+                            commit_hash=r.commit_sha,
+                            line="<remote>",
+                            author_when=datetime.now(timezone.utc),
+                        )
+                        blame_batch.append(blame_obj)
+            except Exception as e:
+                logging.warning(f"Failed to get blame for {file_path}: {e}")
+
+    except Exception as e:
+        logging.error(f"Error fetching files for blame: {e}")
+
+    return blame_batch
+
+
+async def _backfill_gitlab_missing_data(
+    store: Any,
+    connector: GitLabConnector,
+    db_repo: Repo,
+    project_full_name: str,
+    default_branch: str,
+    max_commits: Optional[int],
+) -> None:
+    if not (
+        hasattr(store, "has_any_git_files")
+        and hasattr(store, "has_any_git_blame")
+        and hasattr(store, "has_any_git_commit_stats")
+    ):
+        return
+
+    needs_files = not await store.has_any_git_files(db_repo.id)
+    needs_commit_stats = not await store.has_any_git_commit_stats(db_repo.id)
+    needs_blame = not await store.has_any_git_blame(db_repo.id)
+
+    if not (needs_files or needs_commit_stats or needs_blame):
+        return
+
+    try:
+        project = connector.gitlab.projects.get(project_full_name)
+    except Exception as e:
+        logging.warning(f"Failed to load GitLab project {project_full_name}: {e}")
+        return
+
+    file_paths: List[str] = []
+    if needs_files or needs_blame:
+        try:
+            items = project.repository_tree(
+                ref=default_branch, recursive=True, get_all=True
+            )
+        except TypeError:
+            # Older python-gitlab versions
+            items = project.repository_tree(
+                ref=default_branch, recursive=True, all=True
+            )
+        except Exception as e:
+            logging.warning(f"Failed to list GitLab files for {project_full_name}: {e}")
+            items = []
+
+        for item in items or []:
+            if item.get("type") != "blob":
+                continue
+            path = item.get("path")
+            if not path:
+                continue
+            file_paths.append(path)
+
+        if needs_files and file_paths:
+            batch: List[GitFile] = []
+            for path in file_paths:
+                batch.append(
+                    GitFile(
+                        repo_id=db_repo.id,
+                        path=path,
+                        executable=False,
+                        contents=None,
+                    )
+                )
+                if len(batch) >= BATCH_SIZE:
+                    await store.insert_git_file_data(batch)
+                    batch.clear()
+            if batch:
+                await store.insert_git_file_data(batch)
+
+    if needs_commit_stats:
+        try:
+            commits = project.commits.list(
+                ref_name=default_branch, per_page=100, get_all=True
+            )
+        except TypeError:
+            commits = project.commits.list(
+                ref_name=default_branch, per_page=100, all=True
+            )
+
+        commit_stats_batch: List[GitCommitStat] = []
+        commit_count = 0
+        for commit in commits or []:
+            if max_commits and commit_count >= max_commits:
+                break
+            commit_count += 1
+            sha = getattr(commit, "id", None) or getattr(commit, "sha", None)
+            if not sha:
+                continue
+            try:
+                stats = connector.get_commit_stats_by_project(
+                    sha=sha,
+                    project_name=project_full_name,
+                )
+                commit_stats_batch.append(
+                    GitCommitStat(
+                        repo_id=db_repo.id,
+                        commit_hash=sha,
+                        file_path=AGGREGATE_STATS_MARKER,
+                        additions=getattr(stats, "additions", 0),
+                        deletions=getattr(stats, "deletions", 0),
+                        old_file_mode="unknown",
+                        new_file_mode="unknown",
+                    )
+                )
+                if len(commit_stats_batch) >= BATCH_SIZE:
+                    await store.insert_git_commit_stats(commit_stats_batch)
+                    commit_stats_batch.clear()
+            except Exception as e:
+                logging.debug(
+                    f"Failed commit stat fetch for {project_full_name}@{sha}: {e}"
+                )
+
+        if commit_stats_batch:
+            await store.insert_git_commit_stats(commit_stats_batch)
+
+    if needs_blame and file_paths:
+        blame_batch: List[GitBlame] = []
+        for path in file_paths:
+            try:
+                blame_items = connector.rest_client.get_file_blame(
+                    project.id,
+                    path,
+                    default_branch,
+                )
+            except Exception as e:
+                logging.debug(f"Failed blame fetch for {project_full_name}:{path}: {e}")
+                continue
+
+            line_no = 1
+            for item in blame_items or []:
+                commit = item.get("commit", {})
+                for line in item.get("lines", []) or []:
+                    blame_batch.append(
+                        GitBlame(
+                            repo_id=db_repo.id,
+                            path=path,
+                            line_no=line_no,
+                            author_email=commit.get("author_email"),
+                            author_name=commit.get("author_name"),
+                            author_when=None,
+                            commit_hash=commit.get("id"),
+                            line=line.rstrip("\n") if isinstance(line, str) else None,
+                        )
+                    )
+                    line_no += 1
+                    if len(blame_batch) >= BATCH_SIZE:
+                        await store.insert_blame_data(blame_batch)
+                        blame_batch.clear()
+
+        if blame_batch:
+            await store.insert_blame_data(blame_batch)
+
+
+async def process_gitlab_project(
+    store: Any,
+    project_id: int,
+    token: str,
+    gitlab_url: str,
+    fetch_blame: bool = False,
+    max_commits: int = 100,
+) -> None:
+    """
+    Process a GitLab project using the GitLab connector.
+    """
+    if not CONNECTORS_AVAILABLE:
+        raise RuntimeError(
+            "Connectors are not available. Please install required dependencies."
+        )
+
+    logging.info(f"Processing GitLab project: {project_id}")
+    loop = asyncio.get_running_loop()
+
+    connector = GitLabConnector(url=gitlab_url, private_token=token)
+    try:
+        # 1. Fetch Project Info
+        logging.info("Fetching project information...")
+        gl_project = await loop.run_in_executor(
+            None, _fetch_gitlab_project_info_sync, connector, project_id
+        )
+
+        logging.info(f"Found project: {gl_project.name}")
+
+        # Create/Insert Repo
+        full_name = (
+            gl_project.path_with_namespace
+            if hasattr(gl_project, "path_with_namespace")
+            else gl_project.name
+        )
+
+        db_repo = Repo(
+            repo_path=None,  # Not a local repo
+            repo=full_name,
+            settings={
+                "source": "gitlab",
+                "project_id": gl_project.id,
+                "url": gl_project.web_url if hasattr(gl_project, "web_url") else None,
+                "default_branch": (
+                    gl_project.default_branch
+                    if hasattr(gl_project, "default_branch")
+                    else "main"
+                ),
+            },
+            tags=["gitlab"],
+        )
+
+        await store.insert_repo(db_repo)
+        logging.info(f"Project stored: {db_repo.repo} ({db_repo.id})")
+
+        # 2. Fetch Commits
+        logging.info(f"Fetching up to {max_commits} commits from GitLab...")
+        commit_hashes, commit_objects = await loop.run_in_executor(
+            None, _fetch_gitlab_commits_sync, gl_project, max_commits, db_repo.id
+        )
+
+        if commit_objects:
+            await store.insert_git_commit_data(commit_objects)
+            logging.info(f"Stored {len(commit_objects)} commits from GitLab")
+
+        # 3. Fetch Stats
+        logging.info("Fetching commit stats from GitLab...")
+        stats_limit = min(max_commits, 50)
+        stats_objects = await loop.run_in_executor(
+            None,
+            _fetch_gitlab_commit_stats_sync,
+            gl_project,
+            commit_hashes,
+            db_repo.id,
+            stats_limit,
+        )
+
+        if stats_objects:
+            await store.insert_git_commit_stats(stats_objects)
+            logging.info(f"Stored {len(stats_objects)} commit stats from GitLab")
+
+        # 4. Fetch Merge Requests
+        logging.info("Fetching merge requests from GitLab...")
+        pr_objects = await loop.run_in_executor(
+            None, _fetch_gitlab_mrs_sync, connector, project_id, db_repo.id, 100
+        )
+
+        if pr_objects:
+            await store.insert_git_pull_requests(pr_objects)
+            logging.info(f"Stored {len(pr_objects)} merge requests from GitLab")
+
+        # 5. Fetch Blame (Optional)
+        if fetch_blame:
+            logging.info("Fetching blame data from GitLab (this may take a while)...")
+            blame_batch = await loop.run_in_executor(
+                None,
+                _fetch_gitlab_blame_sync,
+                gl_project,
+                connector,
+                project_id,
+                db_repo.id,
+                50,
+            )
+
+            if blame_batch:
+                await store.insert_blame_data(blame_batch)
+                logging.info(f"Stored {len(blame_batch)} blame records from GitLab")
+
+        logging.info(f"Successfully processed GitLab project: {project_id}")
+
+    except ConnectorException as e:
+        logging.error(f"Connector error: {e}")
+        raise
+    except Exception as e:
+        logging.error(f"Error processing GitLab project: {e}")
+        raise
+    finally:
+        connector.close()
+
+
+async def process_gitlab_projects_batch(
+    store: Any,
+    token: str,
+    gitlab_url: str = "https://gitlab.com",
+    group_name: str = None,
+    pattern: str = None,
+    batch_size: int = 10,
+    max_concurrent: int = 4,
+    rate_limit_delay: float = 1.0,
+    max_commits_per_project: int = None,
+    max_projects: int = None,
+    use_async: bool = False,
+) -> None:
+    """
+    Process multiple GitLab projects using batch processing with pattern matching.
+    """
+    if not CONNECTORS_AVAILABLE:
+        raise RuntimeError(
+            "Connectors are not available. Please install required dependencies."
+        )
+
+    logging.info("=== GitLab Batch Project Processing ===")
+    connector = GitLabConnector(url=gitlab_url, private_token=token)
+    loop = asyncio.get_running_loop()
+
+    all_results: List[GitLabBatchResult] = []
+    stored_count = 0
+
+    results_queue: Optional[asyncio.Queue] = None
+    _queue_sentinel = object()
+
+    async def store_result(result: GitLabBatchResult) -> None:
+        """Store a single result in the database (upsert)."""
+        nonlocal stored_count
+        if not result.success:
+            return
+
+        project_info = result.project
+        db_repo = Repo(
+            repo_path=None,  # Not a local repo
+            repo=project_info.full_name,
+            settings={
+                "source": "gitlab",
+                "project_id": project_info.id,
+                "url": project_info.url,
+                "default_branch": project_info.default_branch,
+                "batch_processed": True,
+            },
+            tags=["gitlab"],
+        )
+
+        await store.insert_repo(db_repo)
+        stored_count += 1
+        logging.debug(f"Stored project ({stored_count}): {db_repo.repo}")
+
+        if result.stats:
+            stat = GitCommitStat(
+                repo_id=db_repo.id,
+                commit_hash=AGGREGATE_STATS_MARKER,
+                file_path=AGGREGATE_STATS_MARKER,
+                additions=result.stats.additions,
+                deletions=result.stats.deletions,
+                old_file_mode="unknown",
+                new_file_mode="unknown",
+            )
+            await store.insert_git_commit_stats([stat])
+
+        try:
+            await _backfill_gitlab_missing_data(
+                store=store,
+                connector=connector,
+                db_repo=db_repo,
+                project_full_name=project_info.full_name,
+                default_branch=project_info.default_branch,
+                max_commits=max_commits_per_project,
+            )
+        except Exception as e:
+            logging.debug(
+                f"Backfill failed for GitLab project {project_info.full_name}: {e}"
+            )
+
+    def on_project_complete(result: GitLabBatchResult) -> None:
+        all_results.append(result)
+        if result.success:
+            stats_info = ""
+            if result.stats:
+                stats_info = f" ({result.stats.total_commits} commits)"
+            logging.info(f"  ✓ Processed: {result.project.full_name}{stats_info}")
+        else:
+            logging.warning(f"  ✗ Failed: {result.project.full_name}: {result.error}")
+
+        if results_queue is not None:
+
+            def _enqueue() -> None:
+                assert results_queue is not None
+                try:
+                    results_queue.put_nowait(result)
+                except asyncio.QueueFull:
+                    asyncio.create_task(results_queue.put(result))
+
+            loop.call_soon_threadsafe(_enqueue)
+
+    try:
+        results_queue = asyncio.Queue(maxsize=max(1, max_concurrent * 2))
+
+        async def _consume_results() -> None:
+            assert results_queue is not None
+            while True:
+                item = await results_queue.get()
+                try:
+                    if item is _queue_sentinel:
+                        return
+                    await store_result(item)
+                finally:
+                    results_queue.task_done()
+
+        consumer_task = asyncio.create_task(_consume_results())
+
+        if use_async:
+            await connector.get_projects_with_stats_async(
+                group_name=group_name,
+                pattern=pattern,
+                batch_size=batch_size,
+                max_concurrent=max_concurrent,
+                rate_limit_delay=rate_limit_delay,
+                max_commits_per_project=max_commits_per_project,
+                max_projects=max_projects,
+                on_project_complete=on_project_complete,
+            )
+        else:
+            await loop.run_in_executor(
+                None,
+                lambda: connector.get_projects_with_stats(
+                    group_name=group_name,
+                    pattern=pattern,
+                    batch_size=batch_size,
+                    max_concurrent=max_concurrent,
+                    rate_limit_delay=rate_limit_delay,
+                    max_commits_per_project=max_commits_per_project,
+                    max_projects=max_projects,
+                    on_project_complete=on_project_complete,
+                ),
+            )
+
+        await results_queue.join()
+        await results_queue.put(_queue_sentinel)
+        await consumer_task
+
+        # Summary
+        successful = sum(1 for r in all_results if r.success)
+        failed = sum(1 for r in all_results if not r.success)
+        logging.info("=== Batch Processing Complete ===")
+        logging.info(f"  Successful: {successful}")
+        logging.info(f"  Failed: {failed}")
+        logging.info(f"  Total: {len(all_results)}")
+        logging.info(f"  Stored: {stored_count}")
+
+    except ConnectorException as e:
+        logging.error(f"Connector error: {e}")
+        raise
+    except Exception as e:
+        logging.error(f"Error in batch processing: {e}")
+        raise
+    finally:
+        connector.close()

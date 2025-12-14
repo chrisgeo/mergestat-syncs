@@ -5,11 +5,59 @@ import uuid
 from datetime import datetime, timezone
 
 from git import Repo as GitRepo
-from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Integer, Text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Text,
+    TypeDecorator,
+    CHAR,
+)
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
+
+
+class GUID(TypeDecorator):
+    """Platform-independent GUID type.
+
+    Uses PostgreSQL's UUID type for PostgreSQL, otherwise uses
+    CHAR(32), storing as stringified hex values.
+    """
+
+    impl = CHAR
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == "postgresql":
+            return dialect.type_descriptor(PGUUID())
+        else:
+            return dialect.type_descriptor(CHAR(32))
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return value
+        elif dialect.name == "postgresql":
+            return str(value)
+        else:
+            if not isinstance(value, uuid.UUID):
+                return str(uuid.UUID(value)).replace("-", "")
+            else:
+                # hex string
+                return value.hex
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return value
+        else:
+            if not isinstance(value, uuid.UUID):
+                return uuid.UUID(value)
+            else:
+                return value
 
 
 def get_repo_uuid_from_repo(repo: str) -> uuid.UUID:
@@ -132,7 +180,7 @@ class Repo(Base, GitRepo):
             GitRepo.__init__(self, repo_path)  # Initialize GitPython Repo
 
     id = Column(
-        UUID(as_uuid=True),
+        GUID,
         primary_key=True,
         default=uuid.uuid4,
         comment="MergeStat identifier for the repo",
@@ -152,12 +200,12 @@ class Repo(Base, GitRepo):
         JSON, nullable=False, default=list, comment="array of tags for the repo"
     )
     # repo_import_id = Column(
-    #     UUID(as_uuid=True),
+    #     GUID,
     #     ForeignKey("mergestat.repo_imports.id", ondelete="CASCADE"),
     #     comment="foreign key for mergestat.repo_imports.id",
     # )
     # provider = Column(
-    #     UUID(as_uuid=True),
+    #     GUID,
     #     ForeignKey("mergestat.providers.id", ondelete="CASCADE"),
     #     nullable=False,
     # )
@@ -174,7 +222,7 @@ class Repo(Base, GitRepo):
 class GitRef(Base):
     __tablename__ = "git_refs"
     repo_id = Column(
-        UUID(as_uuid=True),
+        GUID,
         ForeignKey("repos.id", ondelete="CASCADE"),
         primary_key=True,
         comment="foreign key for public.repos.id",
@@ -202,7 +250,7 @@ class GitRef(Base):
 class GitFile(Base):
     __tablename__ = "git_files"
     repo_id = Column(
-        UUID(as_uuid=True),
+        GUID,
         ForeignKey("repos.id", ondelete="CASCADE"),
         primary_key=True,
         comment="foreign key for public.repos.id",
@@ -228,7 +276,7 @@ class GitFile(Base):
 class GitCommit(Base):
     __tablename__ = "git_commits"
     repo_id = Column(
-        UUID(as_uuid=True),
+        GUID,
         ForeignKey("repos.id", ondelete="CASCADE"),
         primary_key=True,
         comment="foreign key for public.repos.id",
@@ -270,7 +318,7 @@ class GitCommit(Base):
 class GitCommitStat(Base):
     __tablename__ = "git_commit_stats"
     repo_id = Column(
-        UUID(as_uuid=True),
+        GUID,
         ForeignKey("repos.id", ondelete="CASCADE"),
         primary_key=True,
         comment="foreign key for public.repos.id",
@@ -353,7 +401,7 @@ class GitBlameMixin:
 class GitBlame(Base, GitBlameMixin):
     __tablename__ = "git_blame"
     repo_id = Column(
-        UUID(as_uuid=True),
+        GUID,
         ForeignKey("repos.id", ondelete="CASCADE"),
         primary_key=True,
         comment="foreign key for public.repos.id",
@@ -414,7 +462,7 @@ class GitBlame(Base, GitBlameMixin):
 class GitPullRequest(Base):
     __tablename__ = "git_pull_requests"
     repo_id = Column(
-        UUID(as_uuid=True),
+        GUID,
         ForeignKey("repos.id", ondelete="CASCADE"),
         primary_key=True,
         comment="foreign key for public.repos.id",
