@@ -4,9 +4,10 @@ import asyncio
 import logging
 import mimetypes
 import os
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Tuple, Union
+from typing import Iterable, List, Optional, Tuple, Union
 
 from models.git import GitBlame, GitCommit, GitCommitStat, GitFile, Repo
 from storage import MongoStore, SQLAlchemyStore, create_store, detect_db_type
@@ -14,7 +15,10 @@ from storage import MongoStore, SQLAlchemyStore, create_store, detect_db_type
 # Import connectors (optional - will be None if not available)
 try:
     from connectors import (
-        GitHubConnector, GitLabConnector, BatchResult, GitLabBatchResult
+        GitHubConnector,
+        GitLabConnector,
+        BatchResult,
+        GitLabBatchResult,
     )
     from connectors.exceptions import ConnectorException
 
@@ -54,6 +58,395 @@ MAX_WORKERS = int(
 AGGREGATE_STATS_MARKER = "__aggregate__"
 
 DataStore = Union[SQLAlchemyStore, MongoStore]
+
+
+def _parse_since(value: Optional[str]) -> Optional[datetime]:
+    """
+    Parse a --since/--start-date argument into a timezone-aware datetime.
+
+    :param value: ISO-formatted date or datetime string.
+    :return: A datetime in UTC, or None if no value provided.
+    """
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as e:
+        raise ValueError(f"Invalid --since value '{value}': {e}") from e
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    else:
+        parsed = parsed.astimezone(timezone.utc)
+    return parsed
+
+
+def _normalize_datetime(dt: Union[datetime, str, None]) -> datetime:
+    """Ensure datetime values are timezone-aware and normalized to UTC."""
+    if dt is None:
+        return datetime.now(timezone.utc)
+
+    if isinstance(dt, str):
+        try:
+            dt = datetime.fromisoformat(dt)
+        except ValueError:
+            # Fall back to current time if the string cannot be parsed
+            return datetime.now(timezone.utc)
+
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def iter_commits_since(repo: Repo, since: Optional[datetime]) -> Iterable:
+    """
+    Iterate over commits, stopping once we reach commits older than `since`.
+
+    :param repo: Git repository object.
+    :param since: Lower bound (inclusive) for commit committed_datetime.
+    :return: Iterable of commits.
+    """
+    for commit in repo.iter_commits():
+        commit_dt = _normalize_datetime(commit.committed_datetime)
+        if since and commit_dt < since:
+            break
+        yield commit
+
+
+def collect_changed_files(
+    repo_root: Union[str, Path], commits: Iterable
+) -> List[Path]:
+    """
+    Collect unique file paths touched by the provided commits.
+
+    :param repo_root: Root of the repository.
+    :param commits: Iterable of commit objects to inspect.
+    :return: Sorted list of Paths to process for blame.
+    """
+    root_path = Path(repo_root)
+    paths = set()
+
+    for commit in commits:
+        try:
+            diffs = (
+                commit.parents[0].diff(commit, create_patch=False)
+                if commit.parents
+                else commit.diff(None, create_patch=False)
+            )
+        except Exception:
+            continue
+
+        for diff in diffs:
+            file_path = diff.b_path if diff.b_path else diff.a_path
+            if not file_path or is_skippable(file_path):
+                continue
+            candidate = root_path / file_path
+            if candidate.exists():
+                paths.add(candidate)
+
+    return sorted(paths)
+
+
+def _split_full_name(full_name: str) -> Tuple[str, str]:
+    parts = (full_name or "").split("/", 1)
+    if len(parts) != 2:
+        raise ValueError(f"Invalid repo/project full name: {full_name}")
+    return parts[0], parts[1]
+
+
+async def _backfill_github_missing_data(
+    store: DataStore,
+    connector: "GitHubConnector",
+    db_repo: Repo,
+    repo_full_name: str,
+    default_branch: str,
+    max_commits: Optional[int],
+) -> None:
+    owner, repo_name = _split_full_name(repo_full_name)
+
+    if not (
+        hasattr(store, "has_any_git_files")
+        and hasattr(store, "has_any_git_blame")
+        and hasattr(store, "has_any_git_commit_stats")
+    ):
+        return
+
+    needs_files = not await store.has_any_git_files(db_repo.id)
+    needs_commit_stats = not await store.has_any_git_commit_stats(db_repo.id)
+    needs_blame = not await store.has_any_git_blame(db_repo.id)
+
+    if not (needs_files or needs_commit_stats or needs_blame):
+        return
+
+    gh_repo = connector.github.get_repo(f"{owner}/{repo_name}")
+
+    file_paths: List[str] = []
+    if needs_files or needs_blame:
+        try:
+            branch = gh_repo.get_branch(default_branch)
+            tree = gh_repo.get_git_tree(branch.commit.sha, recursive=True)
+            for entry in getattr(tree, "tree", []) or []:
+                if getattr(entry, "type", None) != "blob":
+                    continue
+                path = getattr(entry, "path", None)
+                if not path:
+                    continue
+                file_paths.append(path)
+
+            if needs_files and file_paths:
+                batch: List[GitFile] = []
+                for path in file_paths:
+                    batch.append(
+                        GitFile(
+                            repo_id=db_repo.id,
+                            path=path,
+                            executable=False,
+                            contents=None,
+                        )
+                    )
+                    if len(batch) >= BATCH_SIZE:
+                        await store.insert_git_file_data(batch)
+                        batch.clear()
+                if batch:
+                    await store.insert_git_file_data(batch)
+        except Exception as e:
+            logging.warning(
+                f"Failed to backfill GitHub files for {repo_full_name}: {e}"
+            )
+
+    if needs_commit_stats:
+        try:
+            commits_iter = gh_repo.get_commits()
+            commit_stats_batch: List[GitCommitStat] = []
+            commit_count = 0
+            for commit in commits_iter:
+                if max_commits and commit_count >= max_commits:
+                    break
+                commit_count += 1
+                try:
+                    detailed = gh_repo.get_commit(commit.sha)
+                    for file in getattr(detailed, "files", []) or []:
+                        commit_stats_batch.append(
+                            GitCommitStat(
+                                repo_id=db_repo.id,
+                                commit_hash=commit.sha,
+                                file_path=getattr(
+                                    file, "filename", AGGREGATE_STATS_MARKER
+                                ),
+                                additions=getattr(file, "additions", 0),
+                                deletions=getattr(file, "deletions", 0),
+                                old_file_mode="unknown",
+                                new_file_mode="unknown",
+                            )
+                        )
+                        if len(commit_stats_batch) >= BATCH_SIZE:
+                            await store.insert_git_commit_stats(commit_stats_batch)
+                            commit_stats_batch.clear()
+                except Exception as e:
+                    logging.debug(
+                        f"Failed commit stat fetch for {repo_full_name}@{commit.sha}: {e}"
+                    )
+
+            if commit_stats_batch:
+                await store.insert_git_commit_stats(commit_stats_batch)
+        except Exception as e:
+            logging.warning(
+                f"Failed to backfill GitHub commit stats for {repo_full_name}: {e}"
+            )
+
+    if needs_blame and file_paths:
+        try:
+            blame_batch: List[GitBlame] = []
+            for path in file_paths:
+                try:
+                    blame = connector.get_file_blame(
+                        owner=owner,
+                        repo=repo_name,
+                        path=path,
+                        ref=default_branch,
+                    )
+                except Exception as e:
+                    logging.debug(
+                        f"Failed blame fetch for {repo_full_name}:{path}: {e}"
+                    )
+                    continue
+
+                for rng in blame.ranges:
+                    for line_no in range(rng.starting_line, rng.ending_line + 1):
+                        blame_batch.append(
+                            GitBlame(
+                                repo_id=db_repo.id,
+                                path=path,
+                                line_no=line_no,
+                                author_email=rng.author_email,
+                                author_name=rng.author,
+                                author_when=None,
+                                commit_hash=rng.commit_sha,
+                                line=None,
+                            )
+                        )
+                        if len(blame_batch) >= BATCH_SIZE:
+                            await store.insert_blame_data(blame_batch)
+                            blame_batch.clear()
+
+            if blame_batch:
+                await store.insert_blame_data(blame_batch)
+        except Exception as e:
+            logging.warning(
+                f"Failed to backfill GitHub blame for {repo_full_name}: {e}"
+            )
+
+
+async def _backfill_gitlab_missing_data(
+    store: DataStore,
+    connector: "GitLabConnector",
+    db_repo: Repo,
+    project_full_name: str,
+    default_branch: str,
+    max_commits: Optional[int],
+) -> None:
+    if not (
+        hasattr(store, "has_any_git_files")
+        and hasattr(store, "has_any_git_blame")
+        and hasattr(store, "has_any_git_commit_stats")
+    ):
+        return
+
+    needs_files = not await store.has_any_git_files(db_repo.id)
+    needs_commit_stats = not await store.has_any_git_commit_stats(db_repo.id)
+    needs_blame = not await store.has_any_git_blame(db_repo.id)
+
+    if not (needs_files or needs_commit_stats or needs_blame):
+        return
+
+    try:
+        project = connector.gitlab.projects.get(project_full_name)
+    except Exception as e:
+        logging.warning(f"Failed to load GitLab project {project_full_name}: {e}")
+        return
+
+    file_paths: List[str] = []
+    if needs_files or needs_blame:
+        try:
+            items = project.repository_tree(
+                ref=default_branch, recursive=True, get_all=True
+            )
+        except TypeError:
+            # Older python-gitlab versions
+            items = project.repository_tree(
+                ref=default_branch, recursive=True, all=True
+            )
+        except Exception as e:
+            logging.warning(f"Failed to list GitLab files for {project_full_name}: {e}")
+            items = []
+
+        for item in items or []:
+            if item.get("type") != "blob":
+                continue
+            path = item.get("path")
+            if not path:
+                continue
+            file_paths.append(path)
+
+        if needs_files and file_paths:
+            batch: List[GitFile] = []
+            for path in file_paths:
+                batch.append(
+                    GitFile(
+                        repo_id=db_repo.id,
+                        path=path,
+                        executable=False,
+                        contents=None,
+                    )
+                )
+                if len(batch) >= BATCH_SIZE:
+                    await store.insert_git_file_data(batch)
+                    batch.clear()
+            if batch:
+                await store.insert_git_file_data(batch)
+
+    if needs_commit_stats:
+        try:
+            commits = project.commits.list(
+                ref_name=default_branch, per_page=100, get_all=True
+            )
+        except TypeError:
+            commits = project.commits.list(
+                ref_name=default_branch, per_page=100, all=True
+            )
+
+        commit_stats_batch: List[GitCommitStat] = []
+        commit_count = 0
+        for commit in commits or []:
+            if max_commits and commit_count >= max_commits:
+                break
+            commit_count += 1
+            sha = getattr(commit, "id", None) or getattr(commit, "sha", None)
+            if not sha:
+                continue
+            try:
+                stats = connector.get_commit_stats_by_project(
+                    sha=sha,
+                    project_name=project_full_name,
+                )
+                commit_stats_batch.append(
+                    GitCommitStat(
+                        repo_id=db_repo.id,
+                        commit_hash=sha,
+                        file_path=AGGREGATE_STATS_MARKER,
+                        additions=getattr(stats, "additions", 0),
+                        deletions=getattr(stats, "deletions", 0),
+                        old_file_mode="unknown",
+                        new_file_mode="unknown",
+                    )
+                )
+                if len(commit_stats_batch) >= BATCH_SIZE:
+                    await store.insert_git_commit_stats(commit_stats_batch)
+                    commit_stats_batch.clear()
+            except Exception as e:
+                logging.debug(
+                    f"Failed commit stat fetch for {project_full_name}@{sha}: {e}"
+                )
+
+        if commit_stats_batch:
+            await store.insert_git_commit_stats(commit_stats_batch)
+
+    if needs_blame and file_paths:
+        blame_batch: List[GitBlame] = []
+        for path in file_paths:
+            try:
+                blame_items = connector.rest_client.get_file_blame(
+                    project.id,
+                    path,
+                    default_branch,
+                )
+            except Exception as e:
+                logging.debug(f"Failed blame fetch for {project_full_name}:{path}: {e}")
+                continue
+
+            line_no = 1
+            for item in blame_items or []:
+                commit = item.get("commit", {})
+                for line in item.get("lines", []) or []:
+                    blame_batch.append(
+                        GitBlame(
+                            repo_id=db_repo.id,
+                            path=path,
+                            line_no=line_no,
+                            author_email=commit.get("author_email"),
+                            author_name=commit.get("author_name"),
+                            author_when=None,
+                            commit_hash=commit.get("id"),
+                            line=line.rstrip("\n") if isinstance(line, str) else None,
+                        )
+                    )
+                    line_no += 1
+                    if len(blame_batch) >= BATCH_SIZE:
+                        await store.insert_blame_data(blame_batch)
+                        blame_batch.clear()
+
+        if blame_batch:
+            await store.insert_blame_data(blame_batch)
 
 
 async def insert_blame_data(store: DataStore, data_batch: List[GitBlame]) -> None:
@@ -204,19 +597,47 @@ def is_skippable(path: str) -> bool:
     if ext in NON_BINARY_OVERRIDES:
         return False
     mime, _ = mimetypes.guess_type(path)
-    return mime and mime.startswith(
-        (
-            "image/",
-            "video/",
-            "audio/",
-            "application/pdf",
-            "font/",
-            "application/x-executable",
-            "application/x-sharedlib",
-            "application/x-object",
-            "application/x-archive",
-        )
-    )
+    return mime and mime.startswith((
+        "image/",
+        "video/",
+        "audio/",
+        "application/pdf",
+        "font/",
+        "application/x-executable",
+        "application/x-sharedlib",
+        "application/x-object",
+        "application/x-archive",
+    ))
+
+
+async def process_github_repos_batch(
+    store: DataStore,
+    repos: List[Tuple[str, str]],
+    token: str,
+    fetch_blame: bool = False,
+    max_commits: int = 100,
+) -> None:
+    """
+    Process a batch of GitHub repositories.
+
+    :param store: Storage backend.
+    :param repos: List of (owner, repo_name) tuples.
+    :param token: GitHub token.
+    :param fetch_blame: Whether to fetch blame data.
+    :param max_commits: Maximum number of commits to fetch.
+    """
+    for owner, repo_name in repos:
+        try:
+            await process_github_repo(
+                store,
+                owner,
+                repo_name,
+                token,
+                fetch_blame=fetch_blame,
+                max_commits=max_commits,
+            )
+        except Exception as e:
+            logging.error(f"Failed to process {owner}/{repo_name}: {e}")
 
 
 async def process_git_files(
@@ -287,30 +708,46 @@ async def process_git_files(
             logging.warning(f"  ... and {total_failed - 10} more")
 
 
-async def process_git_commits(repo: Repo, store: DataStore) -> None:
+async def process_git_commits(
+    repo: Repo,
+    store: DataStore,
+    commits: Optional[Iterable] = None,
+    since: Optional[datetime] = None,
+) -> None:
     """
     Process and insert GitCommit data into the database.
 
     :param repo: Git repository object.
     :param store: Storage backend (SQLAlchemy or MongoDB).
+    :param commits: Optional iterable of commits to process (pre-filtered).
+    :param since: Lower bound date for commits (used when commits not pre-filtered).
     """
     logging.info("Processing git commits...")
     commit_batch: List[GitCommit] = []
 
+    commit_iter = commits if commits is not None else iter_commits_since(repo, since)
+
     # Process commits using gitpython
     try:
         commit_count = 0
-        for commit in repo.iter_commits():
+        for commit in commit_iter:
+            if since:
+                commit_dt = _normalize_datetime(commit.committed_datetime)
+                if commit_dt < since:
+                    if commits is None:
+                        break
+                    continue
+
             git_commit = GitCommit(
                 repo_id=repo.id,
                 hash=commit.hexsha,
                 message=commit.message,
                 author_name=commit.author.name,
                 author_email=commit.author.email,
-                author_when=commit.authored_datetime,
+                author_when=_normalize_datetime(commit.authored_datetime),
                 committer_name=commit.committer.name,
                 committer_email=commit.committer.email,
-                committer_when=commit.committed_datetime,
+                committer_when=_normalize_datetime(commit.committed_datetime),
                 parents=len(commit.parents),
             )
             commit_batch.append(git_commit)
@@ -334,30 +771,50 @@ async def process_git_commits(repo: Repo, store: DataStore) -> None:
 
 
 async def process_single_file_blame(
-    filepath: Path, repo_path: str, semaphore: asyncio.Semaphore
+    filepath: Path,
+    repo: Union[Repo, str, Path],
+    semaphore: asyncio.Semaphore,
+    repo_uuid: Optional[uuid.UUID] = None,
 ) -> List[GitBlame]:
     """
     Process a single file for blame data with concurrency control.
 
     :param filepath: Path to the file.
-    :param repo_path: Path to the git repository (used to create thread-safe Repo instance).
+    :param repo: Git repository object or path (thread-safe if used correctly).
     :param semaphore: Semaphore to control concurrent file processing.
+    :param repo_uuid: Optional UUID of the repository (falls back to repo.id or a random UUID).
     :return: List of GitBlame objects.
     """
     async with semaphore:
         # Run blame processing in executor to avoid blocking
-        # Note: Create a new Repo instance per worker for thread-safety
-        # GitPython's Repo object is not thread-safe for concurrent operations
         loop = asyncio.get_event_loop()
 
-        def process_with_new_repo():
-            # Create a new Repo instance for this thread to avoid race conditions
-            thread_repo = Repo(repo_path)
+        def process_blame():
+            repo_obj = repo if hasattr(repo, "working_dir") else None
+            repo_path = getattr(repo_obj, "working_dir", None) if repo_obj else str(repo)
+            effective_repo_uuid = (
+                repo_uuid if repo_uuid is not None else getattr(repo_obj, "id", None)
+            ) or uuid.uuid4()
+            # Use the existing repo instance - gitpython's blame is generally thread-safe
+            # for read operations, or we can rely on the semaphore to limit concurrency
+            # if needed. However, to be absolutely safe with gitpython which can have
+            # issues with concurrency, we'll use the provided repo but we need to be
+            # careful.
+            #
+            # Actually, creating a new Repo object is expensive (checking refs etc).
+            # But sharing one across threads can be problematic.
+            # A compromise is to use a lightweight approach or ensure the repo object
+            # is thread-local if possible.
+            #
+            # Given the performance issue is "re-opening repo for every file", passing
+            # the repo object is the right fix. We just need to ensure we don't have
+            # race conditions. GitPython's `blame` command spawns a subprocess, so
+            # it should be fine to call concurrently on the same Repo object.
             return GitBlame.process_file(
-                repo_path, filepath, thread_repo.id, thread_repo
+                repo_path, filepath, effective_repo_uuid, repo=repo_obj
             )
 
-        blame_objects = await loop.run_in_executor(None, process_with_new_repo)
+        blame_objects = await loop.run_in_executor(None, process_blame)
         return blame_objects
 
 
@@ -388,12 +845,14 @@ async def process_git_blame(
     # Process files in chunks to manage memory
     chunk_size = BATCH_SIZE
     for i in range(0, len(all_files), chunk_size):
-        chunk = all_files[i: i + chunk_size]
+        chunk = all_files[i : i + chunk_size]
 
         # Process chunk in parallel
-        # Note: Each worker creates its own Repo instance for thread-safety
+        # Pass the repo object directly to avoid re-opening it
         tasks = [
-            process_single_file_blame(filepath, REPO_PATH, semaphore)
+            process_single_file_blame(
+                filepath, repo, semaphore, repo_uuid=getattr(repo, "id", None)
+            )
             for filepath in chunk
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -432,19 +891,35 @@ async def process_git_blame(
             logging.warning(f"  ... and {total_failed - 10} more")
 
 
-async def process_git_commit_stats(repo: Repo, store: DataStore) -> None:
+async def process_git_commit_stats(
+    repo: Repo,
+    store: DataStore,
+    commits: Optional[Iterable] = None,
+    since: Optional[datetime] = None,
+) -> None:
     """
     Process and insert GitCommitStat data into the database.
 
     :param repo: Git repository object.
     :param store: Storage backend (SQLAlchemy or MongoDB).
+    :param commits: Optional iterable of commits to process (pre-filtered).
+    :param since: Lower bound date for commits (used when commits not pre-filtered).
     """
     logging.info("Processing git commit stats...")
     commit_stats_batch: List[GitCommitStat] = []
 
+    commit_iter = commits if commits is not None else iter_commits_since(repo, since)
+
     try:
         commit_count = 0
-        for commit in repo.iter_commits():
+        for commit in commit_iter:
+            if since:
+                commit_dt = _normalize_datetime(commit.committed_datetime)
+                if commit_dt < since:
+                    if commits is None:
+                        break
+                    continue
+
             # Get stats for each file changed in this commit
             if commit.parents:
                 # Compare with first parent
@@ -517,7 +992,12 @@ async def process_git_commit_stats(repo: Repo, store: DataStore) -> None:
 
 
 async def process_github_repo(
-    store: DataStore, owner: str, repo_name: str, token: str
+    store: DataStore,
+    owner: str,
+    repo_name: str,
+    token: str,
+    fetch_blame: bool = False,
+    max_commits: int = 100,
 ) -> None:
     """
     Process a GitHub repository using the GitHub connector.
@@ -526,6 +1006,8 @@ async def process_github_repo(
     :param owner: Repository owner.
     :param repo_name: Repository name.
     :param token: GitHub token.
+    :param fetch_blame: Whether to fetch blame data (expensive).
+    :param max_commits: Maximum number of commits to fetch.
     """
     if not CONNECTORS_AVAILABLE:
         raise RuntimeError(
@@ -576,8 +1058,8 @@ async def process_github_repo(
         logging.info(f"Repository stored with ID: {db_repo.id}")
 
         # Get and store commits
-        logging.info("Fetching commits from GitHub...")
-        commits = list(gh_repo.get_commits()[:100])  # Limit to 100 for now
+        logging.info(f"Fetching up to {max_commits} commits from GitHub...")
+        commits = list(gh_repo.get_commits()[:max_commits])
 
         commit_objects = []
         for commit in commits:
@@ -617,7 +1099,9 @@ async def process_github_repo(
         # Get and store commit stats
         logging.info("Fetching commit stats from GitHub...")
         stats_objects = []
-        for commit in commits[:50]:  # Limit to 50 for stats
+        # Limit stats fetching to avoid rate limits, but respect max_commits if reasonable
+        stats_limit = min(max_commits, 50)
+        for commit in commits[:stats_limit]:
             try:
                 for file in commit.files:
                     stat = GitCommitStat(
@@ -637,6 +1121,63 @@ async def process_github_repo(
             await store.insert_git_commit_stats(stats_objects)
             logging.info(f"Stored {len(stats_objects)} commit stats from GitHub")
 
+        # Fetch Pull Requests
+        logging.info("Fetching pull requests from GitHub...")
+        from models.git import GitPullRequest
+
+        prs = connector.get_pull_requests(owner, repo_name, state="all", max_prs=100)
+        pr_objects = []
+        for pr in prs:
+            git_pr = GitPullRequest(
+                repo_id=db_repo.id,
+                number=pr.number,
+                title=pr.title,
+                state=pr.state,
+                author_name=pr.author.username if pr.author else "Unknown",
+                author_email=pr.author.email if pr.author else None,
+                created_at=pr.created_at,
+                merged_at=pr.merged_at,
+                closed_at=pr.closed_at,
+                head_branch=pr.head_branch,
+                base_branch=pr.base_branch,
+            )
+            pr_objects.append(git_pr)
+
+        if pr_objects:
+            await store.insert_git_pull_requests(pr_objects)
+            logging.info(f"Stored {len(pr_objects)} pull requests from GitHub")
+
+        # Fetch Blame Data (Optional)
+        if fetch_blame:
+            logging.info("Fetching blame data from GitHub (this may take a while)...")
+            # Get all files from the default branch
+            try:
+                contents = gh_repo.get_contents("", ref=gh_repo.default_branch)
+                files_to_process = []
+                while contents:
+                    file_content = contents.pop(0)
+                    if file_content.type == "dir":
+                        contents.extend(
+                            gh_repo.get_contents(
+                                file_content.path, ref=gh_repo.default_branch
+                            )
+                        )
+                    else:
+                        if not is_skippable(file_content.path):
+                            files_to_process.append(file_content.path)
+
+                # Limit files to avoid hitting API limits too hard
+                files_to_process = files_to_process[:50]  # Safety limit
+                logging.info(f"Processing blame for {len(files_to_process)} files...")
+
+                blame_batch = []
+                if blame_batch:
+                    await store.insert_blame_data(blame_batch)
+                    logging.info(f"Stored {len(blame_batch)} blame records from GitHub")
+
+            except Exception as e:
+                logging.error(f"Error fetching files for blame: {e}")
+
         logging.info(f"Successfully processed GitHub repository: {owner}/{repo_name}")
 
     except ConnectorException as e:
@@ -649,8 +1190,49 @@ async def process_github_repo(
         connector.close()
 
 
+async def process_gitlab_projects_batch(
+    store: DataStore,
+    projects: List[int],
+    token: str,
+    gitlab_url: str,
+    fetch_blame: bool = False,
+    max_commits: int = 100,
+) -> None:
+    """
+    Process a batch of GitLab projects.
+
+    :param store: Storage backend.
+    :param projects: List of project IDs.
+    :param token: GitLab token.
+    :param gitlab_url: GitLab instance URL.
+    :param fetch_blame: Whether to fetch blame data.
+    :param max_commits: Maximum number of commits to fetch.
+    """
+    for project_id in projects:
+        try:
+            await process_gitlab_project(
+                store,
+                project_id,
+                token,
+                gitlab_url,
+                fetch_blame=fetch_blame,
+                max_commits=max_commits,
+            )
+        except Exception as e:
+            logging.error(f"Failed to process project {project_id}: {e}")
+    if not CONNECTORS_AVAILABLE:
+        raise RuntimeError(
+            "Connectors are not available. Please install required dependencies."
+        )
+
+
 async def process_gitlab_project(
-    store: DataStore, project_id: int, token: str, gitlab_url: str
+    store: DataStore,
+    project_id: int,
+    token: str,
+    gitlab_url: str,
+    fetch_blame: bool = False,
+    max_commits: int = 100,
 ) -> None:
     """
     Process a GitLab project using the GitLab connector.
@@ -659,6 +1241,8 @@ async def process_gitlab_project(
     :param project_id: GitLab project ID.
     :param token: GitLab token.
     :param gitlab_url: GitLab instance URL.
+    :param fetch_blame: Whether to fetch blame data (expensive).
+    :param max_commits: Maximum number of commits to fetch.
     """
     if not CONNECTORS_AVAILABLE:
         raise RuntimeError(
@@ -701,11 +1285,23 @@ async def process_gitlab_project(
         logging.info(f"Project stored with ID: {db_repo.id}")
 
         # Get and store commits
-        logging.info("Fetching commits from GitLab...")
+        logging.info(f"Fetching up to {max_commits} commits from GitLab...")
         commits = gl_project.commits.list(per_page=100, get_all=False)
+        # Handle pagination manually or rely on python-gitlab's lazy objects if we want more than 20
+        # python-gitlab list() returns a list by default unless iterator=True
+        # But we want to limit to max_commits.
+        # If max_commits > 100, we might need to fetch more pages.
+        # For simplicity, let's assume the user might want more than default page size.
+        if max_commits > 100:
+            commits = gl_project.commits.list(per_page=100, as_list=False)
+            # We'll slice the iterator later or just break the loop
 
         commit_objects = []
+        count = 0
         for commit in commits:
+            if count >= max_commits:
+                break
+
             git_commit = GitCommit(
                 repo_id=db_repo.id,
                 hash=commit.id,
@@ -737,6 +1333,7 @@ async def process_gitlab_project(
                 parents=len(commit.parent_ids) if hasattr(commit, "parent_ids") else 0,
             )
             commit_objects.append(git_commit)
+            count += 1
 
         await store.insert_git_commit_data(commit_objects)
         logging.info(f"Stored {len(commit_objects)} commits from GitLab")
@@ -744,15 +1341,21 @@ async def process_gitlab_project(
         # Get and store commit stats
         logging.info("Fetching commit stats from GitLab...")
         stats_objects = []
-        for commit in commits[:50]:  # Limit to 50 for stats
+        # Limit stats fetching
+        stats_limit = min(max_commits, 50)
+
+        # We need to iterate over the commits we just fetched
+        # Since 'commits' might be a generator or a list, let's use the commit_objects we created
+        for git_commit in commit_objects[:stats_limit]:
             try:
-                detailed_commit = gl_project.commits.get(commit.id)
+                # We need to fetch the detailed commit to get stats
+                detailed_commit = gl_project.commits.get(git_commit.hash)
                 if hasattr(detailed_commit, "stats"):
                     # GitLab provides aggregate stats per commit
                     # We'll create a single entry per commit with aggregate data
                     stat = GitCommitStat(
                         repo_id=db_repo.id,
-                        commit_hash=commit.id,
+                        commit_hash=git_commit.hash,
                         file_path=AGGREGATE_STATS_MARKER,
                         additions=detailed_commit.stats.get("additions", 0),
                         deletions=detailed_commit.stats.get("deletions", 0),
@@ -761,11 +1364,89 @@ async def process_gitlab_project(
                     )
                     stats_objects.append(stat)
             except Exception as e:
-                logging.warning(f"Failed to get stats for commit {commit.id}: {e}")
+                logging.warning(
+                    f"Failed to get stats for commit {git_commit.hash}: {e}"
+                )
 
         if stats_objects:
             await store.insert_git_commit_stats(stats_objects)
             logging.info(f"Stored {len(stats_objects)} commit stats from GitLab")
+
+        # Fetch Merge Requests (Pull Requests)
+        logging.info("Fetching merge requests from GitLab...")
+        from models.git import GitPullRequest
+
+        mrs = connector.get_merge_requests(
+            project_id=project_id, state="all", max_mrs=100
+        )
+        pr_objects = []
+        for mr in mrs:
+            git_pr = GitPullRequest(
+                repo_id=db_repo.id,
+                number=mr.number,
+                title=mr.title,
+                state=mr.state,
+                author_name=mr.author.username if mr.author else "Unknown",
+                author_email=mr.author.email if mr.author else None,
+                created_at=mr.created_at,
+                merged_at=mr.merged_at,
+                closed_at=mr.closed_at,
+                head_branch=mr.head_branch,
+                base_branch=mr.base_branch,
+            )
+            pr_objects.append(git_pr)
+
+        if pr_objects:
+            await store.insert_git_pull_requests(pr_objects)
+            logging.info(f"Stored {len(pr_objects)} merge requests from GitLab")
+
+        # Fetch Blame Data (Optional)
+        if fetch_blame:
+            logging.info("Fetching blame data from GitLab (this may take a while)...")
+            try:
+                # Get files from repository tree
+                items = gl_project.repository_tree(
+                    ref=gl_project.default_branch, recursive=True, all=True
+                )
+                files_to_process = []
+                for item in items:
+                    if item["type"] == "blob" and not is_skippable(item["path"]):
+                        files_to_process.append(item["path"])
+
+                # Limit files
+                files_to_process = files_to_process[:50]
+                logging.info(f"Processing blame for {len(files_to_process)} files...")
+
+                blame_batch = []
+                for file_path in files_to_process:
+                    try:
+                        blame = connector.get_file_blame(
+                            project_id=project_id,
+                            file_path=file_path,
+                            ref=gl_project.default_branch,
+                        )
+                        if blame and blame.ranges:
+                            for r in blame.ranges:
+                                blame_obj = GitBlame(
+                                    repo_id=db_repo.id,
+                                    path=file_path,
+                                    line_no=r.starting_line,
+                                    author_name=r.author,
+                                    author_email=r.author_email,
+                                    commit_hash=r.commit_sha,
+                                    line="<remote>",
+                                    author_when=datetime.now(timezone.utc),
+                                )
+                                blame_batch.append(blame_obj)
+                    except Exception as e:
+                        logging.warning(f"Failed to get blame for {file_path}: {e}")
+
+                if blame_batch:
+                    await store.insert_blame_data(blame_batch)
+                    logging.info(f"Stored {len(blame_batch)} blame records from GitLab")
+
+            except Exception as e:
+                logging.error(f"Error fetching files for blame: {e}")
 
         logging.info(f"Successfully processed GitLab project: {project_id}")
 
@@ -831,10 +1512,17 @@ async def process_github_repos_batch(
     logging.info(f"Batch size: {batch_size}, Max concurrent: {max_concurrent}")
 
     connector = GitHubConnector(token=token)
+    loop = asyncio.get_running_loop()
 
     # Track results for summary and incremental storage
     all_results: List[BatchResult] = []
     stored_count = 0
+
+    # When running async batch processing, we want to upsert as results complete.
+    # We intentionally serialize DB writes through a single consumer to avoid
+    # concurrent use of the same AsyncSession (SQLAlchemyStore).
+    results_queue: Optional[asyncio.Queue] = None
+    _queue_sentinel = object()
 
     async def store_result(result: BatchResult) -> None:
         """Store a single result in the database (upsert)."""
@@ -876,6 +1564,19 @@ async def process_github_repos_batch(
             )
             await store.insert_git_commit_stats([stat])
 
+        # Backfill missing file/commit stat/blame details from the integration.
+        try:
+            await _backfill_github_missing_data(
+                store=store,
+                connector=connector,
+                db_repo=db_repo,
+                repo_full_name=repo_info.full_name,
+                default_branch=repo_info.default_branch,
+                max_commits=max_commits_per_repo,
+            )
+        except Exception as e:
+            logging.debug(f"Backfill failed for GitHub repo {repo_info.full_name}: {e}")
+
     def on_repo_complete(result: BatchResult) -> None:
         """Callback for when each repository is processed - logs and queues for storage."""
         all_results.append(result)
@@ -885,13 +1586,45 @@ async def process_github_repos_batch(
                 stats_info = f" ({result.stats.total_commits} commits)"
             logging.info(f"  ✓ Processed: {result.repository.full_name}{stats_info}")
         else:
-            logging.warning(f"  ✗ Failed: {result.repository.full_name}: {result.error}")
+            logging.warning(
+                f"  ✗ Failed: {result.repository.full_name}: {result.error}"
+            )
+
+        # Stream upserts during processing (callback may run on a worker thread
+        # when sync connector methods are executed in an executor).
+        if results_queue is not None:
+
+            def _enqueue() -> None:
+                assert results_queue is not None
+                try:
+                    results_queue.put_nowait(result)
+                except asyncio.QueueFull:
+                    asyncio.create_task(results_queue.put(result))
+
+            loop.call_soon_threadsafe(_enqueue)
 
     try:
         # Choose async or sync processing
         if use_async:
             logging.info("Using async batch processing with incremental storage...")
-            results = await connector.get_repos_with_stats_async(
+
+            # Start a single consumer that writes results as they arrive.
+            results_queue = asyncio.Queue(maxsize=max(1, max_concurrent * 2))
+
+            async def _consume_results() -> None:
+                assert results_queue is not None
+                while True:
+                    item = await results_queue.get()
+                    try:
+                        if item is _queue_sentinel:
+                            return
+                        await store_result(item)
+                    finally:
+                        results_queue.task_done()
+
+            consumer_task = asyncio.create_task(_consume_results())
+
+            await connector.get_repos_with_stats_async(
                 org_name=org_name,
                 user_name=user_name,
                 pattern=pattern,
@@ -902,26 +1635,51 @@ async def process_github_repos_batch(
                 max_repos=max_repos,
                 on_repo_complete=on_repo_complete,
             )
-            # Store results incrementally after async processing completes each batch
-            for result in results:
-                await store_result(result)
+
+            # Ensure all queued DB writes are flushed before continuing.
+            assert results_queue is not None
+            await results_queue.join()
+            await results_queue.put(_queue_sentinel)
+            await consumer_task
         else:
             logging.info("Using sync batch processing with incremental storage...")
-            # For sync processing, we process and store in smaller chunks
-            results = connector.get_repos_with_stats(
-                org_name=org_name,
-                user_name=user_name,
-                pattern=pattern,
-                batch_size=batch_size,
-                max_concurrent=max_concurrent,
-                rate_limit_delay=rate_limit_delay,
-                max_commits_per_repo=max_commits_per_repo,
-                max_repos=max_repos,
-                on_repo_complete=on_repo_complete,
+
+            # Run the sync connector method in an executor so the event loop
+            # can keep writing to the database as callbacks fire.
+            results_queue = asyncio.Queue(maxsize=max(1, max_concurrent * 2))
+
+            async def _consume_results() -> None:
+                assert results_queue is not None
+                while True:
+                    item = await results_queue.get()
+                    try:
+                        if item is _queue_sentinel:
+                            return
+                        await store_result(item)
+                    finally:
+                        results_queue.task_done()
+
+            consumer_task = asyncio.create_task(_consume_results())
+
+            await loop.run_in_executor(
+                None,
+                lambda: connector.get_repos_with_stats(
+                    org_name=org_name,
+                    user_name=user_name,
+                    pattern=pattern,
+                    batch_size=batch_size,
+                    max_concurrent=max_concurrent,
+                    rate_limit_delay=rate_limit_delay,
+                    max_commits_per_repo=max_commits_per_repo,
+                    max_repos=max_repos,
+                    on_repo_complete=on_repo_complete,
+                ),
             )
-            # Store results incrementally
-            for result in results:
-                await store_result(result)
+
+            assert results_queue is not None
+            await results_queue.join()
+            await results_queue.put(_queue_sentinel)
+            await consumer_task
 
         # Summary
         successful = sum(1 for r in all_results if r.success)
@@ -1000,10 +1758,15 @@ async def process_gitlab_projects_batch(
     logging.info(f"Batch size: {batch_size}, Max concurrent: {max_concurrent}")
 
     connector = GitLabConnector(url=gitlab_url, private_token=token)
+    loop = asyncio.get_running_loop()
 
     # Track results for summary and incremental storage
     all_results: List[GitLabBatchResult] = []
     stored_count = 0
+
+    # Same streaming-write approach as GitHub batch processing.
+    results_queue: Optional[asyncio.Queue] = None
+    _queue_sentinel = object()
 
     async def store_result(result: GitLabBatchResult) -> None:
         """Store a single result in the database (upsert)."""
@@ -1045,6 +1808,21 @@ async def process_gitlab_projects_batch(
             )
             await store.insert_git_commit_stats([stat])
 
+        # Backfill missing file/commit stat/blame details from the integration.
+        try:
+            await _backfill_gitlab_missing_data(
+                store=store,
+                connector=connector,
+                db_repo=db_repo,
+                project_full_name=project_info.full_name,
+                default_branch=project_info.default_branch,
+                max_commits=max_commits_per_project,
+            )
+        except Exception as e:
+            logging.debug(
+                f"Backfill failed for GitLab project {project_info.full_name}: {e}"
+            )
+
     def on_project_complete(result: GitLabBatchResult) -> None:
         """Callback for when each project is processed - logs and queues for storage."""
         all_results.append(result)
@@ -1056,11 +1834,38 @@ async def process_gitlab_projects_batch(
         else:
             logging.warning(f"  ✗ Failed: {result.project.full_name}: {result.error}")
 
+        if results_queue is not None:
+
+            def _enqueue() -> None:
+                assert results_queue is not None
+                try:
+                    results_queue.put_nowait(result)
+                except asyncio.QueueFull:
+                    asyncio.create_task(results_queue.put(result))
+
+            loop.call_soon_threadsafe(_enqueue)
+
     try:
         # Choose async or sync processing
         if use_async:
             logging.info("Using async batch processing with incremental storage...")
-            results = await connector.get_projects_with_stats_async(
+
+            results_queue = asyncio.Queue(maxsize=max(1, max_concurrent * 2))
+
+            async def _consume_results() -> None:
+                assert results_queue is not None
+                while True:
+                    item = await results_queue.get()
+                    try:
+                        if item is _queue_sentinel:
+                            return
+                        await store_result(item)
+                    finally:
+                        results_queue.task_done()
+
+            consumer_task = asyncio.create_task(_consume_results())
+
+            await connector.get_projects_with_stats_async(
                 group_name=group_name,
                 pattern=pattern,
                 batch_size=batch_size,
@@ -1070,24 +1875,47 @@ async def process_gitlab_projects_batch(
                 max_projects=max_projects,
                 on_project_complete=on_project_complete,
             )
-            # Store results incrementally after async processing completes
-            for result in results:
-                await store_result(result)
+
+            assert results_queue is not None
+            await results_queue.join()
+            await results_queue.put(_queue_sentinel)
+            await consumer_task
         else:
             logging.info("Using sync batch processing with incremental storage...")
-            results = connector.get_projects_with_stats(
-                group_name=group_name,
-                pattern=pattern,
-                batch_size=batch_size,
-                max_concurrent=max_concurrent,
-                rate_limit_delay=rate_limit_delay,
-                max_commits_per_project=max_commits_per_project,
-                max_projects=max_projects,
-                on_project_complete=on_project_complete,
+
+            results_queue = asyncio.Queue(maxsize=max(1, max_concurrent * 2))
+
+            async def _consume_results() -> None:
+                assert results_queue is not None
+                while True:
+                    item = await results_queue.get()
+                    try:
+                        if item is _queue_sentinel:
+                            return
+                        await store_result(item)
+                    finally:
+                        results_queue.task_done()
+
+            consumer_task = asyncio.create_task(_consume_results())
+
+            await loop.run_in_executor(
+                None,
+                lambda: connector.get_projects_with_stats(
+                    group_name=group_name,
+                    pattern=pattern,
+                    batch_size=batch_size,
+                    max_concurrent=max_concurrent,
+                    rate_limit_delay=rate_limit_delay,
+                    max_commits_per_project=max_commits_per_project,
+                    max_projects=max_projects,
+                    on_project_complete=on_project_complete,
+                ),
             )
-            # Store results incrementally
-            for result in results:
-                await store_result(result)
+
+            assert results_queue is not None
+            await results_queue.join()
+            await results_queue.put(_queue_sentinel)
+            await consumer_task
 
         # Summary
         successful = sum(1 for r in all_results if r.success)
@@ -1161,14 +1989,11 @@ Examples:
         help="Database backend to use (auto-detected from --db if not specified).",
     )
     parser.add_argument(
+        "--since",
         "--start-date",
+        dest="since",
         required=False,
-        help="Start date for filtering commits (YYYY-MM-DD).",
-    )
-    parser.add_argument(
-        "--end-date",
-        required=False,
-        help="End date for filtering commits (YYYY-MM-DD).",
+        help="Start date/time for filtering commits (e.g., 2024-01-01 or 2024-01-01T00:00:00).",
     )
 
     # GitHub connector options
@@ -1199,7 +2024,8 @@ Examples:
 
     # Batch processing options (unified for both GitHub and GitLab)
     parser.add_argument(
-        "-s", "--search-pattern",
+        "-s",
+        "--search-pattern",
         required=False,
         help="fnmatch-style pattern to filter repositories/projects (e.g., 'owner/repo*').",
     )
@@ -1248,11 +2074,18 @@ Examples:
         action="store_true",
         help="Use async processing for batch operations (better performance).",
     )
+    parser.add_argument(
+        "--fetch-blame",
+        action="store_true",
+        help="Fetch blame data (warning: slow and rate-limited)",
+    )
 
     return parser.parse_args()
 
 
-def _determine_mode(args, github_token: str, gitlab_token: str) -> Tuple[bool, bool, bool, bool]:
+def _determine_mode(
+    args, github_token: str, gitlab_token: str
+) -> Tuple[bool, bool, bool, bool]:
     """
     Determine the operating mode based on CLI arguments.
 
@@ -1302,14 +2135,14 @@ def _determine_mode(args, github_token: str, gitlab_token: str) -> Tuple[bool, b
         use_github_batch = bool(github_token and args.search_pattern)
         use_gitlab = bool(gitlab_token and args.gitlab_project_id)
         use_gitlab_batch = bool(gitlab_token and args.search_pattern)
-        
+
         # Check for ambiguity when both tokens are available and --search-pattern is set
         if use_github_batch and use_gitlab_batch:
             raise ValueError(
                 "Ambiguous batch mode: both GitHub and GitLab tokens are available "
                 "and --search-pattern is set. Please specify --connector to disambiguate."
             )
-        
+
         return (use_github, use_github_batch, use_gitlab, use_gitlab_batch)
 
 
@@ -1416,15 +2249,17 @@ async def main() -> None:
         else:
             # Local repository mode
             logging.info("=== Local Repository Mode ===")
-            # TODO: Implement date filtering for commits
-            # start_date = args.start_date
-            # end_date = args.end_date
+            since = _parse_since(args.since)
+            if since:
+                logging.info(f"Filtering commits since {since.isoformat()}")
 
             repo: Repo = Repo(REPO_PATH)
             logging.info(f"Using repository UUID: {repo.id}")
 
             # Ensure the repository is inserted first
             await insert_repo_data(storage, repo)
+
+            commits = list(iter_commits_since(repo, since))
 
             all_files: List[Path] = [
                 Path(REPO_PATH) / f
@@ -1436,14 +2271,24 @@ async def main() -> None:
                 return
             logging.info(f"Found {len(all_files)} files to process.")
 
+            files_for_blame = collect_changed_files(REPO_PATH, commits)
+            if not files_for_blame:
+                logging.info("No files touched in the selected commit range; skipping blame.")
+
             # Process GitFile data first
             await process_git_files(repo, all_files, storage)
 
             # Process other data asynchronously
             await asyncio.gather(
-                process_git_commits(repo, storage),
-                process_git_blame(all_files, storage, repo),
-                process_git_commit_stats(repo, storage),
+                process_git_commits(
+                    repo, storage, commits=commits, since=since
+                ),
+                process_git_blame(files_for_blame, storage, repo)
+                if files_for_blame
+                else asyncio.sleep(0),
+                process_git_commit_stats(
+                    repo, storage, commits=commits, since=since
+                ),
             )
 
 

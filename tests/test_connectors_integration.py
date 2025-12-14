@@ -6,6 +6,8 @@ They can be skipped in CI/CD environments by setting SKIP_INTEGRATION_TESTS=1.
 """
 
 import os
+import socket
+from urllib.parse import urlparse
 
 import pytest
 
@@ -13,6 +15,27 @@ from connectors import GitHubConnector, GitLabConnector
 
 # Skip integration tests if environment variable is set
 skip_integration = os.getenv("SKIP_INTEGRATION_TESTS", "0") == "1"
+
+
+def _can_reach_host(url: str, timeout: float = 1.0) -> bool:
+    """Return True if the host for the given URL is reachable."""
+    parsed_url = urlparse(url)
+    hostname = parsed_url.hostname or url
+    if parsed_url.port:
+        port = parsed_url.port
+    elif parsed_url.scheme == "http":
+        port = 80
+    else:
+        port = 443
+    try:
+        with socket.create_connection((hostname, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+gitlab_url = os.getenv("GITLAB_URL", "https://gitlab.com")
+skip_gitlab_network = not _can_reach_host(gitlab_url)
 
 
 @pytest.mark.skipif(skip_integration, reason="Integration tests disabled")
@@ -114,7 +137,10 @@ class TestGitHubIntegration:
             connector.close()
 
 
-@pytest.mark.skipif(skip_integration, reason="Integration tests disabled")
+@pytest.mark.skipif(
+    skip_integration or skip_gitlab_network,
+    reason="Integration tests disabled or GitLab unreachable",
+)
 class TestGitLabIntegration:
     """Integration tests for GitLab connector with real API calls."""
 

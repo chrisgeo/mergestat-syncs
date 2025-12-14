@@ -5,11 +5,12 @@ from typing import Any, Callable, Dict, List, Optional, Union
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import UpdateOne
 from pymongo.errors import ConfigurationError
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.inspection import inspect
 from sqlalchemy.orm import sessionmaker
 
-from models.git import GitBlame, GitCommit, GitCommitStat, GitFile, Repo
+from models.git import GitBlame, GitCommit, GitCommitStat, GitFile, GitPullRequest, Repo
 
 
 def detect_db_type(conn_string: str) -> str:
@@ -36,7 +37,9 @@ def detect_db_type(conn_string: str) -> str:
         return "postgres"
 
     # SQLite connection strings
-    if conn_lower.startswith("sqlite://") or conn_lower.startswith("sqlite+aiosqlite://"):
+    if conn_lower.startswith("sqlite://") or conn_lower.startswith(
+        "sqlite+aiosqlite://"
+    ):
         return "sqlite"
 
     # Extract scheme for better error reporting
@@ -109,14 +112,12 @@ class SQLAlchemyStore:
 
         # Only add pooling parameters for databases that support them
         if "sqlite" not in conn_string.lower():
-            engine_kwargs.update(
-                {
-                    "pool_size": 20,  # Increased from default 5
-                    "max_overflow": 30,  # Increased from default 10
-                    "pool_pre_ping": True,  # Verify connections before using
-                    "pool_recycle": 3600,  # Recycle connections after 1 hour
-                }
-            )
+            engine_kwargs.update({
+                "pool_size": 20,  # Increased from default 5
+                "max_overflow": 30,  # Increased from default 10
+                "pool_pre_ping": True,  # Verify connections before using
+                "pool_recycle": 3600,  # Recycle connections after 1 hour
+            })
 
         self.engine = create_async_engine(conn_string, **engine_kwargs)
         self.session_factory = sessionmaker(
@@ -126,6 +127,14 @@ class SQLAlchemyStore:
 
     async def __aenter__(self) -> "SQLAlchemyStore":
         self.session = self.session_factory()
+
+        # Create tables for SQLite automatically
+        if "sqlite" in str(self.engine.url):
+            from models.git import Base
+
+            async with self.engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
@@ -138,6 +147,31 @@ class SQLAlchemyStore:
         if not existing_repo:
             self.session.add(repo)
             await self.session.commit()
+
+    async def has_any_git_files(self, repo_id) -> bool:
+        assert self.session is not None
+        result = await self.session.execute(
+            select(func.count()).select_from(GitFile).where(GitFile.repo_id == repo_id)
+        )
+        return (result.scalar() or 0) > 0
+
+    async def has_any_git_commit_stats(self, repo_id) -> bool:
+        assert self.session is not None
+        result = await self.session.execute(
+            select(func.count())
+            .select_from(GitCommitStat)
+            .where(GitCommitStat.repo_id == repo_id)
+        )
+        return (result.scalar() or 0) > 0
+
+    async def has_any_git_blame(self, repo_id) -> bool:
+        assert self.session is not None
+        result = await self.session.execute(
+            select(func.count())
+            .select_from(GitBlame)
+            .where(GitBlame.repo_id == repo_id)
+        )
+        return (result.scalar() or 0) > 0
 
     async def insert_git_file_data(self, file_data: List[GitFile]) -> None:
         if not file_data:
@@ -165,6 +199,13 @@ class SQLAlchemyStore:
             return
         assert self.session is not None
         self.session.add_all(data_batch)
+        await self.session.commit()
+
+    async def insert_git_pull_requests(self, pr_data: List[GitPullRequest]) -> None:
+        if not pr_data:
+            return
+        assert self.session is not None
+        self.session.add_all(pr_data)
         await self.session.commit()
 
 
@@ -205,6 +246,27 @@ class MongoStore:
             {"_id": doc["_id"]}, {"$set": doc}, upsert=True
         )
 
+    async def has_any_git_files(self, repo_id) -> bool:
+        repo_id_val = _serialize_value(repo_id)
+        count = await self.db["git_files"].count_documents(
+            {"repo_id": repo_id_val}, limit=1
+        )
+        return count > 0
+
+    async def has_any_git_commit_stats(self, repo_id) -> bool:
+        repo_id_val = _serialize_value(repo_id)
+        count = await self.db["git_commit_stats"].count_documents(
+            {"repo_id": repo_id_val}, limit=1
+        )
+        return count > 0
+
+    async def has_any_git_blame(self, repo_id) -> bool:
+        repo_id_val = _serialize_value(repo_id)
+        count = await self.db["git_blame"].count_documents(
+            {"repo_id": repo_id_val}, limit=1
+        )
+        return count > 0
+
     async def insert_git_file_data(self, file_data: List[GitFile]) -> None:
         await self._upsert_many(
             "git_files",
@@ -239,6 +301,13 @@ class MongoStore:
                 f"{getattr(obj, 'path')}:"
                 f"{getattr(obj, 'line_no')}"
             ),
+        )
+
+    async def insert_git_pull_requests(self, pr_data: List[GitPullRequest]) -> None:
+        await self._upsert_many(
+            "git_pull_requests",
+            pr_data,
+            lambda obj: f"{getattr(obj, 'repo_id')}:{getattr(obj, 'number')}",
         )
 
     async def _upsert_many(
