@@ -1,9 +1,10 @@
 """Tests for GitBlame functionality including repo instance reuse."""
 
+import logging
 import os
 from unittest.mock import MagicMock, patch
 
-from models import GitBlame, GitBlameMixin
+from models.git import GitBlame, GitBlameMixin
 
 
 class TestGitBlameMixin:
@@ -54,8 +55,8 @@ class TestGitBlameMixin:
             mock_repo.assert_not_called()
 
     def test_fetch_blame_creates_repo_when_none_provided(self, repo_path, repo_uuid):
-        """Test that fetch_blame creates a Repo when none is provided."""
-        with patch("models.Repo") as mock_repo:
+        """Test that fetch_blame creates a GitRepo when none is provided."""
+        with patch("models.git.GitRepo") as mock_repo:
             mock_repo_instance = MagicMock()
             mock_repo_instance.blame.return_value = []
             mock_repo.return_value = mock_repo_instance
@@ -64,27 +65,27 @@ class TestGitBlameMixin:
                 repo_path, os.path.join(repo_path, "README.md"), repo_uuid, repo=None
             )
 
-            # Repo should be instantiated when none is provided
+            # GitRepo should be instantiated when none is provided
             mock_repo.assert_called_once_with(repo_path)
 
     def test_fetch_blame_handles_errors_gracefully(
-        self, repo_path, repo_uuid, git_repo, capsys
+        self, repo_path, repo_uuid, git_repo, caplog
     ):
-        """Test that fetch_blame handles errors and prints message."""
-        # Try to process a non-existent file
-        blame_data = GitBlameMixin.fetch_blame(
-            repo_path,
-            os.path.join(repo_path, "nonexistent_file.xyz"),
-            repo_uuid,
-            repo=git_repo,
-        )
+        """Test that fetch_blame handles errors and logs warning message."""
+        with caplog.at_level(logging.WARNING):
+            # Try to process a non-existent file
+            blame_data = GitBlameMixin.fetch_blame(
+                repo_path,
+                os.path.join(repo_path, "nonexistent_file.xyz"),
+                repo_uuid,
+                repo=git_repo,
+            )
 
-        # Should return empty list on error
-        assert blame_data == []
+            # Should return empty list on error
+            assert blame_data == []
 
-        # Should print error message
-        captured = capsys.readouterr()
-        assert "Error processing" in captured.out
+            # Should log warning message
+            assert "Error processing" in caplog.text
 
 
 class TestGitBlameProcessFile:
@@ -174,7 +175,7 @@ class TestRepoInstanceReuse:
         # Get a few files from the repo
         test_files = [
             os.path.join(repo_path, "README.md"),
-            os.path.join(repo_path, "models.py"),
+            os.path.join(repo_path, "storage.py"),
         ]
 
         # Process each file with the same repo instance
