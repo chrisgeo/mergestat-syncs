@@ -3,15 +3,36 @@ import logging
 import os
 import uuid
 from datetime import datetime, timezone
-from importlib import import_module
 
 from git import Repo as GitRepo
-from sqlalchemy import (JSON, Boolean, Column, DateTime, ForeignKey, Integer,
-                        Text)
+from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Integer, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
+
+
+def get_repo_uuid_from_repo(repo: str) -> uuid.UUID:
+    """Generate a deterministic UUID from a repo identifier string.
+
+    This is used for non-local repositories where we don't have a filesystem
+    path to derive an ID from.
+
+    Priority order:
+    1. REPO_UUID environment variable (if set)
+    2. SHA256(repo identifier)
+    """
+    env_uuid = os.getenv("REPO_UUID")
+    if env_uuid:
+        return uuid.UUID(env_uuid)
+
+    if not repo:
+        raise ValueError("repo identifier is required")
+
+    normalized = repo.strip().lower()
+    hash_obj = hashlib.sha256(normalized.encode("utf-8"))
+    uuid_bytes = hash_obj.digest()[:16]
+    return uuid.UUID(bytes=uuid_bytes)
 
 
 def get_repo_uuid(repo_path: str) -> uuid.UUID:
@@ -87,9 +108,24 @@ class Repo(Base, GitRepo):
         :param repo_path: Path to the git repository (optional).
         :param kwargs: Additional keyword arguments for SQLAlchemy ORM.
         """
-        # Auto-derive UUID from repo_path if not explicitly provided
-        if repo_path and "id" not in kwargs:
-            kwargs["id"] = get_repo_uuid(repo_path)
+        # Auto-derive UUID if not explicitly provided.
+        # This is critical for MongoDB upserts (Repo.id may otherwise be None
+        # until SQLAlchemy flush/commit, causing all upserts to collide).
+        if "id" not in kwargs:
+            if repo_path:
+                kwargs["id"] = get_repo_uuid(repo_path)
+            else:
+                repo_identifier = kwargs.get("repo")
+                if repo_identifier:
+                    try:
+                        kwargs["id"] = get_repo_uuid_from_repo(repo_identifier)
+                    except Exception as e:
+                        logging.warning(
+                            "Could not derive UUID from repo identifier: %s. "
+                            "Generating random UUID.",
+                            e,
+                        )
+                        kwargs["id"] = uuid.uuid4()
 
         super().__init__(**kwargs)  # Initialize SQLAlchemy ORM
         if repo_path:
@@ -132,6 +168,7 @@ class Repo(Base, GitRepo):
     git_commits = relationship("GitCommit", back_populates="repo")
     git_commit_stats = relationship("GitCommitStat", back_populates="repo")
     git_blames = relationship("GitBlame", back_populates="repo")
+    git_pull_requests = relationship("GitPullRequest", back_populates="repo")
 
 
 class GitRef(Base):
@@ -290,29 +327,26 @@ class GitBlameMixin:
         """
         blame_data = []
         if repo is None:
-            repo_cls = import_module("models").Repo
-            repo = repo_cls(repo_path)
+            repo = GitRepo(repo_path)
         rel_path = os.path.relpath(filepath, repo_path)
         try:
             blame_info = repo.blame("HEAD", rel_path)
             line_no = 1
             for commit, lines in blame_info:
                 for line in lines:
-                    blame_data.append(
-                        (
-                            repo_uuid,
-                            commit.author.email,
-                            commit.author.name,
-                            commit.committed_datetime,
-                            commit.hexsha,
-                            line_no,
-                            line.rstrip("\n"),
-                            rel_path,
-                        )
-                    )
+                    blame_data.append((
+                        repo_uuid,
+                        commit.author.email,
+                        commit.author.name,
+                        commit.committed_datetime,
+                        commit.hexsha,
+                        line_no,
+                        line.rstrip("\n"),
+                        rel_path,
+                    ))
                     line_no += 1
         except Exception as e:
-            print(f"Error processing {rel_path}: {e}")
+            logging.warning(f"Error processing {rel_path}: {e}")
         return blame_data
 
 
@@ -375,3 +409,42 @@ class GitBlame(Base, GitBlameMixin):
             )
             for row in blame_data
         ]
+
+
+class GitPullRequest(Base):
+    __tablename__ = "git_pull_requests"
+    repo_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("repos.id", ondelete="CASCADE"),
+        primary_key=True,
+        comment="foreign key for public.repos.id",
+    )
+    number = Column(Integer, primary_key=True, comment="pull request number")
+    title = Column(Text, comment="title of the pull request")
+    state = Column(Text, comment="state of the pull request (open, closed, merged)")
+    author_name = Column(Text, comment="username of the author")
+    author_email = Column(Text, comment="email of the author (if available)")
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        comment="timestamp when PR was created",
+    )
+    merged_at = Column(
+        DateTime(timezone=True),
+        comment="timestamp when PR was merged",
+    )
+    closed_at = Column(
+        DateTime(timezone=True),
+        comment="timestamp when PR was closed",
+    )
+    head_branch = Column(Text, comment="name of the head branch")
+    base_branch = Column(Text, comment="name of the base branch")
+    _mergestat_synced_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        comment="timestamp when record was synced into the MergeStat database",
+    )
+
+    # Relationships
+    repo = relationship("Repo", back_populates="git_pull_requests")

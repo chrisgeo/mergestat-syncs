@@ -17,11 +17,22 @@ from typing import Callable, List, Optional
 import gitlab
 from gitlab.exceptions import GitlabAuthenticationError, GitlabError
 
-from connectors.exceptions import (APIException, AuthenticationException,
-                                   RateLimitException)
-from connectors.models import (Author, BlameRange, CommitStats, FileBlame,
-                               Organization, PullRequest, Repository,
-                               RepoStats)
+from connectors.base import BatchResult, GitConnector
+from connectors.exceptions import (
+    APIException,
+    AuthenticationException,
+    RateLimitException,
+)
+from connectors.models import (
+    Author,
+    BlameRange,
+    CommitStats,
+    FileBlame,
+    Organization,
+    PullRequest,
+    Repository,
+    RepoStats,
+)
 from connectors.utils import GitLabRESTClient, retry_with_backoff
 
 logger = logging.getLogger(__name__)
@@ -53,7 +64,7 @@ def match_project_pattern(full_name: str, pattern: str) -> bool:
     return fnmatch.fnmatch(full_name.lower(), pattern.lower())
 
 
-class GitLabConnector:
+class GitLabConnector(GitConnector):
     """
     Production-grade GitLab connector using python-gitlab and REST API.
 
@@ -76,10 +87,9 @@ class GitLabConnector:
         :param per_page: Number of items per page for pagination.
         :param max_workers: Maximum concurrent workers for operations.
         """
+        super().__init__(per_page=per_page, max_workers=max_workers)
         self.url = url
         self.private_token = private_token
-        self.per_page = per_page
-        self.max_workers = max_workers
 
         # Initialize python-gitlab client
         self.gitlab = gitlab.Gitlab(url=url, private_token=private_token)
@@ -172,16 +182,19 @@ class GitLabConnector:
         self,
         group_id: Optional[int] = None,
         group_name: Optional[str] = None,
+        user_name: Optional[str] = None,
         search: Optional[str] = None,
         pattern: Optional[str] = None,
         max_projects: Optional[int] = None,
     ) -> List[Repository]:
         """
-        List projects for a group or all accessible projects.
+        List projects for a group, user, or all accessible projects.
 
         :param group_id: Optional group ID. If provided, lists group projects.
         :param group_name: Optional group name/path. If provided, lists group projects.
                           Takes precedence over group_id if both are provided.
+        :param user_name: Optional username. If provided, lists that user's projects.
+                         group_name takes precedence over user_name if both are provided.
         :param search: Optional search query to filter projects by name.
         :param pattern: Optional fnmatch-style pattern to filter projects by full name
                        (e.g., 'group/p*', '*/api-*'). Pattern matching is performed
@@ -192,6 +205,7 @@ class GitLabConnector:
         Examples:
             - pattern='group/p*' matches 'group/project'
             - pattern='*/sync*' matches 'anygroup/sync-tool'
+            - user_name='johndoe' fetches johndoe's projects
         """
         try:
             projects = []
@@ -207,6 +221,15 @@ class GitLabConnector:
                 group_identifier = group_name if group_name else group_id
                 group = self.gitlab.groups.get(group_identifier)
                 gl_projects = group.projects.list(**list_params)
+            elif user_name:
+                # Get user's projects
+                users = self.gitlab.users.list(username=user_name)
+                if not users:
+                    logger.warning(f"User '{user_name}' not found")
+                    return []
+                user = users[0]
+                gl_projects = user.projects.list(**list_params)
+                logger.info(f"Fetching projects for user '{user_name}'")
             else:
                 # List all accessible projects
                 gl_projects = self.gitlab.projects.list(**list_params)
@@ -288,7 +311,7 @@ class GitLabConnector:
         initial_delay=1.0,
         exceptions=(RateLimitException, APIException),
     )
-    def get_contributors(
+    def get_contributors_by_project(
         self,
         project_id: Optional[int] = None,
         project_name: Optional[str] = None,
@@ -343,7 +366,7 @@ class GitLabConnector:
         initial_delay=1.0,
         exceptions=(RateLimitException, APIException),
     )
-    def get_commit_stats(
+    def get_commit_stats_by_project(
         self,
         project_id: Optional[int] = None,
         project_name: Optional[str] = None,
@@ -384,7 +407,7 @@ class GitLabConnector:
         initial_delay=1.0,
         exceptions=(RateLimitException, APIException),
     )
-    def get_repo_stats(
+    def get_repo_stats_by_project(
         self,
         project_id: Optional[int] = None,
         project_name: Optional[str] = None,
@@ -600,12 +623,12 @@ class GitLabConnector:
         initial_delay=1.0,
         exceptions=(RateLimitException, APIException),
     )
-    def get_file_blame(
+    def get_file_blame_by_project(
         self,
         file_path: str,
         project_id: Optional[int] = None,
         project_name: Optional[str] = None,
-        ref: str = "main",
+        ref: str = "HEAD",
     ) -> FileBlame:
         """
         Get blame information for a file using GitLab REST API.
@@ -687,21 +710,53 @@ class GitLabConnector:
         self,
         group_id: Optional[int] = None,
         group_name: Optional[str] = None,
+        user_name: Optional[str] = None,
         pattern: Optional[str] = None,
         max_projects: Optional[int] = None,
     ) -> List[Repository]:
         """
         Get projects for batch processing, optionally filtered by pattern.
 
+        If neither group_id, group_name, nor user_name is provided but pattern contains
+        an owner (e.g., 'mygroup/*' or 'username/*'), the owner is extracted from the
+        pattern. First attempts to find a group, then falls back to user.
+
         :param group_id: Optional group ID.
         :param group_name: Optional group name/path.
+        :param user_name: Optional username.
         :param pattern: Optional fnmatch-style pattern.
         :param max_projects: Maximum number of projects to retrieve.
         :return: List of Repository objects.
         """
+        # Extract owner from pattern if not explicitly provided
+        effective_group_name = group_name
+        effective_user_name = user_name
+
+        if not group_id and not group_name and not user_name and pattern:
+            # Check if pattern has a specific owner prefix (e.g., 'mygroup/*' or 'username/*')
+            if "/" in pattern:
+                parts = pattern.split("/", 1)
+                owner_part = parts[0]
+                # Only use as owner if it's not a wildcard
+                if owner_part and "*" not in owner_part and "?" not in owner_part:
+                    # Try as group first, then fall back to user
+                    try:
+                        self.gitlab.groups.get(owner_part)
+                        effective_group_name = owner_part
+                        logger.info(
+                            f"Extracted group '{owner_part}' from pattern '{pattern}'"
+                        )
+                    except Exception:
+                        # Not a group, try as user
+                        effective_user_name = owner_part
+                        logger.info(
+                            f"Extracted user '{owner_part}' from pattern '{pattern}'"
+                        )
+
         return self.list_projects(
             group_id=group_id,
-            group_name=group_name,
+            group_name=effective_group_name,
+            user_name=effective_user_name,
             pattern=pattern,
             max_projects=max_projects,
         )
@@ -719,7 +774,7 @@ class GitLabConnector:
         :return: GitLabBatchResult containing project and stats.
         """
         try:
-            stats = self.get_repo_stats(
+            stats = self.get_repo_stats_by_project(
                 project_name=project.full_name,
                 max_commits=max_commits,
             )
@@ -742,6 +797,7 @@ class GitLabConnector:
         self,
         group_id: Optional[int] = None,
         group_name: Optional[str] = None,
+        user_name: Optional[str] = None,
         pattern: Optional[str] = None,
         batch_size: int = 10,
         max_concurrent: int = 4,
@@ -753,12 +809,13 @@ class GitLabConnector:
         """
         Get projects and their stats with batch processing and rate limiting.
 
-        This method retrieves projects from a group or all accessible projects,
+        This method retrieves projects from a group, user, or all accessible projects,
         optionally filtering by pattern, and collects statistics for each
         project with configurable batch processing and rate limiting.
 
         :param group_id: Optional group ID to fetch projects from.
         :param group_name: Optional group name/path to fetch projects from.
+        :param user_name: Optional username to fetch projects from.
         :param pattern: Optional fnmatch-style pattern to filter projects (e.g., 'group/p*').
         :param batch_size: Number of projects to process in each batch.
         :param max_concurrent: Maximum number of concurrent workers for processing.
@@ -784,6 +841,7 @@ class GitLabConnector:
         projects = self._get_projects_for_processing(
             group_id=group_id,
             group_name=group_name,
+            user_name=user_name,
             pattern=pattern,
             max_projects=max_projects,
         )
@@ -840,6 +898,7 @@ class GitLabConnector:
         self,
         group_id: Optional[int] = None,
         group_name: Optional[str] = None,
+        user_name: Optional[str] = None,
         pattern: Optional[str] = None,
         batch_size: int = 10,
         max_concurrent: int = 4,
@@ -851,12 +910,13 @@ class GitLabConnector:
         """
         Async version of get_projects_with_stats for better concurrent processing.
 
-        This method retrieves projects from a group or all accessible projects,
+        This method retrieves projects from a group, user, or all accessible projects,
         optionally filtering by pattern, and collects statistics for each
         project with configurable async batch processing and rate limiting.
 
         :param group_id: Optional group ID to fetch projects from.
         :param group_name: Optional group name/path to fetch projects from.
+        :param user_name: Optional username to fetch projects from.
         :param pattern: Optional fnmatch-style pattern to filter projects (e.g., 'group/p*').
         :param batch_size: Number of projects to process in each batch.
         :param max_concurrent: Maximum number of concurrent workers for processing.
@@ -888,6 +948,7 @@ class GitLabConnector:
             lambda: self._get_projects_for_processing(
                 group_id=group_id,
                 group_name=group_name,
+                user_name=user_name,
                 pattern=pattern,
                 max_projects=max_projects,
             ),
@@ -923,21 +984,24 @@ class GitLabConnector:
                 f"projects {batch_start + 1}-{batch_end} of {len(projects)}"
             )
 
-            # Process batch concurrently
-            batch_results = await asyncio.gather(
-                *[process_project_async(project) for project in batch],
-                return_exceptions=True,
-            )
+            # Process batch concurrently and consume results as they complete.
+            tasks = [
+                asyncio.create_task(process_project_async(project)) for project in batch
+            ]
+            for fut in asyncio.as_completed(tasks):
+                try:
+                    result = await fut
+                except Exception as e:
+                    logger.error(f"Unexpected error in async batch processing: {e}")
+                    continue
 
-            for result in batch_results:
-                if isinstance(result, Exception):
-                    logger.error(f"Unexpected error in async batch processing: {result}")
-                else:
-                    results.append(result)
+                results.append(result)
 
             # Rate limiting delay between batches
             if batch_end < len(projects) and rate_limit_delay > 0:
-                logger.debug(f"Rate limiting: waiting {rate_limit_delay}s before next batch")
+                logger.debug(
+                    f"Rate limiting: waiting {rate_limit_delay}s before next batch"
+                )
                 await asyncio.sleep(rate_limit_delay)
 
         logger.info(
@@ -945,6 +1009,284 @@ class GitLabConnector:
             f"{sum(1 for r in results if r.success)} successful"
         )
         return results
+
+    # =========================================================================
+    # Base class interface implementations (adapters for GitLab-style methods)
+    # =========================================================================
+
+    def list_organizations(
+        self,
+        max_orgs: Optional[int] = None,
+    ) -> List[Organization]:
+        """
+        List organizations (GitLab groups) accessible to the authenticated user.
+
+        This is an adapter method that maps to list_groups for base class compatibility.
+
+        :param max_orgs: Maximum number of organizations to retrieve.
+        :return: List of Organization objects.
+        """
+        return self.list_groups(max_groups=max_orgs)
+
+    def list_repositories(
+        self,
+        org_name: Optional[str] = None,
+        user_name: Optional[str] = None,
+        search: Optional[str] = None,
+        pattern: Optional[str] = None,
+        max_repos: Optional[int] = None,
+    ) -> List[Repository]:
+        """
+        List repositories (GitLab projects) for a group or search query.
+
+        This is an adapter method that maps to list_projects for base class compatibility.
+
+        :param org_name: Optional organization/group name.
+        :param user_name: Optional user name (mapped to group search).
+        :param search: Optional search query.
+        :param pattern: Optional fnmatch-style pattern.
+        :param max_repos: Maximum number of repositories to retrieve.
+        :return: List of Repository objects.
+        """
+        return self.list_projects(
+            group_name=org_name or user_name,
+            search=search,
+            pattern=pattern,
+            max_projects=max_repos,
+        )
+
+    def get_contributors(
+        self,
+        owner: str,
+        repo: str,
+        max_contributors: Optional[int] = None,
+    ) -> List[Author]:
+        """
+        Get contributors for a repository using owner/repo style parameters.
+
+        This is an adapter method that maps to get_contributors_by_project.
+
+        :param owner: Repository owner (group name).
+        :param repo: Repository name (project name).
+        :param max_contributors: Maximum number of contributors to retrieve.
+        :return: List of Author objects.
+        """
+        project_name = f"{owner}/{repo}"
+        return self.get_contributors_by_project(
+            project_name=project_name, max_contributors=max_contributors
+        )
+
+    def get_commit_stats(
+        self,
+        owner: str,
+        repo: str,
+        sha: str,
+    ) -> CommitStats:
+        """
+        Get statistics for a specific commit using owner/repo style parameters.
+
+        This is an adapter method that maps to get_commit_stats_by_project.
+
+        :param owner: Repository owner (group name).
+        :param repo: Repository name (project name).
+        :param sha: Commit SHA.
+        :return: CommitStats object.
+        """
+        project_name = f"{owner}/{repo}"
+        return self.get_commit_stats_by_project(project_name=project_name, sha=sha)
+
+    def get_repo_stats(
+        self,
+        owner: str,
+        repo: str,
+        max_commits: Optional[int] = None,
+    ) -> RepoStats:
+        """
+        Get aggregated statistics for a repository using owner/repo style parameters.
+
+        This is an adapter method that maps to get_repo_stats_by_project.
+
+        :param owner: Repository owner (group name).
+        :param repo: Repository name (project name).
+        :param max_commits: Maximum number of commits to analyze.
+        :return: RepoStats object.
+        """
+        project_name = f"{owner}/{repo}"
+        return self.get_repo_stats_by_project(
+            project_name=project_name, max_commits=max_commits
+        )
+
+    def get_pull_requests(
+        self,
+        owner: str,
+        repo: str,
+        state: str = "all",
+        max_prs: Optional[int] = None,
+    ) -> List[PullRequest]:
+        """
+        Get pull requests (merge requests) for a repository.
+
+        This is an adapter method that maps to get_merge_requests for base class.
+
+        :param owner: Repository owner (group name).
+        :param repo: Repository name (project name).
+        :param state: State filter ('open', 'closed', 'all').
+        :param max_prs: Maximum number of pull requests to retrieve.
+        :return: List of PullRequest objects.
+        """
+        project_name = f"{owner}/{repo}"
+        return self.get_merge_requests(
+            project_name=project_name, state=state, max_mrs=max_prs
+        )
+
+    def get_file_blame(
+        self,
+        owner: str,
+        repo: str,
+        path: str,
+        ref: str = "HEAD",
+    ) -> FileBlame:
+        """
+        Get blame information for a file using owner/repo style parameters.
+
+        This is an adapter method for base class compatibility.
+
+        :param owner: Repository owner (group name).
+        :param repo: Repository name (project name).
+        :param path: File path within the repository.
+        :param ref: Git reference (branch, tag, or commit SHA).
+        :return: FileBlame object.
+        """
+        project_name = f"{owner}/{repo}"
+        return self.get_file_blame_by_project(
+            project_name=project_name, file_path=path, ref=ref
+        )
+
+    def get_repos_with_stats(
+        self,
+        org_name: Optional[str] = None,
+        user_name: Optional[str] = None,
+        pattern: Optional[str] = None,
+        batch_size: int = 10,
+        max_concurrent: int = 4,
+        rate_limit_delay: float = 1.0,
+        max_commits_per_repo: Optional[int] = None,
+        max_repos: Optional[int] = None,
+        on_repo_complete: Optional[Callable[[BatchResult], None]] = None,
+    ) -> List[BatchResult]:
+        """
+        Get repositories and their stats with batch processing.
+
+        This is an adapter method that maps to get_projects_with_stats for base class.
+
+        :param org_name: Optional organization/group name.
+        :param user_name: Optional user name (now properly mapped to user, not group).
+        :param pattern: Optional fnmatch-style pattern to filter repos.
+        :param batch_size: Number of repos to process in each batch.
+        :param max_concurrent: Maximum concurrent workers for processing.
+        :param rate_limit_delay: Delay in seconds between batches.
+        :param max_commits_per_repo: Maximum commits to analyze per repository.
+        :param max_repos: Maximum number of repositories to process.
+        :param on_repo_complete: Callback function called after each repo.
+        :return: List of BatchResult objects.
+        """
+
+        # Map the callback to use BatchResult instead of GitLabBatchResult
+        def wrapped_callback(gitlab_result: GitLabBatchResult) -> None:
+            if on_repo_complete:
+                batch_result = BatchResult(
+                    repository=gitlab_result.project,
+                    stats=gitlab_result.stats,
+                    error=gitlab_result.error,
+                    success=gitlab_result.success,
+                )
+                on_repo_complete(batch_result)
+
+        gitlab_results = self.get_projects_with_stats(
+            group_name=org_name,
+            user_name=user_name,
+            pattern=pattern,
+            batch_size=batch_size,
+            max_concurrent=max_concurrent,
+            rate_limit_delay=rate_limit_delay,
+            max_commits_per_project=max_commits_per_repo,
+            max_projects=max_repos,
+            on_project_complete=wrapped_callback if on_repo_complete else None,
+        )
+
+        # Convert GitLabBatchResult to BatchResult
+        return [
+            BatchResult(
+                repository=r.project,
+                stats=r.stats,
+                error=r.error,
+                success=r.success,
+            )
+            for r in gitlab_results
+        ]
+
+    async def get_repos_with_stats_async(
+        self,
+        org_name: Optional[str] = None,
+        user_name: Optional[str] = None,
+        pattern: Optional[str] = None,
+        batch_size: int = 10,
+        max_concurrent: int = 4,
+        rate_limit_delay: float = 1.0,
+        max_commits_per_repo: Optional[int] = None,
+        max_repos: Optional[int] = None,
+        on_repo_complete: Optional[Callable[[BatchResult], None]] = None,
+    ) -> List[BatchResult]:
+        """
+        Async version of get_repos_with_stats.
+
+        This is an adapter method that maps to get_projects_with_stats_async.
+
+        :param org_name: Optional organization/group name.
+        :param user_name: Optional user name (now properly mapped to user, not group).
+        :param pattern: Optional fnmatch-style pattern to filter repos.
+        :param batch_size: Number of repos to process in each batch.
+        :param max_concurrent: Maximum concurrent workers for processing.
+        :param rate_limit_delay: Delay in seconds between batches.
+        :param max_commits_per_repo: Maximum commits to analyze per repository.
+        :param max_repos: Maximum number of repositories to process.
+        :param on_repo_complete: Callback function called after each repo.
+        :return: List of BatchResult objects.
+        """
+
+        # Map the callback to use BatchResult instead of GitLabBatchResult
+        def wrapped_callback(gitlab_result: GitLabBatchResult) -> None:
+            if on_repo_complete:
+                batch_result = BatchResult(
+                    repository=gitlab_result.project,
+                    stats=gitlab_result.stats,
+                    error=gitlab_result.error,
+                    success=gitlab_result.success,
+                )
+                on_repo_complete(batch_result)
+
+        gitlab_results = await self.get_projects_with_stats_async(
+            group_name=org_name,
+            user_name=user_name,
+            pattern=pattern,
+            batch_size=batch_size,
+            max_concurrent=max_concurrent,
+            rate_limit_delay=rate_limit_delay,
+            max_commits_per_project=max_commits_per_repo,
+            max_projects=max_repos,
+            on_project_complete=wrapped_callback if on_repo_complete else None,
+        )
+
+        # Convert GitLabBatchResult to BatchResult
+        return [
+            BatchResult(
+                repository=r.project,
+                stats=r.stats,
+                error=r.error,
+                success=r.success,
+            )
+            for r in gitlab_results
+        ]
 
     def close(self) -> None:
         """Close the connector and cleanup resources."""

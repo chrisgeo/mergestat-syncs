@@ -1,15 +1,93 @@
 import uuid
 from collections.abc import Iterable
-from typing import Any, Callable, Dict, List, Optional
+from datetime import datetime, timezone
+from typing import Any, Callable, Dict, List, Optional, Union
 
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import UpdateOne
 from pymongo.errors import ConfigurationError
+from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.inspection import inspect
 from sqlalchemy.orm import sessionmaker
 
-from models.git import GitBlame, GitCommit, GitCommitStat, GitFile, Repo
+from models.git import GitBlame, GitCommit, GitCommitStat, GitFile, GitPullRequest, Repo
+
+
+def detect_db_type(conn_string: str) -> str:
+    """
+    Detect database type from connection string.
+
+    :param conn_string: Database connection string.
+    :return: Database type ('postgres', 'sqlite', or 'mongo').
+    :raises ValueError: If database type cannot be determined.
+    """
+    if not conn_string:
+        raise ValueError("Connection string is required")
+
+    conn_lower = conn_string.lower()
+
+    # MongoDB connection strings
+    if conn_lower.startswith("mongodb://") or conn_lower.startswith("mongodb+srv://"):
+        return "mongo"
+
+    # PostgreSQL connection strings
+    if conn_lower.startswith("postgresql://") or conn_lower.startswith("postgres://"):
+        return "postgres"
+    if conn_lower.startswith("postgresql+asyncpg://"):
+        return "postgres"
+
+    # SQLite connection strings
+    if conn_lower.startswith("sqlite://") or conn_lower.startswith(
+        "sqlite+aiosqlite://"
+    ):
+        return "sqlite"
+
+    # Extract scheme for better error reporting
+    scheme = conn_string.split("://", 1)[0] if "://" in conn_string else "unknown"
+    raise ValueError(
+        f"Could not detect database type from connection string. "
+        f"Supported: mongodb://, postgresql://, postgres://, sqlite://, "
+        f"or variations with async drivers. Got scheme: '{scheme}', "
+        f"connection string (first 100 chars): {conn_string[:100]}..."
+    )
+
+
+def create_store(
+    conn_string: str,
+    db_type: Optional[str] = None,
+    db_name: Optional[str] = None,
+    echo: bool = False,
+) -> Union["SQLAlchemyStore", "MongoStore"]:
+    """
+    Create a storage backend based on the connection string.
+
+    This factory function automatically detects the database type from the
+    connection string and returns the appropriate store implementation.
+
+    :param conn_string: Database connection string.
+    :param db_type: Optional explicit database type ('postgres', 'sqlite', 'mongo').
+                   If not provided, it will be auto-detected from conn_string.
+    :param db_name: Optional database name (for MongoDB).
+    :param echo: Whether to echo SQL statements (for SQLAlchemy).
+    :return: Appropriate store instance (SQLAlchemyStore or MongoStore).
+    """
+    if db_type is None:
+        db_type = detect_db_type(conn_string)
+
+    db_type = db_type.lower()
+
+    if db_type == "mongo":
+        return MongoStore(conn_string, db_name=db_name)
+    elif db_type in ("postgres", "postgresql", "sqlite"):
+        return SQLAlchemyStore(conn_string, echo=echo)
+    else:
+        raise ValueError(
+            f"Unsupported database type: {db_type}. "
+            f"Supported types: postgres, sqlite, mongo"
+        )
 
 
 def _serialize_value(value: Any) -> Any:
@@ -37,14 +115,12 @@ class SQLAlchemyStore:
 
         # Only add pooling parameters for databases that support them
         if "sqlite" not in conn_string.lower():
-            engine_kwargs.update(
-                {
-                    "pool_size": 20,  # Increased from default 5
-                    "max_overflow": 30,  # Increased from default 10
-                    "pool_pre_ping": True,  # Verify connections before using
-                    "pool_recycle": 3600,  # Recycle connections after 1 hour
-                }
-            )
+            engine_kwargs.update({
+                "pool_size": 20,  # Increased from default 5
+                "max_overflow": 30,  # Increased from default 10
+                "pool_pre_ping": True,  # Verify connections before using
+                "pool_recycle": 3600,  # Recycle connections after 1 hour
+            })
 
         self.engine = create_async_engine(conn_string, **engine_kwargs)
         self.session_factory = sessionmaker(
@@ -52,8 +128,43 @@ class SQLAlchemyStore:
         )
         self.session: Optional[AsyncSession] = None
 
+    def _insert_for_dialect(self, model: Any):
+        dialect = self.engine.dialect.name
+        if dialect == "sqlite":
+            return sqlite_insert(model)
+        if dialect in ("postgres", "postgresql"):
+            return pg_insert(model)
+        raise ValueError(f"Unsupported SQL dialect for upserts: {dialect}")
+
+    async def _upsert_many(
+        self,
+        model: Any,
+        rows: List[Dict[str, Any]],
+        conflict_columns: List[str],
+        update_columns: List[str],
+    ) -> None:
+        if not rows:
+            return
+        assert self.session is not None
+
+        stmt = self._insert_for_dialect(model)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[getattr(model, col) for col in conflict_columns],
+            set_={col: getattr(stmt.excluded, col) for col in update_columns},
+        )
+        await self.session.execute(stmt, rows)
+        await self.session.commit()
+
     async def __aenter__(self) -> "SQLAlchemyStore":
         self.session = self.session_factory()
+
+        # Create tables for SQLite automatically
+        if "sqlite" in str(self.engine.url):
+            from models.git import Base
+
+            async with self.engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
@@ -67,33 +178,273 @@ class SQLAlchemyStore:
             self.session.add(repo)
             await self.session.commit()
 
+    async def has_any_git_files(self, repo_id) -> bool:
+        assert self.session is not None
+        result = await self.session.execute(
+            select(func.count()).select_from(GitFile).where(GitFile.repo_id == repo_id)
+        )
+        return (result.scalar() or 0) > 0
+
+    async def has_any_git_commit_stats(self, repo_id) -> bool:
+        assert self.session is not None
+        result = await self.session.execute(
+            select(func.count())
+            .select_from(GitCommitStat)
+            .where(GitCommitStat.repo_id == repo_id)
+        )
+        return (result.scalar() or 0) > 0
+
+    async def has_any_git_blame(self, repo_id) -> bool:
+        assert self.session is not None
+        result = await self.session.execute(
+            select(func.count())
+            .select_from(GitBlame)
+            .where(GitBlame.repo_id == repo_id)
+        )
+        return (result.scalar() or 0) > 0
+
     async def insert_git_file_data(self, file_data: List[GitFile]) -> None:
         if not file_data:
             return
-        assert self.session is not None
-        self.session.add_all(file_data)
-        await self.session.commit()
+        synced_at_default = datetime.now(timezone.utc)
+        rows: List[Dict[str, Any]] = []
+        for item in file_data:
+            if isinstance(item, dict):
+                row = {
+                    "repo_id": item.get("repo_id"),
+                    "path": item.get("path"),
+                    "executable": item.get("executable"),
+                    "contents": item.get("contents"),
+                    "_mergestat_synced_at": item.get("_mergestat_synced_at")
+                    or synced_at_default,
+                }
+            else:
+                row = {
+                    "repo_id": getattr(item, "repo_id"),
+                    "path": getattr(item, "path"),
+                    "executable": getattr(item, "executable"),
+                    "contents": getattr(item, "contents"),
+                    "_mergestat_synced_at": getattr(item, "_mergestat_synced_at", None)
+                    or synced_at_default,
+                }
+            rows.append(row)
+
+        await self._upsert_many(
+            GitFile,
+            rows,
+            conflict_columns=["repo_id", "path"],
+            update_columns=["executable", "contents", "_mergestat_synced_at"],
+        )
 
     async def insert_git_commit_data(self, commit_data: List[GitCommit]) -> None:
         if not commit_data:
             return
-        assert self.session is not None
-        self.session.add_all(commit_data)
-        await self.session.commit()
+        synced_at_default = datetime.now(timezone.utc)
+        rows: List[Dict[str, Any]] = []
+        for item in commit_data:
+            if isinstance(item, dict):
+                row = {
+                    "repo_id": item.get("repo_id"),
+                    "hash": item.get("hash"),
+                    "message": item.get("message"),
+                    "author_name": item.get("author_name"),
+                    "author_email": item.get("author_email"),
+                    "author_when": item.get("author_when"),
+                    "committer_name": item.get("committer_name"),
+                    "committer_email": item.get("committer_email"),
+                    "committer_when": item.get("committer_when"),
+                    "parents": item.get("parents"),
+                    "_mergestat_synced_at": item.get("_mergestat_synced_at")
+                    or synced_at_default,
+                }
+            else:
+                row = {
+                    "repo_id": getattr(item, "repo_id"),
+                    "hash": getattr(item, "hash"),
+                    "message": getattr(item, "message"),
+                    "author_name": getattr(item, "author_name"),
+                    "author_email": getattr(item, "author_email"),
+                    "author_when": getattr(item, "author_when"),
+                    "committer_name": getattr(item, "committer_name"),
+                    "committer_email": getattr(item, "committer_email"),
+                    "committer_when": getattr(item, "committer_when"),
+                    "parents": getattr(item, "parents"),
+                    "_mergestat_synced_at": getattr(item, "_mergestat_synced_at", None)
+                    or synced_at_default,
+                }
+            rows.append(row)
+
+        await self._upsert_many(
+            GitCommit,
+            rows,
+            conflict_columns=["repo_id", "hash"],
+            update_columns=[
+                "message",
+                "author_name",
+                "author_email",
+                "author_when",
+                "committer_name",
+                "committer_email",
+                "committer_when",
+                "parents",
+                "_mergestat_synced_at",
+            ],
+        )
 
     async def insert_git_commit_stats(self, commit_stats: List[GitCommitStat]) -> None:
         if not commit_stats:
             return
-        assert self.session is not None
-        self.session.add_all(commit_stats)
-        await self.session.commit()
+        synced_at_default = datetime.now(timezone.utc)
+        rows: List[Dict[str, Any]] = []
+        for item in commit_stats:
+            if isinstance(item, dict):
+                old_mode = item.get("old_file_mode") or "unknown"
+                new_mode = item.get("new_file_mode") or "unknown"
+                row = {
+                    "repo_id": item.get("repo_id"),
+                    "commit_hash": item.get("commit_hash"),
+                    "file_path": item.get("file_path"),
+                    "additions": item.get("additions"),
+                    "deletions": item.get("deletions"),
+                    "old_file_mode": old_mode,
+                    "new_file_mode": new_mode,
+                    "_mergestat_synced_at": item.get("_mergestat_synced_at")
+                    or synced_at_default,
+                }
+            else:
+                old_mode = getattr(item, "old_file_mode", None) or "unknown"
+                new_mode = getattr(item, "new_file_mode", None) or "unknown"
+                row = {
+                    "repo_id": getattr(item, "repo_id"),
+                    "commit_hash": getattr(item, "commit_hash"),
+                    "file_path": getattr(item, "file_path"),
+                    "additions": getattr(item, "additions"),
+                    "deletions": getattr(item, "deletions"),
+                    "old_file_mode": old_mode,
+                    "new_file_mode": new_mode,
+                    "_mergestat_synced_at": getattr(item, "_mergestat_synced_at", None)
+                    or synced_at_default,
+                }
+            rows.append(row)
+
+        await self._upsert_many(
+            GitCommitStat,
+            rows,
+            conflict_columns=["repo_id", "commit_hash", "file_path"],
+            update_columns=[
+                "additions",
+                "deletions",
+                "old_file_mode",
+                "new_file_mode",
+                "_mergestat_synced_at",
+            ],
+        )
 
     async def insert_blame_data(self, data_batch: List[GitBlame]) -> None:
         if not data_batch:
             return
-        assert self.session is not None
-        self.session.add_all(data_batch)
-        await self.session.commit()
+        synced_at_default = datetime.now(timezone.utc)
+        rows: List[Dict[str, Any]] = []
+        for item in data_batch:
+            if isinstance(item, dict):
+                row = {
+                    "repo_id": item.get("repo_id"),
+                    "path": item.get("path"),
+                    "line_no": item.get("line_no"),
+                    "author_email": item.get("author_email"),
+                    "author_name": item.get("author_name"),
+                    "author_when": item.get("author_when"),
+                    "commit_hash": item.get("commit_hash"),
+                    "line": item.get("line"),
+                    "_mergestat_synced_at": item.get("_mergestat_synced_at")
+                    or synced_at_default,
+                }
+            else:
+                row = {
+                    "repo_id": getattr(item, "repo_id"),
+                    "path": getattr(item, "path"),
+                    "line_no": getattr(item, "line_no"),
+                    "author_email": getattr(item, "author_email"),
+                    "author_name": getattr(item, "author_name"),
+                    "author_when": getattr(item, "author_when"),
+                    "commit_hash": getattr(item, "commit_hash"),
+                    "line": getattr(item, "line"),
+                    "_mergestat_synced_at": getattr(item, "_mergestat_synced_at", None)
+                    or synced_at_default,
+                }
+            rows.append(row)
+
+        await self._upsert_many(
+            GitBlame,
+            rows,
+            conflict_columns=["repo_id", "path", "line_no"],
+            update_columns=[
+                "author_email",
+                "author_name",
+                "author_when",
+                "commit_hash",
+                "line",
+                "_mergestat_synced_at",
+            ],
+        )
+
+    async def insert_git_pull_requests(self, pr_data: List[GitPullRequest]) -> None:
+        if not pr_data:
+            return
+        synced_at_default = datetime.now(timezone.utc)
+        rows: List[Dict[str, Any]] = []
+        for item in pr_data:
+            if isinstance(item, dict):
+                row = {
+                    "repo_id": item.get("repo_id"),
+                    "number": item.get("number"),
+                    "title": item.get("title"),
+                    "state": item.get("state"),
+                    "author_name": item.get("author_name"),
+                    "author_email": item.get("author_email"),
+                    "created_at": item.get("created_at"),
+                    "merged_at": item.get("merged_at"),
+                    "closed_at": item.get("closed_at"),
+                    "head_branch": item.get("head_branch"),
+                    "base_branch": item.get("base_branch"),
+                    "_mergestat_synced_at": item.get("_mergestat_synced_at")
+                    or synced_at_default,
+                }
+            else:
+                row = {
+                    "repo_id": getattr(item, "repo_id"),
+                    "number": getattr(item, "number"),
+                    "title": getattr(item, "title"),
+                    "state": getattr(item, "state"),
+                    "author_name": getattr(item, "author_name"),
+                    "author_email": getattr(item, "author_email"),
+                    "created_at": getattr(item, "created_at"),
+                    "merged_at": getattr(item, "merged_at"),
+                    "closed_at": getattr(item, "closed_at"),
+                    "head_branch": getattr(item, "head_branch"),
+                    "base_branch": getattr(item, "base_branch"),
+                    "_mergestat_synced_at": getattr(item, "_mergestat_synced_at", None)
+                    or synced_at_default,
+                }
+            rows.append(row)
+
+        await self._upsert_many(
+            GitPullRequest,
+            rows,
+            conflict_columns=["repo_id", "number"],
+            update_columns=[
+                "title",
+                "state",
+                "author_name",
+                "author_email",
+                "created_at",
+                "merged_at",
+                "closed_at",
+                "head_branch",
+                "base_branch",
+                "_mergestat_synced_at",
+            ],
+        )
 
 
 class MongoStore:
@@ -133,6 +484,27 @@ class MongoStore:
             {"_id": doc["_id"]}, {"$set": doc}, upsert=True
         )
 
+    async def has_any_git_files(self, repo_id) -> bool:
+        repo_id_val = _serialize_value(repo_id)
+        count = await self.db["git_files"].count_documents(
+            {"repo_id": repo_id_val}, limit=1
+        )
+        return count > 0
+
+    async def has_any_git_commit_stats(self, repo_id) -> bool:
+        repo_id_val = _serialize_value(repo_id)
+        count = await self.db["git_commit_stats"].count_documents(
+            {"repo_id": repo_id_val}, limit=1
+        )
+        return count > 0
+
+    async def has_any_git_blame(self, repo_id) -> bool:
+        repo_id_val = _serialize_value(repo_id)
+        count = await self.db["git_blame"].count_documents(
+            {"repo_id": repo_id_val}, limit=1
+        )
+        return count > 0
+
     async def insert_git_file_data(self, file_data: List[GitFile]) -> None:
         await self._upsert_many(
             "git_files",
@@ -167,6 +539,13 @@ class MongoStore:
                 f"{getattr(obj, 'path')}:"
                 f"{getattr(obj, 'line_no')}"
             ),
+        )
+
+    async def insert_git_pull_requests(self, pr_data: List[GitPullRequest]) -> None:
+        await self._upsert_many(
+            "git_pull_requests",
+            pr_data,
+            lambda obj: f"{getattr(obj, 'repo_id')}:{getattr(obj, 'number')}",
         )
 
     async def _upsert_many(

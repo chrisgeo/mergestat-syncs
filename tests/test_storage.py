@@ -9,7 +9,79 @@ from sqlalchemy import select
 
 from models import GitBlame, GitCommit, GitCommitStat, GitFile, Repo
 from models.git import Base
-from storage import MongoStore, SQLAlchemyStore, model_to_dict
+from storage import MongoStore, SQLAlchemyStore, create_store, detect_db_type, model_to_dict
+
+
+class TestDetectDbType:
+    """Tests for the detect_db_type function."""
+
+    def test_detect_mongodb(self):
+        """Test detection of MongoDB connection strings."""
+        assert detect_db_type("mongodb://localhost:27017/mydb") == "mongo"
+        assert detect_db_type("mongodb+srv://user:pass@cluster.mongodb.net/db") == "mongo"
+
+    def test_detect_postgresql(self):
+        """Test detection of PostgreSQL connection strings."""
+        assert detect_db_type("postgresql://localhost/mydb") == "postgres"
+        assert detect_db_type("postgres://localhost/mydb") == "postgres"
+        assert detect_db_type("postgresql+asyncpg://localhost/mydb") == "postgres"
+
+    def test_detect_sqlite(self):
+        """Test detection of SQLite connection strings."""
+        assert detect_db_type("sqlite:///test.db") == "sqlite"
+        assert detect_db_type("sqlite+aiosqlite:///:memory:") == "sqlite"
+
+    def test_detect_case_insensitive(self):
+        """Test that detection is case-insensitive."""
+        assert detect_db_type("PostgreSQL://localhost/mydb") == "postgres"
+        assert detect_db_type("POSTGRESQL://localhost/mydb") == "postgres"
+        assert detect_db_type("MongoDB://localhost:27017/mydb") == "mongo"
+        assert detect_db_type("MONGODB://localhost:27017/mydb") == "mongo"
+        assert detect_db_type("SQLite:///test.db") == "sqlite"
+        assert detect_db_type("SQLITE:///test.db") == "sqlite"
+
+    def test_detect_empty_string_raises(self):
+        """Test that empty connection string raises ValueError."""
+        with pytest.raises(ValueError, match="Connection string is required"):
+            detect_db_type("")
+
+    def test_detect_unknown_raises(self):
+        """Test that unknown connection string raises ValueError."""
+        with pytest.raises(ValueError, match="Could not detect database type"):
+            detect_db_type("unknown://localhost/mydb")
+
+
+class TestCreateStore:
+    """Tests for the create_store factory function."""
+
+    def test_create_mongo_store(self):
+        """Test creation of MongoStore from connection string."""
+        store = create_store("mongodb://localhost:27017/mydb")
+        assert isinstance(store, MongoStore)
+
+    def test_create_sqlalchemy_store_postgres(self):
+        """Test creation of SQLAlchemyStore for PostgreSQL."""
+        store = create_store("postgresql+asyncpg://localhost/mydb")
+        assert isinstance(store, SQLAlchemyStore)
+
+    def test_create_sqlalchemy_store_sqlite(self):
+        """Test creation of SQLAlchemyStore for SQLite."""
+        store = create_store("sqlite+aiosqlite:///:memory:")
+        assert isinstance(store, SQLAlchemyStore)
+
+    def test_create_store_with_explicit_db_type(self):
+        """Test creation with explicit db_type overriding auto-detection."""
+        # Force PostgreSQL even though URL looks like SQLite
+        store = create_store(
+            "postgresql+asyncpg://localhost/mydb",
+            db_type="postgres"
+        )
+        assert isinstance(store, SQLAlchemyStore)
+
+    def test_create_store_unsupported_type_raises(self):
+        """Test that unsupported db_type raises ValueError."""
+        with pytest.raises(ValueError, match="Unsupported database type"):
+            create_store("postgresql://localhost/mydb", db_type="oracle")
 
 
 def test_model_to_dict_serializes_uuid_and_fields(repo_uuid):
@@ -164,6 +236,51 @@ async def test_sqlalchemy_store_insert_git_file_data(sqlalchemy_store):
         assert len(saved_files) == 2
         assert saved_files[0].path in ["file1.txt", "file2.txt"]
         assert saved_files[1].path in ["file1.txt", "file2.txt"]
+
+
+@pytest.mark.asyncio
+async def test_sqlalchemy_store_insert_git_file_data_upsert(sqlalchemy_store):
+    """Test that inserting duplicate git file data performs an upsert."""
+    test_repo_id = uuid.uuid4()
+    test_repo = Repo(
+        id=test_repo_id,
+        repo="https://github.com/test/repo.git",
+        ref="main",
+        settings={},
+        tags=[],
+    )
+
+    initial = [
+        GitFile(
+            repo_id=test_repo_id,
+            path="file.txt",
+            executable=False,
+            contents="content1",
+        )
+    ]
+    updated = [
+        GitFile(
+            repo_id=test_repo_id,
+            path="file.txt",
+            executable=True,
+            contents="content2",
+        )
+    ]
+
+    async with sqlalchemy_store as store:
+        await store.insert_repo(test_repo)
+        await store.insert_git_file_data(initial)
+        await store.insert_git_file_data(updated)
+
+        result = await store.session.execute(
+            select(GitFile).where(GitFile.repo_id == test_repo_id)
+        )
+        saved_files = result.scalars().all()
+
+        assert len(saved_files) == 1
+        assert saved_files[0].path == "file.txt"
+        assert saved_files[0].executable
+        assert saved_files[0].contents == "content2"
 
 
 @pytest.mark.asyncio

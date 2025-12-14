@@ -10,30 +10,30 @@ import fnmatch
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable, List, Optional
 
 from github import Github, GithubException, RateLimitExceededException
 
-from connectors.exceptions import (APIException, AuthenticationException,
-                                   RateLimitException)
-from connectors.models import (Author, BlameRange, CommitStats, FileBlame,
-                               Organization, PullRequest, Repository,
-                               RepoStats)
+from connectors.base import BatchResult, GitConnector
+from connectors.exceptions import (
+    APIException,
+    AuthenticationException,
+    RateLimitException,
+)
+from connectors.models import (
+    Author,
+    BlameRange,
+    CommitStats,
+    FileBlame,
+    Organization,
+    PullRequest,
+    Repository,
+    RepoStats,
+)
 from connectors.utils import GitHubGraphQLClient, retry_with_backoff
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class BatchResult:
-    """Result of a batch repository processing operation."""
-
-    repository: Repository
-    stats: Optional[RepoStats] = None
-    error: Optional[str] = None
-    success: bool = True
 
 
 def match_repo_pattern(full_name: str, pattern: str) -> bool:
@@ -52,7 +52,7 @@ def match_repo_pattern(full_name: str, pattern: str) -> bool:
     return fnmatch.fnmatch(full_name.lower(), pattern.lower())
 
 
-class GitHubConnector:
+class GitHubConnector(GitConnector):
     """
     Production-grade GitHub connector using PyGithub and GraphQL.
 
@@ -75,9 +75,8 @@ class GitHubConnector:
         :param per_page: Number of items per page for pagination.
         :param max_workers: Maximum concurrent workers for operations.
         """
+        super().__init__(per_page=per_page, max_workers=max_workers)
         self.token = token
-        self.per_page = per_page
-        self.max_workers = max_workers
 
         # Initialize PyGithub client
         if base_url:
@@ -536,15 +535,36 @@ class GitHubConnector:
         """
         Get repositories for batch processing, optionally filtered by pattern.
 
+        If neither org_name nor user_name is provided but pattern contains an owner
+        (e.g., 'chrisgeo/*'), the owner is extracted from the pattern and used as
+        the user_name for fetching repositories.
+
         :param org_name: Optional organization name.
         :param user_name: Optional user name.
         :param pattern: Optional fnmatch-style pattern.
         :param max_repos: Maximum number of repos to retrieve.
         :return: List of Repository objects.
         """
+        # Extract owner from pattern if not explicitly provided
+        effective_org = org_name
+        effective_user = user_name
+
+        if not org_name and not user_name and pattern:
+            # Check if pattern has a specific owner prefix (e.g., 'chrisgeo/*')
+            if "/" in pattern:
+                parts = pattern.split("/", 1)
+                owner_part = parts[0]
+                # Only use as owner if it's not a wildcard
+                if owner_part and "*" not in owner_part and "?" not in owner_part:
+                    # Try as user first (works for both users and orgs via search)
+                    effective_user = owner_part
+                    logger.info(
+                        f"Extracted owner '{owner_part}' from pattern '{pattern}'"
+                    )
+
         return self.list_repositories(
-            org_name=org_name,
-            user_name=user_name,
+            org_name=effective_org,
+            user_name=effective_user,
             pattern=pattern,
             max_repos=max_repos,
         )
@@ -637,7 +657,9 @@ class GitHubConnector:
             max_repos=max_repos,
         )
 
-        logger.info(f"Processing {len(repos)} repositories with batch_size={batch_size}")
+        logger.info(
+            f"Processing {len(repos)} repositories with batch_size={batch_size}"
+        )
 
         results = []
 
@@ -770,21 +792,22 @@ class GitHubConnector:
                 f"repos {batch_start + 1}-{batch_end} of {len(repos)}"
             )
 
-            # Process batch concurrently
-            batch_results = await asyncio.gather(
-                *[process_repo_async(repo) for repo in batch],
-                return_exceptions=True,
-            )
+            # Process batch concurrently and consume results as they complete.
+            tasks = [asyncio.create_task(process_repo_async(repo)) for repo in batch]
+            for fut in asyncio.as_completed(tasks):
+                try:
+                    result = await fut
+                except Exception as e:
+                    logger.error(f"Unexpected error in async batch processing: {e}")
+                    continue
 
-            for result in batch_results:
-                if isinstance(result, Exception):
-                    logger.error(f"Unexpected error in async batch processing: {result}")
-                else:
-                    results.append(result)
+                results.append(result)
 
             # Rate limiting delay between batches
             if batch_end < len(repos) and rate_limit_delay > 0:
-                logger.debug(f"Rate limiting: waiting {rate_limit_delay}s before next batch")
+                logger.debug(
+                    f"Rate limiting: waiting {rate_limit_delay}s before next batch"
+                )
                 await asyncio.sleep(rate_limit_delay)
 
         logger.info(
