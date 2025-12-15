@@ -3,6 +3,7 @@ import argparse
 import asyncio
 import logging
 import os
+from pathlib import Path
 from typing import Tuple
 
 from models.git import Repo
@@ -218,6 +219,7 @@ async def main() -> None:
         DB_CONN_STRING = args.db
     if args.repo_path:
         REPO_PATH = args.repo_path
+    REPO_PATH = os.path.abspath(REPO_PATH)
 
     if args.db_type:
         DB_TYPE = args.db_type.lower()
@@ -298,21 +300,22 @@ async def main() -> None:
 
             else:
                 # Local Mode
-                logging.info(f"Processing local repository at {REPO_PATH}")
-                if not os.path.exists(os.path.join(REPO_PATH, ".git")):
-                    logging.error(f"No git repository found at {REPO_PATH}")
+                repo_root = Path(REPO_PATH).resolve()
+                logging.info(f"Processing local repository at {repo_root}")
+                if not (repo_root / ".git").exists():
+                    logging.error(f"No git repository found at {repo_root}")
                     return
 
                 # Initialize Repo for Database
-                repo_name = os.path.basename(os.path.abspath(REPO_PATH))
-                repo = Repo(repo_path=str(REPO_PATH), repo=repo_name)
+                repo_name = repo_root.name
+                repo = Repo(repo_path=str(repo_root), repo=repo_name)
                 await store.insert_repo(repo)
                 logging.info(f"Repository stored: {repo.repo} ({repo.id})")
 
                 # Iterate commits (using gitpython for iteration)
                 from git import Repo as GitPythonRepo
 
-                repo_obj = GitPythonRepo(str(REPO_PATH))
+                repo_obj = GitPythonRepo(str(repo_root))
                 since_dt = _parse_since(args.since)
 
                 # 1. Commits
@@ -328,22 +331,19 @@ async def main() -> None:
                     # Previously: iter_commits_since -> collect_changed_files -> files_for_blame
                     # And walk_repo -> all_files
                     files_for_blame = set(
-                        collect_changed_files(REPO_PATH, commits_iter)
+                        collect_changed_files(repo_root, commits_iter)
                     )
 
-                all_files = []
-                for root, _, files in os.walk(REPO_PATH):
-                    if ".git" in root:
+                all_files_path = []
+                for root, _, files in os.walk(str(repo_root)):
+                    root_path = Path(root)
+                    if ".git" in root_path.parts:
                         continue
                     for file in files:
-                        file_path = os.path.join(root, file)
-                        all_files.append(os.path.abspath(file_path))
+                        file_path = (root_path / file).resolve()
+                        all_files_path.append(file_path)
 
-                # Convert to Path objects
-                from pathlib import Path
-
-                all_files_path = [Path(p) for p in all_files]
-                files_for_blame_path = {Path(p) for p in files_for_blame}
+                files_for_blame_path = {Path(p).resolve() for p in files_for_blame}
 
                 # Sequential Processing (SQLite doesn't handle concurrent writes well)
                 # Process commits first
@@ -359,7 +359,7 @@ async def main() -> None:
                     all_files_path,
                     files_for_blame_path,
                     store,
-                    str(REPO_PATH),
+                    str(repo_root),
                 )
 
                 logging.info("Local repository processing complete.")

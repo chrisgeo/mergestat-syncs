@@ -4,15 +4,16 @@ from datetime import datetime, timezone
 from typing import Any, Tuple, List, Optional
 
 from models.git import GitCommit, GitCommitStat, Repo, GitPullRequest, GitBlame, GitFile
-from connectors.models import Repository
-from connectors import BatchResult
 from utils import AGGREGATE_STATS_MARKER, is_skippable, CONNECTORS_AVAILABLE, BATCH_SIZE
 
 if CONNECTORS_AVAILABLE:
-    from connectors import GitHubConnector, ConnectorException
+    from connectors import BatchResult, GitHubConnector, ConnectorException
+    from connectors.models import Repository
 else:
-    GitHubConnector = None
+    BatchResult = None  # type: ignore
+    GitHubConnector = None  # type: ignore
     ConnectorException = Exception
+    Repository = None  # type: ignore
 
 
 # --- GitHub Sync Helpers ---
