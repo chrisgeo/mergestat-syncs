@@ -9,7 +9,9 @@ import asyncio
 import fnmatch
 import logging
 import time
-from concurrent.futures import ThreadPoolExecutor
+import threading
+from queue import Queue
+from queue import Empty as QueueEmpty
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable, List, Optional
@@ -22,6 +24,7 @@ from connectors.exceptions import (
     APIException,
     AuthenticationException,
     RateLimitException,
+    NotFoundException,
 )
 from connectors.models import (
     Author,
@@ -34,8 +37,21 @@ from connectors.models import (
     RepoStats,
 )
 from connectors.utils import GitLabRESTClient, retry_with_backoff
+from connectors.utils.rate_limit_queue import RateLimitConfig, RateLimitGate
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_retry_after_seconds(headers: object) -> Optional[float]:
+    if not isinstance(headers, dict):
+        return None
+    retry_after = headers.get("Retry-After")
+    if retry_after is None:
+        return None
+    try:
+        return max(0.0, float(retry_after))
+    except (TypeError, ValueError):
+        return None
 
 
 @dataclass
@@ -120,9 +136,19 @@ class GitLabConnector(GitConnector):
         elif isinstance(e, GitlabError):
             if hasattr(e, "response_code"):
                 if e.response_code == 429:
-                    raise RateLimitException(f"GitLab rate limit exceeded: {e}")
+                    retry_after = _parse_retry_after_seconds(
+                        getattr(e, "response_headers", None)
+                    )
+                    raise RateLimitException(
+                        f"GitLab rate limit exceeded: {e}",
+                        retry_after_seconds=retry_after,
+                    )
                 elif e.response_code == 404:
-                    raise APIException(f"GitLab resource not found: {e}")
+                    raise NotFoundException(
+                        "GitLab resource not found (404). "
+                        "This can also mean the token lacks access. "
+                        f"Details: {e}"
+                    )
             raise APIException(f"GitLab API error: {e}")
         else:
             raise APIException(f"Unexpected error: {e}")
@@ -785,6 +811,9 @@ class GitLabConnector(GitConnector):
                 success=True,
             )
 
+        except RateLimitException:
+            raise
+
         except Exception as e:
             logger.warning(f"Failed to get stats for {project.full_name}: {e}")
             return GitLabBatchResult(
@@ -848,9 +877,9 @@ class GitLabConnector(GitConnector):
 
         logger.info(f"Processing {len(projects)} projects with batch_size={batch_size}")
 
-        results = []
+        results: List[GitLabBatchResult] = []
 
-        # Step 2: Process in batches
+        # Step 2: Process in batches (queue workers + shared backoff)
         for batch_start in range(0, len(projects), batch_size):
             batch_end = min(batch_start + batch_size, len(projects))
             batch = projects[batch_start:batch_end]
@@ -860,32 +889,83 @@ class GitLabConnector(GitConnector):
                 f"projects {batch_start + 1}-{batch_end} of {len(projects)}"
             )
 
-            # Process batch concurrently using ThreadPoolExecutor
-            with ThreadPoolExecutor(max_workers=max_concurrent) as executor:
-                futures = [
-                    executor.submit(
-                        self._process_single_project_stats,
-                        project,
-                        max_commits_per_project,
-                    )
-                    for project in batch
-                ]
+            work_q: Queue[Repository] = Queue()
+            for project in batch:
+                work_q.put(project)
 
-                for future in futures:
+            gate = RateLimitGate(
+                RateLimitConfig(
+                    initial_backoff_seconds=max(1.0, rate_limit_delay),
+                )
+            )
+            results_lock = threading.Lock()
+
+            def worker(
+                work_q: Queue,
+                gate: RateLimitGate,
+                results_lock: threading.Lock,
+            ) -> None:
+                while True:
                     try:
-                        result = future.result()
-                        results.append(result)
+                        project = work_q.get_nowait()
+                    except QueueEmpty:
+                        return
 
-                        # Call callback if provided
-                        if on_project_complete:
-                            on_project_complete(result)
+                    try:
+                        attempts = 0
+                        while True:
+                            gate.wait_sync()
+                            try:
+                                result = self._process_single_project_stats(
+                                    project,
+                                    max_commits=max_commits_per_project,
+                                )
+                                gate.reset()
+                                with results_lock:
+                                    results.append(result)
+                                if on_project_complete:
+                                    on_project_complete(result)
+                                break
+                            except RateLimitException as e:
+                                attempts += 1
+                                applied = gate.penalize(
+                                    getattr(e, "retry_after_seconds", None)
+                                )
+                                logger.info(
+                                    "GitLab rate limited; backoff %.1fs (%s)",
+                                    applied,
+                                    e,
+                                )
+                                if attempts >= 10:
+                                    result = GitLabBatchResult(
+                                        project=project,
+                                        error=str(e),
+                                        success=False,
+                                    )
+                                    with results_lock:
+                                        results.append(result)
+                                    if on_project_complete:
+                                        on_project_complete(result)
+                                    break
+                    finally:
+                        work_q.task_done()
 
-                    except Exception as e:
-                        logger.error(f"Unexpected error in batch processing: {e}")
+            threads = [
+                threading.Thread(
+                    target=worker,
+                    args=(work_q, gate, results_lock),
+                    daemon=True,
+                )
+                for _ in range(max(1, min(max_concurrent, len(batch))))
+            ]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
 
             # Rate limiting delay between batches
             if batch_end < len(projects) and rate_limit_delay > 0:
-                logger.debug(f"Rate limiting: waiting {rate_limit_delay}s")
+                logger.debug("Rate limiting: waiting %ss", rate_limit_delay)
                 time.sleep(rate_limit_delay)
 
         logger.info(
@@ -956,23 +1036,7 @@ class GitLabConnector(GitConnector):
 
         logger.info(f"Processing {len(projects)} projects asynchronously")
 
-        results = []
-        semaphore = asyncio.Semaphore(max_concurrent)
-
-        async def process_project_async(project: Repository) -> GitLabBatchResult:
-            """Process a single project asynchronously."""
-            async with semaphore:
-                result = await loop.run_in_executor(
-                    None,
-                    lambda: self._process_single_project_stats(
-                        project, max_commits_per_project
-                    ),
-                )
-
-                if on_project_complete:
-                    on_project_complete(result)
-
-                return result
+        results: List[GitLabBatchResult] = []
 
         # Step 2: Process in batches with rate limiting
         for batch_start in range(0, len(projects), batch_size):
@@ -984,23 +1048,77 @@ class GitLabConnector(GitConnector):
                 f"projects {batch_start + 1}-{batch_end} of {len(projects)}"
             )
 
-            # Process batch concurrently and consume results as they complete.
-            tasks = [
-                asyncio.create_task(process_project_async(project)) for project in batch
-            ]
-            for fut in asyncio.as_completed(tasks):
-                try:
-                    result = await fut
-                except Exception as e:
-                    logger.error(f"Unexpected error in async batch processing: {e}")
-                    continue
+            work_q: asyncio.Queue[Repository] = asyncio.Queue()
+            for project in batch:
+                await work_q.put(project)
 
-                results.append(result)
+            gate = RateLimitGate(
+                RateLimitConfig(
+                    initial_backoff_seconds=max(1.0, rate_limit_delay),
+                )
+            )
+
+            async def worker_async(
+                work_q: asyncio.Queue = work_q,
+                gate: RateLimitGate = gate,
+            ) -> None:
+                while True:
+                    try:
+                        project = work_q.get_nowait()
+                    except asyncio.QueueEmpty:
+                        return
+
+                    try:
+                        attempts = 0
+                        while True:
+                            await gate.wait_async()
+                            try:
+                                result = await loop.run_in_executor(
+                                    None,
+                                    lambda: self._process_single_project_stats(
+                                        project,
+                                        max_commits=max_commits_per_project,
+                                    ),
+                                )
+                                gate.reset()
+                                results.append(result)
+                                if on_project_complete:
+                                    on_project_complete(result)
+                                break
+                            except RateLimitException as e:
+                                attempts += 1
+                                applied = gate.penalize(
+                                    getattr(e, "retry_after_seconds", None)
+                                )
+                                logger.info(
+                                    "GitLab rate limited; backoff %.1fs (%s)",
+                                    applied,
+                                    e,
+                                )
+                                if attempts >= 10:
+                                    result = GitLabBatchResult(
+                                        project=project,
+                                        error=str(e),
+                                        success=False,
+                                    )
+                                    results.append(result)
+                                    if on_project_complete:
+                                        on_project_complete(result)
+                                    break
+                    finally:
+                        work_q.task_done()
+
+            workers = [
+                asyncio.create_task(worker_async())
+                for _ in range(max(1, min(max_concurrent, len(batch))))
+            ]
+            await asyncio.gather(*workers)
 
             # Rate limiting delay between batches
             if batch_end < len(projects) and rate_limit_delay > 0:
                 logger.debug(
-                    f"Rate limiting: waiting {rate_limit_delay}s before next batch"
+                    "Rate limiting: waiting %ss before next batch",
+                    rate_limit_delay,
                 )
                 await asyncio.sleep(rate_limit_delay)
 

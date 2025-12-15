@@ -10,11 +10,24 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
-from connectors.exceptions import (APIException, AuthenticationException,
-                                   RateLimitException)
+from connectors.exceptions import (
+    APIException,
+    AuthenticationException,
+    RateLimitException,
+)
 from connectors.utils.retry import retry_with_backoff
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_retry_after_seconds(response: requests.Response) -> Optional[float]:
+    retry_after = response.headers.get("Retry-After")
+    if not retry_after:
+        return None
+    try:
+        return max(0.0, float(retry_after))
+    except ValueError:
+        return None
 
 
 class RESTClient:
@@ -85,7 +98,10 @@ class RESTClient:
             elif response.status_code == 403:
                 raise APIException(f"Forbidden: {response.text}")
             elif response.status_code == 429:
-                raise RateLimitException("API rate limit exceeded")
+                raise RateLimitException(
+                    "API rate limit exceeded",
+                    retry_after_seconds=_parse_retry_after_seconds(response),
+                )
             elif response.status_code == 404:
                 raise APIException(f"Not found: {endpoint}")
             elif response.status_code != 200:
@@ -95,10 +111,10 @@ class RESTClient:
 
             return response.json()
 
-        except requests.exceptions.Timeout:
-            raise APIException("Request timeout")
-        except requests.exceptions.RequestException as e:
-            raise APIException(f"Request failed: {e}")
+        except requests.exceptions.Timeout as exc:
+            raise APIException("Request timeout") from exc
+        except requests.exceptions.RequestException as exc:
+            raise APIException(f"Request failed: {exc}") from exc
 
     @retry_with_backoff(
         max_retries=5,
@@ -137,7 +153,10 @@ class RESTClient:
             elif response.status_code == 403:
                 raise APIException(f"Forbidden: {response.text}")
             elif response.status_code == 429:
-                raise RateLimitException("API rate limit exceeded")
+                raise RateLimitException(
+                    "API rate limit exceeded",
+                    retry_after_seconds=_parse_retry_after_seconds(response),
+                )
             elif response.status_code == 404:
                 raise APIException(f"Not found: {endpoint}")
             elif response.status_code != 200:
@@ -149,15 +168,71 @@ class RESTClient:
 
             # Ensure we return a list
             if not isinstance(data, list):
-                logger.warning(f"Expected list response, got {type(data)}")
+                logger.warning("Expected list response, got %s", type(data))
                 return []
 
             return data
 
-        except requests.exceptions.Timeout:
-            raise APIException("Request timeout")
-        except requests.exceptions.RequestException as e:
-            raise APIException(f"Request failed: {e}")
+        except requests.exceptions.Timeout as exc:
+            raise APIException("Request timeout") from exc
+        except requests.exceptions.RequestException as exc:
+            raise APIException(f"Request failed: {exc}") from exc
+
+    @retry_with_backoff(
+        max_retries=5,
+        initial_delay=1.0,
+        max_delay=60.0,
+        exceptions=(RateLimitException, APIException),
+    )
+    def delete(
+        self,
+        endpoint: str,
+        params: Optional[Dict[str, Any]] = None,
+        headers: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        """Make a DELETE request.
+
+        Returns a JSON body when present, otherwise an empty dict.
+        """
+        url = f"{self.base_url}/{endpoint.lstrip('/')}"
+        request_headers = {**self.headers, **(headers or {})}
+
+        try:
+            response = requests.delete(
+                url,
+                params=params,
+                headers=request_headers,
+                timeout=self.timeout,
+            )
+
+            if response.status_code == 401:
+                raise AuthenticationException("Authentication failed")
+            elif response.status_code == 403:
+                raise APIException(f"Forbidden: {response.text}")
+            elif response.status_code == 429:
+                raise RateLimitException(
+                    "API rate limit exceeded",
+                    retry_after_seconds=_parse_retry_after_seconds(response),
+                )
+            elif response.status_code == 404:
+                raise APIException(f"Not found: {endpoint}")
+            elif response.status_code not in (200, 202, 204):
+                raise APIException(
+                    f"API error: {response.status_code} - {response.text}"
+                )
+
+            if response.status_code == 204 or not response.content:
+                return {}
+
+            data = response.json()
+            if not isinstance(data, dict):
+                return {}
+            return data
+
+        except requests.exceptions.Timeout as exc:
+            raise APIException("Request timeout") from exc
+        except requests.exceptions.RequestException as exc:
+            raise APIException(f"Request failed: {exc}") from exc
 
 
 class GitLabRESTClient(RESTClient):
@@ -210,7 +285,10 @@ class GitLabRESTClient(RESTClient):
         params = {"ref": ref}
 
         logger.debug(
-            f"Fetching blame for project {project_id}, file {file_path} at ref {ref}"
+            "Fetching blame for project %s, file %s at ref %s",
+            project_id,
+            file_path,
+            ref,
         )
         return self.get_list(endpoint, params=params)
 
@@ -237,5 +315,9 @@ class GitLabRESTClient(RESTClient):
             "per_page": per_page,
         }
 
-        logger.debug(f"Fetching merge requests for project {project_id}, page {page}")
+        logger.debug(
+            "Fetching merge requests for project %s, page %s",
+            project_id,
+            page,
+        )
         return self.get_list(endpoint, params=params)

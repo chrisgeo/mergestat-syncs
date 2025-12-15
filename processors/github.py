@@ -9,11 +9,16 @@ from utils import AGGREGATE_STATS_MARKER, is_skippable, CONNECTORS_AVAILABLE, BA
 if CONNECTORS_AVAILABLE:
     from connectors import BatchResult, GitHubConnector, ConnectorException
     from connectors.models import Repository
+    from connectors.utils import RateLimitConfig, RateLimitGate
+    from github import RateLimitExceededException
 else:
     BatchResult = None  # type: ignore
     GitHubConnector = None  # type: ignore
     ConnectorException = Exception
     Repository = None  # type: ignore
+    RateLimitConfig = None  # type: ignore
+    RateLimitGate = None  # type: ignore
+    RateLimitExceededException = Exception
 
 
 # --- GitHub Sync Helpers ---
@@ -92,6 +97,9 @@ def _fetch_github_prs_sync(connector, owner, repo_name, repo_id, max_prs):
     prs = connector.get_pull_requests(owner, repo_name, state="all", max_prs=max_prs)
     pr_objects = []
     for pr in prs:
+        created_at = (
+            pr.created_at or pr.merged_at or pr.closed_at or datetime.now(timezone.utc)
+        )
         git_pr = GitPullRequest(
             repo_id=repo_id,
             number=pr.number,
@@ -99,7 +107,7 @@ def _fetch_github_prs_sync(connector, owner, repo_name, repo_id, max_prs):
             state=pr.state,
             author_name=pr.author.username if pr.author else "Unknown",
             author_email=pr.author.email if pr.author else None,
-            created_at=pr.created_at,
+            created_at=created_at,
             merged_at=pr.merged_at,
             closed_at=pr.closed_at,
             head_branch=pr.head_branch,
@@ -107,6 +115,127 @@ def _fetch_github_prs_sync(connector, owner, repo_name, repo_id, max_prs):
         )
         pr_objects.append(git_pr)
     return pr_objects
+
+
+def _sync_github_prs_to_store(
+    connector,
+    owner: str,
+    repo_name: str,
+    repo_id,
+    store,
+    loop: asyncio.AbstractEventLoop,
+    batch_size: int,
+    state: str = "all",
+    gate: Optional[RateLimitGate] = None,
+) -> int:
+    """Fetch all PRs for a repo and insert them in batches.
+
+    Runs in a worker thread; uses run_coroutine_threadsafe to write batches.
+    """
+    gh_repo = connector.github.get_repo(f"{owner}/{repo_name}")
+    batch: List[GitPullRequest] = []
+    total = 0
+
+    if gate is None:
+        gate = RateLimitGate(RateLimitConfig(initial_backoff_seconds=1.0))
+
+    pr_iter = iter(gh_repo.get_pulls(state=state))
+    while True:
+        try:
+            gate.wait_sync()
+            gh_pr = next(pr_iter)
+            gate.reset()
+        except StopIteration:
+            break
+        except RateLimitExceededException as e:
+            retry_after = None
+            if hasattr(connector, "_rate_limit_reset_delay_seconds"):
+                try:
+                    retry_after = connector._rate_limit_reset_delay_seconds()
+                except Exception:
+                    retry_after = None
+            applied = gate.penalize(retry_after)
+            logging.info(
+                "GitHub rate limited fetching PRs; backoff %.1fs (%s)",
+                applied,
+                e,
+            )
+            continue
+        except Exception as e:
+            headers = getattr(e, "headers", None)
+            retry_after = None
+            if isinstance(headers, dict):
+                # PyGithub header casing varies; treat keys case-insensitively.
+                headers_ci = {str(k).lower(): v for k, v in headers.items()}
+                ra = headers_ci.get("retry-after")
+                if ra:
+                    try:
+                        retry_after = float(ra)
+                    except ValueError:
+                        retry_after = None
+                if retry_after is None:
+                    reset = headers_ci.get("x-ratelimit-reset")
+                    if reset:
+                        try:
+                            import time
+
+                            retry_after = max(0.0, float(reset) - time.time())
+                        except ValueError:
+                            retry_after = None
+
+            if retry_after is not None:
+                applied = gate.penalize(retry_after)
+                logging.info(
+                    "GitHub rate limited fetching PRs; backoff %.1fs (%s)",
+                    applied,
+                    e,
+                )
+                continue
+            raise
+        author_name = "Unknown"
+        author_email = None
+        if getattr(gh_pr, "user", None):
+            author_name = getattr(gh_pr.user, "login", None) or author_name
+            author_email = getattr(gh_pr.user, "email", None)
+
+        created_at = (
+            getattr(gh_pr, "created_at", None)
+            or getattr(gh_pr, "merged_at", None)
+            or getattr(gh_pr, "closed_at", None)
+            or datetime.now(timezone.utc)
+        )
+
+        batch.append(
+            GitPullRequest(
+                repo_id=repo_id,
+                number=int(getattr(gh_pr, "number", 0) or 0),
+                title=getattr(gh_pr, "title", None),
+                state=getattr(gh_pr, "state", None),
+                author_name=author_name,
+                author_email=author_email,
+                created_at=created_at,
+                merged_at=getattr(gh_pr, "merged_at", None),
+                closed_at=getattr(gh_pr, "closed_at", None),
+                head_branch=getattr(getattr(gh_pr, "head", None), "ref", None),
+                base_branch=getattr(getattr(gh_pr, "base", None), "ref", None),
+            )
+        )
+        total += 1
+
+        if len(batch) >= batch_size:
+            asyncio.run_coroutine_threadsafe(
+                store.insert_git_pull_requests(batch),
+                loop,
+            ).result()
+            batch.clear()
+
+    if batch:
+        asyncio.run_coroutine_threadsafe(
+            store.insert_git_pull_requests(batch),
+            loop,
+        ).result()
+
+    return total
 
 
 def _fetch_github_blame_sync(gh_repo, repo_id, limit=50):
@@ -362,13 +491,19 @@ async def process_github_repo(
 
         # 4. Fetch PRs
         logging.info("Fetching pull requests from GitHub...")
-        pr_objects = await loop.run_in_executor(
-            None, _fetch_github_prs_sync, connector, owner, repo_name, db_repo.id, 100
+        pr_total = await loop.run_in_executor(
+            None,
+            _sync_github_prs_to_store,
+            connector,
+            owner,
+            repo_name,
+            db_repo.id,
+            store,
+            loop,
+            BATCH_SIZE,
+            "all",
         )
-
-        if pr_objects:
-            await store.insert_git_pull_requests(pr_objects)
-            logging.info(f"Stored {len(pr_objects)} pull requests from GitHub")
+        logging.info(f"Stored {pr_total} pull requests from GitHub")
 
         # 5. Fetch Blame (Optional & Stubbed)
         if fetch_blame:
@@ -414,6 +549,11 @@ async def process_github_repos_batch(
     connector = GitHubConnector(token=token)
     loop = asyncio.get_running_loop()
 
+    pr_gate = RateLimitGate(
+        RateLimitConfig(initial_backoff_seconds=max(1.0, rate_limit_delay))
+    )
+    pr_semaphore = asyncio.Semaphore(max(1, max_concurrent))
+
     # Track results for summary and incremental storage
     all_results: List[BatchResult] = []
     stored_count = 0
@@ -444,6 +584,30 @@ async def process_github_repos_batch(
         await store.insert_repo(db_repo)
         stored_count += 1
         logging.debug(f"Stored repository ({stored_count}): {db_repo.repo}")
+
+        # Fetch ALL PRs for batch-processed repos, storing in batches.
+        try:
+            owner, repo_name = _split_full_name(repo_info.full_name)
+            async with pr_semaphore:
+                await loop.run_in_executor(
+                    None,
+                    _sync_github_prs_to_store,
+                    connector,
+                    owner,
+                    repo_name,
+                    db_repo.id,
+                    store,
+                    loop,
+                    BATCH_SIZE,
+                    "all",
+                    pr_gate,
+                )
+        except Exception as e:
+            logging.warning(
+                "Failed to fetch/store PRs for GitHub repo %s: %s",
+                repo_info.full_name,
+                e,
+            )
 
         if result.stats:
             stat = GitCommitStat(

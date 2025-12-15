@@ -1,19 +1,182 @@
 import asyncio
 import logging
 import os
+import re
 import uuid
-from typing import List, Optional, Tuple, Set, Dict, Any, Union
+from typing import List, Optional, Tuple, Set, Dict, Any
 from pathlib import Path
 from datetime import datetime, timezone
 
-from models.git import GitBlame, GitCommit, GitCommitStat, GitFile, Repo
+from models.git import GitBlame, GitCommit, GitCommitStat, GitFile, GitPullRequest, Repo
 from utils import (
     BATCH_SIZE,
     MAX_WORKERS,
-    AGGREGATE_STATS_MARKER,
-    is_skippable,
     _normalize_datetime,
 )
+
+
+_GITHUB_MERGE_PR_RE = re.compile(
+    r"^Merge pull request #(?P<number>\d+)\b",
+    re.MULTILINE,
+)
+_GITLAB_MERGE_MR_RE = re.compile(r"\bSee merge request\b.*!(?P<number>\d+)\b")
+
+
+def _first_meaningful_title_line(message: str) -> Optional[str]:
+    if not message:
+        return None
+    lines = [ln.strip() for ln in message.splitlines()]
+    # Prefer the first non-empty line that is not a generic merge header.
+    for ln in lines:
+        if not ln:
+            continue
+        if ln.startswith("Merge pull request #"):
+            continue
+        if ln.startswith("Merge branch "):
+            continue
+        if ln.startswith("See merge request"):
+            continue
+        return ln
+    return None
+
+
+def infer_merged_pull_requests_from_commits(
+    commits: List[Any],
+    repo_id: uuid.UUID,
+    since: Optional[datetime] = None,
+) -> List[GitPullRequest]:
+    """Infer merged PRs/MRs from merge commit messages.
+
+    Supports common GitHub merge-commit messages ("Merge pull request #123") and
+    common GitLab merge-commit trailers ("See merge request group/project!123").
+    """
+    inferred: Dict[int, GitPullRequest] = {}
+
+    for commit in commits or []:
+        try:
+            commit_dt = _normalize_datetime(getattr(commit, "committed_datetime"))
+            if since and commit_dt and commit_dt < since:
+                continue
+
+            message = getattr(commit, "message", "") or ""
+            match = _GITHUB_MERGE_PR_RE.search(message)
+            if not match:
+                match = _GITLAB_MERGE_MR_RE.search(message)
+            if not match:
+                continue
+
+            number = int(match.group("number"))
+            title = _first_meaningful_title_line(message)
+
+            author = getattr(commit, "author", None)
+            author_name = getattr(author, "name", None)
+            author_email = getattr(author, "email", None)
+
+            # Use the merge commit timestamp as a safe, non-null created_at.
+            created_at = commit_dt or datetime.now(timezone.utc)
+            merged_at = commit_dt or datetime.now(timezone.utc)
+
+            inferred[number] = GitPullRequest(
+                repo_id=repo_id,
+                number=number,
+                title=title,
+                state="merged",
+                author_name=author_name,
+                author_email=author_email,
+                created_at=created_at,
+                merged_at=merged_at,
+                closed_at=None,
+                head_branch=None,
+                base_branch=None,
+            )
+        except Exception:
+            continue
+
+    return list(inferred.values())
+
+
+def infer_open_pull_requests_from_refs(
+    repo_obj: Any,
+    repo_id: uuid.UUID,
+) -> List[GitPullRequest]:
+    """Infer open PRs/MRs from local refs, if present.
+
+    Requires that the local clone has fetched provider-specific refs:
+    - GitHub: refs/pull/<id>/head
+    - GitLab: refs/merge-requests/<id>/head
+    """
+    inferred: Dict[int, GitPullRequest] = {}
+
+    refs = getattr(repo_obj, "refs", None) or []
+    for ref in refs:
+        ref_path = getattr(ref, "path", None) or ""
+        m = re.match(r"^refs/pull/(?P<number>\d+)/head$", ref_path)
+        if not m:
+            m = re.match(r"^refs/merge-requests/(?P<number>\d+)/head$", ref_path)
+        if not m:
+            continue
+
+        try:
+            number = int(m.group("number"))
+            tip_commit = getattr(ref, "commit", None)
+            if tip_commit is None and hasattr(repo_obj, "commit"):
+                tip_commit = repo_obj.commit(ref)
+
+            commit_dt = None
+            if tip_commit is not None:
+                commit_dt = _normalize_datetime(
+                    getattr(tip_commit, "committed_datetime", None)
+                )
+
+            inferred[number] = GitPullRequest(
+                repo_id=repo_id,
+                number=number,
+                title=None,
+                state="open",
+                author_name=None,
+                author_email=None,
+                created_at=commit_dt or datetime.now(timezone.utc),
+                merged_at=None,
+                closed_at=None,
+                head_branch=ref_path,
+                base_branch=None,
+            )
+        except Exception:
+            continue
+
+    return list(inferred.values())
+
+
+async def process_local_pull_requests(
+    repo: Repo,
+    store: Any,
+    repo_obj: Any,
+    commits: Optional[List[Any]] = None,
+    since: Optional[datetime] = None,
+) -> None:
+    """Collect PR/MR-like records for local repos and store them.
+
+    - Always tries merge-commit inference (merged PRs/MRs)
+    - Also tries ref-based inference if refs are present
+    """
+    logging.info("Processing local pull/merge requests...")
+
+    commit_list = commits or []
+    merged = infer_merged_pull_requests_from_commits(
+        commit_list,
+        repo.id,
+        since=since,
+    )
+    open_refs = infer_open_pull_requests_from_refs(repo_obj, repo.id)
+
+    pr_objects: List[GitPullRequest] = []
+    pr_objects.extend(open_refs)
+    pr_objects.extend(merged)
+
+    if pr_objects:
+        await store.insert_git_pull_requests(pr_objects)
+        logging.info(f"Inserted/updated {len(pr_objects)} local PR/MR records")
+
 
 # We need access to the store, but we pass it as an argument usually.
 # The 'Repo' type hint comes from models.git

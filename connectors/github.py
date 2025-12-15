@@ -9,7 +9,10 @@ import asyncio
 import fnmatch
 import logging
 import time
-from concurrent.futures import ThreadPoolExecutor
+import inspect
+from queue import Queue
+from queue import Empty as QueueEmpty
+import threading
 from datetime import datetime, timezone
 from typing import Callable, List, Optional
 
@@ -19,6 +22,7 @@ from connectors.base import BatchResult, GitConnector
 from connectors.exceptions import (
     APIException,
     AuthenticationException,
+    NotFoundException,
     RateLimitException,
 )
 from connectors.models import (
@@ -32,6 +36,7 @@ from connectors.models import (
     RepoStats,
 )
 from connectors.utils import GitHubGraphQLClient, retry_with_backoff
+from connectors.utils.rate_limit_queue import RateLimitConfig, RateLimitGate
 
 logger = logging.getLogger(__name__)
 
@@ -97,12 +102,20 @@ class GitHubConnector(GitConnector):
         :raises: Appropriate connector exception.
         """
         if isinstance(e, RateLimitExceededException):
-            raise RateLimitException(f"GitHub rate limit exceeded: {e}")
+            raise RateLimitException(
+                f"GitHub rate limit exceeded: {e}",
+                retry_after_seconds=self._rate_limit_reset_delay_seconds(),
+            )
         elif isinstance(e, GithubException):
             if e.status == 401:
                 raise AuthenticationException(f"GitHub authentication failed: {e}")
             elif e.status == 404:
-                raise APIException(f"GitHub resource not found: {e}")
+                raise NotFoundException(
+                    "GitHub resource not found (404). "
+                    "This can also mean the token lacks access "
+                    "(fine-grained PAT / GitHub App tokens can 404). "
+                    f"Details: {e}"
+                )
             else:
                 raise APIException(f"GitHub API error: {e}")
         else:
@@ -345,21 +358,37 @@ class GitHubConnector(GitConnector):
 
                 commit_count += 1
 
-                # Get commit stats
-                if commit.stats:
-                    total_additions += commit.stats.additions
-                    total_deletions += commit.stats.deletions
+                # Get commit stats without triggering extra API calls.
+                # In PyGithub, `commit.stats` is a property that completes the
+                # object via an additional request per commit. That explodes
+                # rate-limit usage in batch mode.
+                stats_value = inspect.getattr_static(commit, "stats", None)
+                if stats_value is None or isinstance(stats_value, property):
+                    continue
+
+                total_additions += getattr(stats_value, "additions", 0) or 0
+                total_deletions += getattr(stats_value, "deletions", 0) or 0
 
                 # Track unique authors
                 if commit.author:
-                    author_id = commit.author.id
+                    # Some commits reference users that no longer exist
+                    # (deleted/suspended), and PyGithub will 404 when trying
+                    # to lazily fetch extra user fields like name/email.
+                    # Keep this robust by only using stable fields.
+                    try:
+                        author_id = commit.author.id
+                        author_login = commit.author.login
+                    except Exception:
+                        author_id = None
+                        author_login = None
+
+                    if not author_id or not author_login:
+                        continue
+
                     if author_id not in authors_dict:
                         authors_dict[author_id] = Author(
-                            id=commit.author.id,
-                            username=commit.author.login,
-                            name=commit.author.name,
-                            email=commit.author.email,
-                            url=commit.author.html_url,
+                            id=author_id,
+                            username=author_login,
                         )
 
             # Calculate commits per week (rough estimate based on repo age)
@@ -599,6 +628,10 @@ class GitHubConnector(GitConnector):
                 success=True,
             )
 
+        except RateLimitException:
+            # Let the batch scheduler coordinate a shared backoff.
+            raise
+
         except Exception as e:
             logger.warning(f"Failed to get stats for {repo.full_name}: {e}")
             return BatchResult(
@@ -606,6 +639,19 @@ class GitHubConnector(GitConnector):
                 error=str(e),
                 success=False,
             )
+
+    def _rate_limit_reset_delay_seconds(self) -> Optional[float]:
+        """Best-effort delay until GitHub core rate limit reset."""
+        try:
+            info = self.get_rate_limit() or {}
+            remaining = info.get("remaining")
+            reset = info.get("reset")
+            if remaining == 0 and reset:
+                seconds = (reset - datetime.now(timezone.utc)).total_seconds()
+                return max(1.0, float(seconds))
+        except Exception:
+            return None
+        return None
 
     def get_repos_with_stats(
         self,
@@ -658,52 +704,111 @@ class GitHubConnector(GitConnector):
         )
 
         logger.info(
-            f"Processing {len(repos)} repositories with batch_size={batch_size}"
+            "Processing %s repositories with batch_size=%s",
+            len(repos),
+            batch_size,
         )
 
-        results = []
+        results: List[BatchResult] = []
 
-        # Step 2: Process in batches
+        # Step 2: Process in batches (queue-based workers + shared backoff)
         for batch_start in range(0, len(repos), batch_size):
             batch_end = min(batch_start + batch_size, len(repos))
             batch = repos[batch_start:batch_end]
 
             logger.info(
-                f"Processing batch {batch_start // batch_size + 1}: "
-                f"repos {batch_start + 1}-{batch_end} of {len(repos)}"
+                "Processing batch %s: repos %s-%s of %s",
+                batch_start // batch_size + 1,
+                batch_start + 1,
+                batch_end,
+                len(repos),
             )
 
-            # Process batch concurrently using ThreadPoolExecutor
-            with ThreadPoolExecutor(max_workers=max_concurrent) as executor:
-                futures = [
-                    executor.submit(
-                        self._process_single_repo_stats,
-                        repo,
-                        max_commits_per_repo,
-                    )
-                    for repo in batch
-                ]
+            work_q: Queue[Repository] = Queue()
+            for repo in batch:
+                work_q.put(repo)
 
-                for future in futures:
+            gate = RateLimitGate(
+                RateLimitConfig(
+                    initial_backoff_seconds=max(1.0, rate_limit_delay),
+                )
+            )
+            results_lock = threading.Lock()
+
+            def worker(
+                work_q: Queue,
+                gate: RateLimitGate,
+                results_lock: threading.Lock,
+            ) -> None:
+                while True:
                     try:
-                        result = future.result()
-                        results.append(result)
+                        repo = work_q.get_nowait()
+                    except QueueEmpty:
+                        return
 
-                        # Call callback if provided
-                        if on_repo_complete:
-                            on_repo_complete(result)
+                    try:
+                        attempts = 0
+                        while True:
+                            gate.wait_sync()
+                            try:
+                                result = self._process_single_repo_stats(
+                                    repo,
+                                    max_commits=max_commits_per_repo,
+                                )
+                                gate.reset()
+                                with results_lock:
+                                    results.append(result)
+                                if on_repo_complete:
+                                    on_repo_complete(result)
+                                break
+                            except RateLimitException as e:
+                                attempts += 1
+                                reset_delay = (
+                                    getattr(e, "retry_after_seconds", None)
+                                    or self._rate_limit_reset_delay_seconds()
+                                )
+                                applied = gate.penalize(reset_delay)
+                                logger.info(
+                                    "GitHub rate limited; backoff %.1fs (%s)",
+                                    applied,
+                                    e,
+                                )
+                                if attempts >= 10:
+                                    result = BatchResult(
+                                        repository=repo,
+                                        error=str(e),
+                                        success=False,
+                                    )
+                                    with results_lock:
+                                        results.append(result)
+                                    if on_repo_complete:
+                                        on_repo_complete(result)
+                                    break
+                    finally:
+                        work_q.task_done()
 
-                    except Exception as e:
-                        logger.error(f"Unexpected error in batch processing: {e}")
+            threads = [
+                threading.Thread(
+                    target=worker,
+                    args=(work_q, gate, results_lock),
+                    daemon=True,
+                )
+                for _ in range(max(1, min(max_concurrent, len(batch))))
+            ]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
 
             # Rate limiting delay between batches
             if batch_end < len(repos) and rate_limit_delay > 0:
-                logger.debug(f"Rate limiting: waiting {rate_limit_delay}s")
+                logger.debug("Rate limiting: waiting %ss", rate_limit_delay)
                 time.sleep(rate_limit_delay)
 
         logger.info(
-            f"Completed processing {len(results)} repositories, "
-            f"{sum(1 for r in results if r.success)} successful"
+            "Completed processing %s repositories, %s successful",
+            len(results),
+            sum(1 for r in results if r.success),
         )
         return results
 
@@ -764,23 +869,9 @@ class GitHubConnector(GitConnector):
             ),
         )
 
-        logger.info(f"Processing {len(repos)} repositories asynchronously")
+        logger.info("Processing %s repositories asynchronously", len(repos))
 
-        results = []
-        semaphore = asyncio.Semaphore(max_concurrent)
-
-        async def process_repo_async(repo: Repository) -> BatchResult:
-            """Process a single repository asynchronously."""
-            async with semaphore:
-                result = await loop.run_in_executor(
-                    None,
-                    lambda: self._process_single_repo_stats(repo, max_commits_per_repo),
-                )
-
-                if on_repo_complete:
-                    on_repo_complete(result)
-
-                return result
+        results: List[BatchResult] = []
 
         # Step 2: Process in batches with rate limiting
         for batch_start in range(0, len(repos), batch_size):
@@ -788,31 +879,95 @@ class GitHubConnector(GitConnector):
             batch = repos[batch_start:batch_end]
 
             logger.info(
-                f"Processing async batch {batch_start // batch_size + 1}: "
-                f"repos {batch_start + 1}-{batch_end} of {len(repos)}"
+                "Processing async batch %s: repos %s-%s of %s",
+                batch_start // batch_size + 1,
+                batch_start + 1,
+                batch_end,
+                len(repos),
             )
 
-            # Process batch concurrently and consume results as they complete.
-            tasks = [asyncio.create_task(process_repo_async(repo)) for repo in batch]
-            for fut in asyncio.as_completed(tasks):
-                try:
-                    result = await fut
-                except Exception as e:
-                    logger.error(f"Unexpected error in async batch processing: {e}")
-                    continue
+            work_q: asyncio.Queue[Repository] = asyncio.Queue()
+            for repo in batch:
+                await work_q.put(repo)
 
-                results.append(result)
+            gate = RateLimitGate(
+                RateLimitConfig(
+                    initial_backoff_seconds=max(1.0, rate_limit_delay),
+                )
+            )
+
+            async def worker_async(
+                work_q: asyncio.Queue = work_q,
+                gate: RateLimitGate = gate,
+            ) -> None:
+                while True:
+                    try:
+                        repo = work_q.get_nowait()
+                    except asyncio.QueueEmpty:
+                        return
+
+                    try:
+                        attempts = 0
+                        while True:
+                            await gate.wait_async()
+                            try:
+                                result = await loop.run_in_executor(
+                                    None,
+                                    lambda: self._process_single_repo_stats(
+                                        repo,
+                                        max_commits=max_commits_per_repo,
+                                    ),
+                                )
+                                gate.reset()
+                                results.append(result)
+                                if on_repo_complete:
+                                    on_repo_complete(result)
+                                break
+                            except RateLimitException as e:
+                                attempts += 1
+                                retry_after = getattr(e, "retry_after_seconds", None)
+                                if retry_after is None:
+                                    retry_after = await loop.run_in_executor(
+                                        None,
+                                        self._rate_limit_reset_delay_seconds,
+                                    )
+                                applied = gate.penalize(retry_after)
+                                logger.info(
+                                    "GitHub rate limited; backoff %.1fs (%s)",
+                                    applied,
+                                    e,
+                                )
+                                if attempts >= 10:
+                                    result = BatchResult(
+                                        repository=repo,
+                                        error=str(e),
+                                        success=False,
+                                    )
+                                    results.append(result)
+                                    if on_repo_complete:
+                                        on_repo_complete(result)
+                                    break
+                    finally:
+                        work_q.task_done()
+
+            workers = [
+                asyncio.create_task(worker_async())
+                for _ in range(max(1, min(max_concurrent, len(batch))))
+            ]
+            await asyncio.gather(*workers)
 
             # Rate limiting delay between batches
             if batch_end < len(repos) and rate_limit_delay > 0:
                 logger.debug(
-                    f"Rate limiting: waiting {rate_limit_delay}s before next batch"
+                    "Rate limiting: waiting %ss before next batch",
+                    rate_limit_delay,
                 )
                 await asyncio.sleep(rate_limit_delay)
 
         logger.info(
-            f"Completed async processing {len(results)} repositories, "
-            f"{sum(1 for r in results if r.success)} successful"
+            "Completed async processing %s repositories, %s successful",
+            len(results),
+            sum(1 for r in results if r.success),
         )
         return results
 
