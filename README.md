@@ -21,7 +21,7 @@ The GitHub connector supports batch processing of repositories with:
 
 - **Pattern matching** - Filter repositories using fnmatch-style patterns (e.g., `chrisgeo/m*`, `*/api-*`)
 - **Configurable batch size** - Process repositories in batches to manage memory and API usage
-- **Rate limiting** - Configurable delays between batches to avoid hitting API limits
+- **Rate limiting** - Delay between batches plus shared backoff across workers (avoids stampedes; honors server reset/`Retry-After` when available)
 - **Async processing** - Process multiple repositories concurrently for better performance
 - **Callbacks** - Get notified as each repository is processed
 
@@ -126,7 +126,7 @@ You can also configure the database using command-line arguments, which will ove
 
 - **`--github-owner`**: GitHub repository owner/organization
 - **`--github-repo`**: GitHub repository name
-- **`--gitlab-url`**: GitLab instance URL (default: https://gitlab.com)
+- **`--gitlab-url`**: GitLab instance URL (default: <https://gitlab.com>)
 - **`--gitlab-project-id`**: GitLab project ID (numeric)
 
 #### Batch Processing Options
@@ -226,6 +226,7 @@ SQLite connection strings use the following format:
 - **In-memory**: `sqlite+aiosqlite:///:memory:` (data is lost when the process exits)
 
 SQLite is ideal for:
+
 - Local development and testing
 - Single-user scenarios
 - Small to medium-sized repositories
@@ -247,6 +248,7 @@ The script includes several configuration options to optimize performance:
   - Connections are recycled every hour
 
 **Example for large repositories:**
+
 ```bash
 export BATCH_SIZE=500
 export MAX_WORKERS=8
@@ -254,6 +256,7 @@ python git_mergestat.py
 ```
 
 **Example for resource-constrained environments:**
+
 ```bash
 export BATCH_SIZE=50
 export MAX_WORKERS=2
@@ -265,29 +268,34 @@ python git_mergestat.py
 This project includes several key performance optimizations to speed up git data processing:
 
 ### 1. **Increased Batch Size** (10x improvement)
+
 - **Changed from**: 10 records per batch
 - **Changed to**: 100 records per batch (configurable)
 - **Impact**: Reduces database round-trips by 10x, significantly improving insertion speed
 - **Configuration**: Set `BATCH_SIZE=200` for even larger batches
 
 ### 2. **Parallel Git Blame Processing** (4-8x improvement)
+
 - **Implementation**: Uses asyncio with configurable worker pool
 - **Default**: 4 parallel workers processing files concurrently
 - **Impact**: Multi-core CPU utilization, dramatically faster blame processing
 - **Configuration**: Set `MAX_WORKERS=8` for more powerful machines
 
 ### 3. **Database Connection Pooling** (PostgreSQL)
+
 - **Pool size**: 20 connections (up from default 5)
 - **Max overflow**: 30 additional connections (up from default 10)
 - **Impact**: Better handling of concurrent operations, reduced connection overhead
 - **Auto-configured**: No manual setup required
 
 ### 4. **Optimized Bulk Operations**
+
 - All database insertions use bulk operations
 - MongoDB operations use `ordered=False` for better performance
 - SQLAlchemy uses `add_all()` for efficient batch inserts
 
 ### 5. **Smart File Filtering**
+
 - Skips binary files (images, videos, archives, etc.)
 - Skips files larger than 1MB for content reading
 - Reduces unnecessary I/O and processing time

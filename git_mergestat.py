@@ -15,6 +15,7 @@ from processors.local import (
     process_files_and_blame,
     process_git_commit_stats,
     process_git_commits,
+    process_local_pull_requests,
 )
 from storage import create_store, detect_db_type
 from utils import REPO_PATH, _parse_since, collect_changed_files, iter_commits_since
@@ -344,6 +345,15 @@ async def main() -> None:
                 # Sequential Processing (SQLite doesn't handle concurrent writes well)
                 # Process commits first
                 await process_git_commits(repo, store, commits_iter, since_dt)
+
+                # PRs / Merge Requests (best-effort inference from local repo)
+                await process_local_pull_requests(
+                    repo=repo,
+                    store=store,
+                    repo_obj=repo_obj,
+                    commits=commits_iter,
+                    since=since_dt,
+                )
 
                 # Then commit stats (need fresh iterator since commits_iter is exhausted)
                 commits_for_stats = list(iter_commits_since(repo_obj, since_dt))

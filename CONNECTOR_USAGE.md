@@ -9,6 +9,7 @@ The `git_mergestat.py` script supports three modes of operation:
 ## Simplified CLI Interface
 
 The CLI now supports:
+
 - **Unified authentication** with `--auth` (works for both GitHub and GitLab)
 - **Auto-detection of database type** from connection string URL scheme
 - **Consolidated batch processing arguments** that work with both connectors
@@ -310,6 +311,8 @@ python git_mergestat.py \
 
 Both connectors include automatic retry with exponential backoff for rate limit handling.
 
+Batch modes also coordinate concurrent workers using a shared backoff gate to reduce rate-limit stampedes, and honor server-provided `Retry-After`/reset delays when available.
+
 ## Troubleshooting
 
 ### "Connectors are not available"
@@ -329,25 +332,29 @@ pip install -r requirements.txt
 ### GitHub Authentication Errors
 
 Ensure your token has the appropriate scopes:
+
 - **`repo`** - Full control of private repositories (REQUIRED for private repos)
 - **`read:org`** - Read org and team membership (recommended for organization repos)
 
 **For private repositories**: The `repo` scope is mandatory. Without it, you'll receive 404 errors when trying to access private repositories.
 
 **To verify your token scopes**:
-1. Go to https://github.com/settings/tokens
+
+1. Go to <https://github.com/settings/tokens>
 2. Find your token and check which scopes are selected
 3. If `repo` is not checked, generate a new token with this scope
 
 ### GitLab Authentication Errors
 
 Ensure your token has the appropriate scopes:
+
 - **`read_api`** - Read access to API (REQUIRED for private projects)
 - **`read_repository`** - Read repository data (REQUIRED for private projects)
 
 **For private projects**: Both scopes are mandatory. Without them, you'll receive authentication or permission errors.
 
 **To verify your token permissions**:
+
 1. Go to your GitLab instance Settings → Access Tokens
 2. Review the token's scopes
 3. If needed, create a new token with `read_api` and `read_repository` scopes
@@ -374,5 +381,6 @@ The connector modes integrate seamlessly with the existing storage system:
 - **Network dependency**: Connector modes require internet access
 
 Choose the appropriate mode based on your needs:
+
 - Use **local mode** for complete repository analysis
 - Use **connector modes** for quick commit and stats analysis without cloning

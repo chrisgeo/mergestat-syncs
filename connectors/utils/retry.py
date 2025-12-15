@@ -13,6 +13,16 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 
+def _get_retry_after_seconds(exc: Exception) -> Optional[float]:
+    retry_after = getattr(exc, "retry_after_seconds", None)
+    if retry_after is None:
+        return None
+    try:
+        return max(0.0, float(retry_after))
+    except (TypeError, ValueError):
+        return None
+
+
 class RateLimiter:
     """
     Rate limiter with exponential backoff support.
@@ -55,13 +65,19 @@ class RateLimiter:
     async def wait(self) -> None:
         """Wait for the current delay period."""
         delay = self.get_next_delay()
-        logger.info(f"Rate limited. Waiting {delay:.2f} seconds before retry...")
+        logger.info(
+            "Waiting %.2f seconds before retry...",
+            delay,
+        )
         await asyncio.sleep(delay)
 
     def wait_sync(self) -> None:
         """Synchronous wait for the current delay period."""
         delay = self.get_next_delay()
-        logger.info(f"Rate limited. Waiting {delay:.2f} seconds before retry...")
+        logger.info(
+            "Waiting %.2f seconds before retry...",
+            delay,
+        )
         time.sleep(delay)
 
 
@@ -102,17 +118,31 @@ def retry_with_backoff(
                 except exceptions as e:
                     last_exception = e
                     if attempt < max_retries - 1:
+                        retry_after = _get_retry_after_seconds(e)
                         logger.warning(
-                            f"Attempt {attempt + 1}/{max_retries} failed: {e}. Retrying..."
+                            "Attempt %s/%s failed: %s. Retrying...",
+                            attempt + 1,
+                            max_retries,
+                            e,
                         )
-                        await rate_limiter.wait()
+                        if retry_after is not None:
+                            logger.info(
+                                "Rate limited. Waiting %.2fs before retry...",
+                                retry_after,
+                            )
+                            await asyncio.sleep(retry_after)
+                        else:
+                            await rate_limiter.wait()
                     else:
-                        logger.error(f"All {max_retries} attempts failed. Giving up.")
+                        logger.error(
+                            "All %s attempts failed. Giving up.",
+                            max_retries,
+                        )
 
             # If we get here, all retries failed
             if last_exception:
                 raise last_exception
-            raise Exception("Max retries exceeded with no exception captured")
+            raise RuntimeError("Max retries exceeded with no exception captured")
 
         @wraps(func)
         def sync_wrapper(*args: Any, **kwargs: Any) -> T:
@@ -132,17 +162,31 @@ def retry_with_backoff(
                 except exceptions as e:
                     last_exception = e
                     if attempt < max_retries - 1:
+                        retry_after = _get_retry_after_seconds(e)
                         logger.warning(
-                            f"Attempt {attempt + 1}/{max_retries} failed: {e}. Retrying..."
+                            "Attempt %s/%s failed: %s. Retrying...",
+                            attempt + 1,
+                            max_retries,
+                            e,
                         )
-                        rate_limiter.wait_sync()
+                        if retry_after is not None:
+                            logger.info(
+                                "Rate limited. Waiting %.2fs before retry...",
+                                retry_after,
+                            )
+                            time.sleep(retry_after)
+                        else:
+                            rate_limiter.wait_sync()
                     else:
-                        logger.error(f"All {max_retries} attempts failed. Giving up.")
+                        logger.error(
+                            "All %s attempts failed. Giving up.",
+                            max_retries,
+                        )
 
             # If we get here, all retries failed
             if last_exception:
                 raise last_exception
-            raise Exception("Max retries exceeded with no exception captured")
+            raise RuntimeError("Max retries exceeded with no exception captured")
 
         # Return appropriate wrapper based on function type
         if asyncio.iscoroutinefunction(func):

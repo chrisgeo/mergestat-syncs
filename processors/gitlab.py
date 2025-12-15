@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import Any, Tuple, List, Optional
+from typing import Any, List, Optional
 
 from models.git import GitCommit, GitCommitStat, Repo, GitPullRequest, GitBlame, GitFile
 from utils import AGGREGATE_STATS_MARKER, is_skippable, CONNECTORS_AVAILABLE, BATCH_SIZE
@@ -9,11 +9,14 @@ from utils import AGGREGATE_STATS_MARKER, is_skippable, CONNECTORS_AVAILABLE, BA
 if CONNECTORS_AVAILABLE:
     from connectors import GitLabBatchResult, GitLabConnector, ConnectorException
     from connectors.models import Repository
+    from connectors.utils import RateLimitConfig, RateLimitGate
 else:
     GitLabBatchResult = None  # type: ignore
     GitLabConnector = None  # type: ignore
     ConnectorException = Exception
     Repository = None  # type: ignore
+    RateLimitConfig = None  # type: ignore
+    RateLimitGate = None  # type: ignore
 
 
 # --- GitLab Sync Helpers ---
@@ -109,6 +112,9 @@ def _fetch_gitlab_mrs_sync(connector, project_id, repo_id, max_mrs):
     )
     pr_objects = []
     for mr in mrs:
+        created_at = (
+            mr.created_at or mr.merged_at or mr.closed_at or datetime.now(timezone.utc)
+        )
         git_pr = GitPullRequest(
             repo_id=repo_id,
             number=mr.number,
@@ -116,7 +122,7 @@ def _fetch_gitlab_mrs_sync(connector, project_id, repo_id, max_mrs):
             state=mr.state,
             author_name=mr.author.username if mr.author else "Unknown",
             author_email=mr.author.email if mr.author else None,
-            created_at=mr.created_at,
+            created_at=created_at,
             merged_at=mr.merged_at,
             closed_at=mr.closed_at,
             head_branch=mr.head_branch,
@@ -124,6 +130,108 @@ def _fetch_gitlab_mrs_sync(connector, project_id, repo_id, max_mrs):
         )
         pr_objects.append(git_pr)
     return pr_objects
+
+
+def _sync_gitlab_mrs_to_store(
+    connector,
+    project_id: int,
+    repo_id,
+    store,
+    loop: asyncio.AbstractEventLoop,
+    batch_size: int,
+    state: str = "all",
+    gate: Optional[RateLimitGate] = None,
+) -> int:
+    """Fetch all MRs for a project and insert them in batches.
+
+    Runs in a worker thread; uses run_coroutine_threadsafe to write batches.
+    """
+    batch: List[GitPullRequest] = []
+    total = 0
+    page = 1
+
+    if gate is None:
+        gate = RateLimitGate(RateLimitConfig(initial_backoff_seconds=1.0))
+
+    while True:
+        try:
+            gate.wait_sync()
+            mrs = connector.rest_client.get_merge_requests(
+                project_id=project_id,
+                state=state,
+                page=page,
+                per_page=connector.per_page,
+            )
+            gate.reset()
+        except Exception as e:
+            retry_after = getattr(e, "retry_after_seconds", None)
+            if retry_after is None:
+                raise
+            applied = gate.penalize(retry_after)
+            logging.info(
+                "GitLab rate limited while fetching MRs; backoff %.1fs (%s)",
+                applied,
+                e,
+            )
+            continue
+        if not mrs:
+            break
+
+        for mr in mrs:
+            author_name = "Unknown"
+            author_email = None
+            author_data = mr.get("author")
+            if author_data:
+                author_name = author_data.get("username") or author_name
+
+            def _parse_dt(value):
+                if not value:
+                    return None
+                try:
+                    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+                except Exception:
+                    return None
+
+            created_at = _parse_dt(mr.get("created_at"))
+            merged_at = _parse_dt(mr.get("merged_at"))
+            closed_at = _parse_dt(mr.get("closed_at"))
+            created_at = (
+                created_at or merged_at or closed_at or datetime.now(timezone.utc)
+            )
+
+            batch.append(
+                GitPullRequest(
+                    repo_id=repo_id,
+                    number=int(mr.get("iid") or 0),
+                    title=mr.get("title") or None,
+                    state=mr.get("state") or None,
+                    author_name=author_name,
+                    author_email=author_email,
+                    created_at=created_at,
+                    merged_at=merged_at,
+                    closed_at=closed_at,
+                    head_branch=mr.get("source_branch"),
+                    base_branch=mr.get("target_branch"),
+                )
+            )
+            total += 1
+
+            if len(batch) >= batch_size:
+                asyncio.run_coroutine_threadsafe(
+                    store.insert_git_pull_requests(batch),
+                    loop,
+                ).result()
+                batch.clear()
+
+        page += 1
+
+    if batch:
+        asyncio.run_coroutine_threadsafe(
+            store.insert_git_pull_requests(batch),
+            loop,
+        ).result()
+
+    return total
 
 
 def _fetch_gitlab_blame_sync(gl_project, connector, project_id, repo_id, limit=50):
@@ -406,13 +514,18 @@ async def process_gitlab_project(
 
         # 4. Fetch Merge Requests
         logging.info("Fetching merge requests from GitLab...")
-        pr_objects = await loop.run_in_executor(
-            None, _fetch_gitlab_mrs_sync, connector, project_id, db_repo.id, 100
+        mr_total = await loop.run_in_executor(
+            None,
+            _sync_gitlab_mrs_to_store,
+            connector,
+            project_id,
+            db_repo.id,
+            store,
+            loop,
+            BATCH_SIZE,
+            "all",
         )
-
-        if pr_objects:
-            await store.insert_git_pull_requests(pr_objects)
-            logging.info(f"Stored {len(pr_objects)} merge requests from GitLab")
+        logging.info(f"Stored {mr_total} merge requests from GitLab")
 
         # 5. Fetch Blame (Optional)
         if fetch_blame:
@@ -468,6 +581,11 @@ async def process_gitlab_projects_batch(
     connector = GitLabConnector(url=gitlab_url, private_token=token)
     loop = asyncio.get_running_loop()
 
+    mr_gate = RateLimitGate(
+        RateLimitConfig(initial_backoff_seconds=max(1.0, rate_limit_delay))
+    )
+    mr_semaphore = asyncio.Semaphore(max(1, max_concurrent))
+
     all_results: List[GitLabBatchResult] = []
     stored_count = 0
 
@@ -497,6 +615,28 @@ async def process_gitlab_projects_batch(
         await store.insert_repo(db_repo)
         stored_count += 1
         logging.debug(f"Stored project ({stored_count}): {db_repo.repo}")
+
+        # Fetch ALL merge requests for batch-processed projects, storing in batches.
+        try:
+            async with mr_semaphore:
+                await loop.run_in_executor(
+                    None,
+                    _sync_gitlab_mrs_to_store,
+                    connector,
+                    project_info.id,
+                    db_repo.id,
+                    store,
+                    loop,
+                    BATCH_SIZE,
+                    "all",
+                    mr_gate,
+                )
+        except Exception as e:
+            logging.warning(
+                "Failed to fetch/store MRs for GitLab project %s: %s",
+                project_info.full_name,
+                e,
+            )
 
         if result.stats:
             stat = GitCommitStat(

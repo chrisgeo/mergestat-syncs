@@ -59,6 +59,7 @@ pip install -r requirements.txt
 ```
 
 Key dependencies:
+
 - `PyGithub` - GitHub API client
 - `python-gitlab` - GitLab API client
 - `requests` - HTTP library
@@ -374,7 +375,7 @@ results = handler.paginate_all(fetch_function)
 
 ## Rate Limiting
 
-Rate limiting is handled automatically with exponential backoff:
+Rate limiting is handled automatically with exponential backoff. When APIs return server-provided delays (e.g., `Retry-After` or reset headers), retries will honor those values.
 
 ```python
 from connectors.utils import retry_with_backoff
@@ -464,6 +465,7 @@ pytest tests/test_connectors_integration.py -v
 ```
 
 Integration tests verify:
+
 - Fetching first 10 public repositories from GitHub organizations and users
 - Searching repositories on GitHub
 - Fetching first 10 public projects from GitLab
@@ -500,7 +502,7 @@ async with SQLAlchemyStore(conn_string="postgresql+asyncpg://...") as store:
 ## Performance Considerations
 
 - **Pagination**: Default page size is 100 (maximum for both GitHub and GitLab)
-- **Rate Limits**: 
+- **Rate Limits**:
   - GitHub: 5000 requests/hour (authenticated)
   - GitLab: 10 requests/second (self-hosted may vary)
 - **Concurrency**: Use `max_workers` parameter for parallel operations
