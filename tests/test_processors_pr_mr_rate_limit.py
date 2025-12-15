@@ -133,7 +133,7 @@ async def test_github_pr_sync_retries_on_retry_after_and_persists():
     assert total == 2
     assert len(store.pr_batches) == 2
     assert [b[0].number for b in store.pr_batches] == [1, 2]
-    assert gate.penalties and gate.penalties[0] == 0.0
+    assert gate.penalties and gate.penalties[0] == pytest.approx(0.0)
 
 
 @pytest.mark.asyncio
@@ -206,4 +206,4 @@ async def test_gitlab_mr_sync_retries_on_retry_after_and_persists():
     assert total == 1
     assert len(store.pr_batches) == 1
     assert store.pr_batches[0][0].number == 7
-    assert gate.penalties and gate.penalties[0] == 0
+    assert gate.penalties and gate.penalties[0] == 0.0
