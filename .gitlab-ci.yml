@@ -1,0 +1,186 @@
+workflow:
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "push"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "web"
+
+stages:
+  - lint
+  - test
+  - security
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PIP_ROOT_USER_ACTION: "ignore"
+  PYTHONDONTWRITEBYTECODE: "1"
+
+default:
+  cache:
+    key: "pip-$CI_PROJECT_NAME"
+    paths:
+      - .cache/pip
+  before_script:
+    - python -V
+    - python -m pip install --upgrade pip
+    - pip install -r requirements.txt
+
+lint:black:
+  stage: lint
+  image: python:3.11
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "web"
+  script:
+    - black --check .
+  allow_failure: true
+
+lint:isort:
+  stage: lint
+  image: python:3.11
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "web"
+  script:
+    - isort --check-only .
+  allow_failure: true
+
+lint:flake8:
+  stage: lint
+  image: python:3.11
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "web"
+  script:
+    - flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+    - flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+lint:mypy:
+  stage: lint
+  image: python:3.11
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "web"
+  script:
+    - mypy --install-types --non-interactive .
+  allow_failure: true
+
+tests:
+  stage: test
+  image: python:${PYTHON_VERSION}
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  before_script:
+    - python -V
+    - apt-get update -y
+    - apt-get install -y --no-install-recommends build-essential git curl
+    - python -m pip install --upgrade pip
+    - pip install -r requirements.txt
+  parallel:
+    matrix:
+      - PYTHON_VERSION: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+  services:
+    - name: postgres:15
+      alias: postgres
+    - name: mongo:7
+      alias: mongo
+  variables:
+    POSTGRES_USER: postgres
+    POSTGRES_PASSWORD: postgres
+    POSTGRES_DB: test_db
+    DB_CONN_STRING: "postgresql+asyncpg://postgres:postgres@postgres:5432/test_db"
+    MONGO_CONN_STRING: "mongodb://mongo:27017"
+  script:
+    - |
+      python - <<'PY'
+      import asyncio
+      import os
+      from sqlalchemy import text
+      from sqlalchemy.ext.asyncio import create_async_engine
+      from motor.motor_asyncio import AsyncIOMotorClient
+
+
+      async def wait_postgres(url: str) -> None:
+          engine = create_async_engine(url, pool_pre_ping=True)
+          try:
+              for attempt in range(30):
+                  try:
+                      async with engine.connect() as conn:
+                          await conn.execute(text("SELECT 1"))
+                      return
+                  except Exception:
+                      if attempt == 29:
+                          raise
+                      await asyncio.sleep(1)
+          finally:
+              await engine.dispose()
+
+
+      async def wait_mongo(url: str) -> None:
+          client = AsyncIOMotorClient(url, serverSelectionTimeoutMS=1000)
+          try:
+              for attempt in range(30):
+                  try:
+                      await client.admin.command("ping")
+                      return
+                  except Exception:
+                      if attempt == 29:
+                          raise
+                      await asyncio.sleep(1)
+          finally:
+              client.close()
+
+
+      async def main() -> None:
+          await wait_postgres(os.environ["DB_CONN_STRING"])
+          await wait_mongo(os.environ["MONGO_CONN_STRING"])
+
+
+      asyncio.run(main())
+      PY
+    - pytest tests/ -v --tb=short --junitxml=pytest-junit.xml --cov=. --cov-report=term --cov-report=xml
+    - |
+      if [ "$PYTHON_VERSION" = "3.11" ] && [ -n "${CODECOV_TOKEN:-}" ]; then
+        curl -Os https://uploader.codecov.io/latest/linux/codecov
+        chmod +x codecov
+        ./codecov -t "$CODECOV_TOKEN" -f coverage.xml || true
+      else
+        echo "Skipping Codecov upload (PYTHON_VERSION=$PYTHON_VERSION)"
+      fi
+  artifacts:
+    when: always
+    expire_in: 1 week
+    paths:
+      - coverage.xml
+      - pytest-junit.xml
+    reports:
+      junit: pytest-junit.xml
+  coverage: '/^TOTAL.*\s(\d+\%)$/'
+
+security:bandit:
+  stage: security
+  image: python:3.11
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "web"
+  before_script:
+    - python -V
+    - python -m pip install --upgrade pip
+    - pip install bandit
+  script:
+    - bandit -r . -x .venv,tests,benchmark_repo --exit-zero -f json -o bandit.json
+  artifacts:
+    when: always
+    expire_in: 1 week
+    paths:
+      - bandit.json
