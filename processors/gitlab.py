@@ -52,9 +52,7 @@ def _fetch_gitlab_commits_sync(gl_project, max_commits, repo_id):
             author_name=(
                 commit.author_name if hasattr(commit, "author_name") else "Unknown"
             ),
-            author_email=(
-                commit.author_email if hasattr(commit, "author_email") else ""
-            ),
+            author_email=None,
             author_when=(
                 datetime.fromisoformat(commit.authored_date.replace("Z", "+00:00"))
                 if hasattr(commit, "authored_date")
@@ -65,9 +63,7 @@ def _fetch_gitlab_commits_sync(gl_project, max_commits, repo_id):
                 if hasattr(commit, "committer_name")
                 else "Unknown"
             ),
-            committer_email=(
-                commit.committer_email if hasattr(commit, "committer_email") else ""
-            ),
+            committer_email=None,
             committer_when=(
                 datetime.fromisoformat(commit.committed_date.replace("Z", "+00:00"))
                 if hasattr(commit, "committed_date")
@@ -101,7 +97,11 @@ def _fetch_gitlab_commit_stats_sync(gl_project, commit_hashes, repo_id, max_stat
                 )
                 stats_objects.append(stat)
         except Exception as e:
-            logging.warning(f"Failed to get stats for commit {commit_hash}: {e}")
+            logging.warning(
+                "Failed to get stats for commit %s: %s",
+                commit_hash,
+                e,
+            )
     return stats_objects
 
 
@@ -121,7 +121,7 @@ def _fetch_gitlab_mrs_sync(connector, project_id, repo_id, max_mrs):
             title=mr.title,
             state=mr.state,
             author_name=mr.author.username if mr.author else "Unknown",
-            author_email=mr.author.email if mr.author else None,
+            author_email=None,
             created_at=created_at,
             merged_at=mr.merged_at,
             closed_at=mr.closed_at,

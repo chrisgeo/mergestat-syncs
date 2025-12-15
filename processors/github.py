@@ -3,8 +3,20 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Tuple, List, Optional
 
-from models.git import GitCommit, GitCommitStat, Repo, GitPullRequest, GitBlame, GitFile
-from utils import AGGREGATE_STATS_MARKER, is_skippable, CONNECTORS_AVAILABLE, BATCH_SIZE
+from models.git import (
+    GitBlame,
+    GitCommit,
+    GitCommitStat,
+    GitFile,
+    GitPullRequest,
+    Repo,
+)
+from utils import (
+    AGGREGATE_STATS_MARKER,
+    BATCH_SIZE,
+    CONNECTORS_AVAILABLE,
+    is_skippable,
+)
 
 if CONNECTORS_AVAILABLE:
     from connectors import BatchResult, GitHubConnector, ConnectorException
@@ -37,25 +49,30 @@ def _fetch_github_commits_sync(gh_repo, max_commits, repo_id):
 
     commit_objects = []
     for commit in raw_commits:
+        # Prefer GitHub user `login` when available; do not store emails.
+        author_login = getattr(commit, "author", None)
+        committer_login = getattr(commit, "committer", None)
+
+        author_name = getattr(author_login, "login", None) or (
+            commit.commit.author.name if commit.commit.author else "Unknown"
+        )
+        committer_name = getattr(committer_login, "login", None) or (
+            commit.commit.committer.name if commit.commit.committer else "Unknown"
+        )
+
         git_commit = GitCommit(
             repo_id=repo_id,
             hash=commit.sha,
             message=commit.commit.message,
-            author_name=(
-                commit.commit.author.name if commit.commit.author else "Unknown"
-            ),
-            author_email=commit.commit.author.email if commit.commit.author else "",
+            author_name=author_name,
+            author_email=None,
             author_when=(
                 commit.commit.author.date
                 if commit.commit.author
                 else datetime.now(timezone.utc)
             ),
-            committer_name=(
-                commit.commit.committer.name if commit.commit.committer else "Unknown"
-            ),
-            committer_email=(
-                commit.commit.committer.email if commit.commit.committer else ""
-            ),
+            committer_name=committer_name,
+            committer_email=None,
             committer_when=(
                 commit.commit.committer.date
                 if commit.commit.committer
@@ -88,13 +105,22 @@ def _fetch_github_commit_stats_sync(raw_commits, repo_id, max_stats):
                 )
                 stats_objects.append(stat)
         except Exception as e:
-            logging.warning(f"Failed to get stats for commit {commit.sha}: {e}")
+            logging.warning(
+                "Failed to get stats for commit %s: %s",
+                commit.sha,
+                e,
+            )
     return stats_objects
 
 
 def _fetch_github_prs_sync(connector, owner, repo_name, repo_id, max_prs):
     """Sync helper to fetch Pull Requests."""
-    prs = connector.get_pull_requests(owner, repo_name, state="all", max_prs=max_prs)
+    prs = connector.get_pull_requests(
+        owner,
+        repo_name,
+        state="all",
+        max_prs=max_prs,
+    )
     pr_objects = []
     for pr in prs:
         created_at = (
@@ -191,12 +217,12 @@ def _sync_github_prs_to_store(
                     e,
                 )
                 continue
+
             raise
         author_name = "Unknown"
         author_email = None
         if getattr(gh_pr, "user", None):
             author_name = getattr(gh_pr.user, "login", None) or author_name
-            author_email = getattr(gh_pr.user, "email", None)
 
         created_at = (
             getattr(gh_pr, "created_at", None)
@@ -247,7 +273,10 @@ def _fetch_github_blame_sync(gh_repo, repo_id, limit=50):
             file_content = contents.pop(0)
             if file_content.type == "dir":
                 contents.extend(
-                    gh_repo.get_contents(file_content.path, ref=gh_repo.default_branch)
+                    gh_repo.get_contents(
+                        file_content.path,
+                        ref=gh_repo.default_branch,
+                    )
                 )
             else:
                 if not is_skippable(file_content.path):
@@ -358,14 +387,19 @@ async def _backfill_github_missing_data(
                             commit_stats_batch.clear()
                 except Exception as e:
                     logging.debug(
-                        f"Failed commit stat fetch for {repo_full_name}@{commit.sha}: {e}"
+                        "Failed commit stat fetch for %s@%s: %s",
+                        repo_full_name,
+                        commit.sha,
+                        e,
                     )
 
             if commit_stats_batch:
                 await store.insert_git_commit_stats(commit_stats_batch)
         except Exception as e:
             logging.warning(
-                f"Failed to backfill GitHub commit stats for {repo_full_name}: {e}"
+                "Failed to backfill GitHub commit stats for %s: %s",
+                repo_full_name,
+                e,
             )
 
     if needs_blame and file_paths:
@@ -386,7 +420,10 @@ async def _backfill_github_missing_data(
                     continue
 
                 for rng in blame.ranges:
-                    for line_no in range(rng.starting_line, rng.ending_line + 1):
+                    for line_no in range(
+                        rng.starting_line,
+                        rng.ending_line + 1,
+                    ):
                         blame_batch.append(
                             GitBlame(
                                 repo_id=db_repo.id,
@@ -423,9 +460,7 @@ async def process_github_repo(
     Process a GitHub repository using the GitHub connector.
     """
     if not CONNECTORS_AVAILABLE:
-        raise RuntimeError(
-            "Connectors are not available. Please install required dependencies."
-        )
+        raise RuntimeError("Connectors unavailable. Install required dependencies.")
 
     logging.info(f"Processing GitHub repository: {owner}/{repo_name}")
     loop = asyncio.get_running_loop()
@@ -462,7 +497,12 @@ async def process_github_repo(
                 "url": repo_info.url,
                 "default_branch": repo_info.default_branch,
             },
-            tags=["github", repo_info.language] if repo_info.language else ["github"],
+            tags=[
+                "github",
+                repo_info.language,
+            ]
+            if repo_info.language
+            else ["github"],
         )
 
         await store.insert_repo(db_repo)
@@ -482,12 +522,19 @@ async def process_github_repo(
         logging.info("Fetching commit stats from GitHub...")
         stats_limit = min(max_commits, 50)
         stats_objects = await loop.run_in_executor(
-            None, _fetch_github_commit_stats_sync, raw_commits, db_repo.id, stats_limit
+            None,
+            _fetch_github_commit_stats_sync,
+            raw_commits,
+            db_repo.id,
+            stats_limit,
         )
 
         if stats_objects:
             await store.insert_git_commit_stats(stats_objects)
-            logging.info(f"Stored {len(stats_objects)} commit stats from GitHub")
+            logging.info(
+                "Stored %d commit stats from GitHub",
+                len(stats_objects),
+            )
 
         # 4. Fetch PRs
         logging.info("Fetching pull requests from GitHub...")
@@ -512,7 +559,11 @@ async def process_github_repo(
                 None, _fetch_github_blame_sync, gh_repo, db_repo.id
             )
 
-        logging.info(f"Successfully processed GitHub repository: {owner}/{repo_name}")
+        logging.info(
+            "Successfully processed GitHub repository: %s/%s",
+            owner,
+            repo_name,
+        )
 
     except ConnectorException as e:
         logging.error(f"Connector error: {e}")
@@ -538,12 +589,11 @@ async def process_github_repos_batch(
     use_async: bool = False,
 ) -> None:
     """
-    Process multiple GitHub repositories using batch processing with pattern matching.
+    Process multiple GitHub repositories using batch processing with
+    pattern matching.
     """
     if not CONNECTORS_AVAILABLE:
-        raise RuntimeError(
-            "Connectors are not available. Please install required dependencies."
-        )
+        raise RuntimeError("Connectors unavailable. Install required dependencies.")
 
     logging.info("=== GitHub Batch Repository Processing ===")
     connector = GitHubConnector(token=token)
@@ -578,7 +628,12 @@ async def process_github_repos_batch(
                 "default_branch": repo_info.default_branch,
                 "batch_processed": True,
             },
-            tags=["github", repo_info.language] if repo_info.language else ["github"],
+            tags=[
+                "github",
+                repo_info.language,
+            ]
+            if repo_info.language
+            else ["github"],
         )
 
         await store.insert_repo(db_repo)
@@ -603,11 +658,12 @@ async def process_github_repos_batch(
                     pr_gate,
                 )
         except Exception as e:
-            logging.warning(
+            logging.error(
                 "Failed to fetch/store PRs for GitHub repo %s: %s",
                 repo_info.full_name,
                 e,
             )
+            raise
 
         if result.stats:
             stat = GitCommitStat(
@@ -631,7 +687,11 @@ async def process_github_repos_batch(
                 max_commits=max_commits_per_repo,
             )
         except Exception as e:
-            logging.debug(f"Backfill failed for GitHub repo {repo_info.full_name}: {e}")
+            logging.debug(
+                "Backfill failed for GitHub repo %s: %s",
+                repo_info.full_name,
+                e,
+            )
 
     def on_repo_complete(result: BatchResult) -> None:
         all_results.append(result)
@@ -639,7 +699,11 @@ async def process_github_repos_batch(
             stats_info = ""
             if result.stats:
                 stats_info = f" ({result.stats.total_commits} commits)"
-            logging.info(f"  ✓ Processed: {result.repository.full_name}{stats_info}")
+            logging.info(
+                "  \u2713 Processed: %s%s",
+                result.repository.full_name,
+                stats_info,
+            )
         else:
             logging.warning(
                 f"  ✗ Failed: {result.repository.full_name}: {result.error}"
