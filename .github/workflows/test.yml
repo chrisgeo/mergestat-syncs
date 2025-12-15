@@ -59,7 +59,7 @@ jobs:
         DB_CONN_STRING: postgresql+asyncpg://postgres:postgres@localhost:5432/test_db
         MONGO_CONN_STRING: mongodb://localhost:27017
       run: |
-        pytest tests/ --ignore=tests/test_performance.py -v --tb=short --cov=. --cov-report=xml
+        pytest tests/ -v --tb=short --cov=. --cov-report=xml
 
     - name: Upload coverage reports
       if: matrix.python-version == '3.11'
