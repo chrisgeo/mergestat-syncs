@@ -179,7 +179,7 @@ All modes support these environment variables:
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `DB_CONN_STRING` | Database connection string | None (required) |
-| `DB_TYPE` | Database type (`postgres`, `mongo`, or `sqlite`) | Auto-detected from URL |
+| `DB_TYPE` | Database type (`postgres`, `mongo`, `sqlite`, or `clickhouse`) | Auto-detected from URL |
 | `DB_ECHO` | Enable SQL logging | `false` |
 | `MONGO_DB_NAME` | MongoDB database name | None |
 | `BATCH_SIZE` | Records per batch insert | `100` |
@@ -193,7 +193,7 @@ All modes support these environment variables:
 ```
 usage: git_mergestat.py [-h] [--db DB] [--connector {local,github,gitlab}]
                         [--auth AUTH] [--repo-path REPO_PATH]
-                        [--db-type {postgres,mongo,sqlite}]
+                        [--db-type {postgres,mongo,sqlite,clickhouse}]
                         [--github-owner GITHUB_OWNER] [--github-repo GITHUB_REPO]
                         [--gitlab-url GITLAB_URL] [--gitlab-project-id GITLAB_PROJECT_ID]
                         [-s SEARCH_PATTERN] [--batch-size BATCH_SIZE] [--group GROUP]
@@ -207,7 +207,7 @@ Core Options:
   --auth AUTH                   Authentication token (GitHub or GitLab)
   --repo-path REPO_PATH        Path to the local git repository
   --since SINCE                 Lower-bound date/time for local mode. Filters commits, per-file stats, and blame to activity at or after this timestamp (ISO date or datetime).
-  --db-type {postgres,mongo,sqlite}  Database backend (optional, auto-detected)
+  --db-type {postgres,mongo,sqlite,clickhouse}  Database backend (optional, auto-detected)
 
 GitHub Options:
   --github-owner OWNER         GitHub repository owner/organization
