@@ -7,23 +7,17 @@ from pathlib import Path
 from typing import Tuple
 
 from models.git import Repo
-from storage import create_store, detect_db_type
-from utils import (
-    _parse_since,
-    iter_commits_since,
-    collect_changed_files,
-    REPO_PATH,
-)
-
-# Import processors
-from processors.local import (
-    process_git_commits,
-    process_git_commit_stats,
-    process_files_and_blame,
-)
 from processors.github import process_github_repo, process_github_repos_batch
 from processors.gitlab import process_gitlab_project, process_gitlab_projects_batch
 
+# Import processors
+from processors.local import (
+    process_files_and_blame,
+    process_git_commit_stats,
+    process_git_commits,
+)
+from storage import create_store, detect_db_type
+from utils import REPO_PATH, _parse_since, collect_changed_files, iter_commits_since
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
@@ -62,7 +56,7 @@ def parse_args():
     parser.add_argument(
         "--db-type",
         required=False,
-        choices=["postgres", "mongo", "sqlite"],
+        choices=["postgres", "mongo", "sqlite", "clickhouse"],
         help="Database backend to use (auto-detected from --db if not specified).",
     )
     parser.add_argument(
@@ -230,8 +224,10 @@ async def main() -> None:
         except ValueError:
             pass
 
-    if DB_TYPE not in {"postgres", "mongo", "sqlite"}:
-        raise ValueError("DB_TYPE must be 'postgres', 'mongo', or 'sqlite'")
+    if DB_TYPE not in {"postgres", "mongo", "sqlite", "clickhouse"}:
+        raise ValueError(
+            "DB_TYPE must be 'postgres', 'mongo', 'sqlite', or 'clickhouse'"
+        )
     if not DB_CONN_STRING:
         raise ValueError(
             "Database connection string is required (set DB_CONN_STRING or use --db)"

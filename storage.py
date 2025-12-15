@@ -1,8 +1,11 @@
+import asyncio
+import json
 import uuid
 from collections.abc import Iterable
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Union
 
+import clickhouse_connect
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import UpdateOne
 from pymongo.errors import ConfigurationError
@@ -21,13 +24,19 @@ def detect_db_type(conn_string: str) -> str:
     Detect database type from connection string.
 
     :param conn_string: Database connection string.
-    :return: Database type ('postgres', 'sqlite', or 'mongo').
+    :return: Database type ('postgres', 'sqlite', 'mongo', or 'clickhouse').
     :raises ValueError: If database type cannot be determined.
     """
     if not conn_string:
         raise ValueError("Connection string is required")
 
     conn_lower = conn_string.lower()
+
+    # ClickHouse connection strings
+    if conn_lower.startswith("clickhouse://") or conn_lower.startswith(
+        ("clickhouse+http://", "clickhouse+https://", "clickhouse+native://")
+    ):
+        return "clickhouse"
 
     # MongoDB connection strings
     if conn_lower.startswith("mongodb://") or conn_lower.startswith("mongodb+srv://"):
@@ -50,7 +59,7 @@ def detect_db_type(conn_string: str) -> str:
     raise ValueError(
         f"Could not detect database type from connection string. "
         f"Supported: mongodb://, postgresql://, postgres://, sqlite://, "
-        f"or variations with async drivers. Got scheme: '{scheme}', "
+        f"clickhouse://, or variations with async drivers. Got scheme: '{scheme}', "
         f"connection string (first 100 chars): {conn_string[:100]}..."
     )
 
@@ -60,7 +69,7 @@ def create_store(
     db_type: Optional[str] = None,
     db_name: Optional[str] = None,
     echo: bool = False,
-) -> Union["SQLAlchemyStore", "MongoStore"]:
+) -> Union["SQLAlchemyStore", "MongoStore", "ClickHouseStore"]:
     """
     Create a storage backend based on the connection string.
 
@@ -68,11 +77,11 @@ def create_store(
     connection string and returns the appropriate store implementation.
 
     :param conn_string: Database connection string.
-    :param db_type: Optional explicit database type ('postgres', 'sqlite', 'mongo').
+    :param db_type: Optional explicit database type ('postgres', 'sqlite', 'mongo', 'clickhouse').
                    If not provided, it will be auto-detected from conn_string.
     :param db_name: Optional database name (for MongoDB).
     :param echo: Whether to echo SQL statements (for SQLAlchemy).
-    :return: Appropriate store instance (SQLAlchemyStore or MongoStore).
+    :return: Appropriate store instance (SQLAlchemyStore, MongoStore, or ClickHouseStore).
     """
     if db_type is None:
         db_type = detect_db_type(conn_string)
@@ -81,12 +90,14 @@ def create_store(
 
     if db_type == "mongo":
         return MongoStore(conn_string, db_name=db_name)
+    elif db_type == "clickhouse":
+        return ClickHouseStore(conn_string)
     elif db_type in ("postgres", "postgresql", "sqlite"):
         return SQLAlchemyStore(conn_string, echo=echo)
     else:
         raise ValueError(
             f"Unsupported database type: {db_type}. "
-            f"Supported types: postgres, sqlite, mongo"
+            f"Supported types: postgres, sqlite, mongo, clickhouse"
         )
 
 
@@ -115,12 +126,14 @@ class SQLAlchemyStore:
 
         # Only add pooling parameters for databases that support them
         if "sqlite" not in conn_string.lower():
-            engine_kwargs.update({
-                "pool_size": 20,  # Increased from default 5
-                "max_overflow": 30,  # Increased from default 10
-                "pool_pre_ping": True,  # Verify connections before using
-                "pool_recycle": 3600,  # Recycle connections after 1 hour
-            })
+            engine_kwargs.update(
+                {
+                    "pool_size": 20,  # Increased from default 5
+                    "max_overflow": 30,  # Increased from default 10
+                    "pool_pre_ping": True,  # Verify connections before using
+                    "pool_recycle": 3600,  # Recycle connections after 1 hour
+                }
+            )
 
         self.engine = create_async_engine(conn_string, **engine_kwargs)
         self.session_factory = sessionmaker(
@@ -567,3 +580,504 @@ class MongoStore:
             UpdateOne({"_id": doc["_id"]}, {"$set": doc}, upsert=True) for doc in docs
         ]
         await self.db[collection].bulk_write(operations, ordered=False)
+
+
+class ClickHouseStore:
+    """Async storage implementation backed by ClickHouse (via clickhouse-connect)."""
+
+    def __init__(self, conn_string: str) -> None:
+        if not conn_string:
+            raise ValueError("ClickHouse connection string is required")
+        self.conn_string = conn_string
+        self.client = None
+        self._lock = asyncio.Lock()
+
+    async def __aenter__(self) -> "ClickHouseStore":
+        self.client = await asyncio.to_thread(
+            clickhouse_connect.get_client, dsn=self.conn_string
+        )
+        await self._ensure_tables()
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        if self.client is not None:
+            await asyncio.to_thread(self.client.close)
+
+    @staticmethod
+    def _normalize_uuid(value: Any) -> uuid.UUID:
+        if value is None:
+            raise ValueError("UUID value is required")
+        if isinstance(value, uuid.UUID):
+            return value
+        return uuid.UUID(str(value))
+
+    @staticmethod
+    def _normalize_datetime(value: Any) -> Any:
+        if value is None:
+            return None
+        if not isinstance(value, datetime):
+            return value
+        if value.tzinfo is None:
+            return value
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+    @staticmethod
+    def _json_or_none(value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        return json.dumps(value, default=str)
+
+    async def _ensure_tables(self) -> None:
+        assert self.client is not None
+        stmts = [
+            """
+            CREATE TABLE IF NOT EXISTS repos (
+                id UUID,
+                repo String,
+                ref Nullable(String),
+                created_at DateTime64(3, 'UTC'),
+                settings Nullable(String),
+                tags Nullable(String),
+                _mergestat_synced_at DateTime64(3, 'UTC')
+            ) ENGINE = ReplacingMergeTree(_mergestat_synced_at)
+            ORDER BY (id)
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS git_files (
+                repo_id UUID,
+                path String,
+                executable UInt8,
+                contents Nullable(String),
+                _mergestat_synced_at DateTime64(3, 'UTC')
+            ) ENGINE = ReplacingMergeTree(_mergestat_synced_at)
+            ORDER BY (repo_id, path)
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS git_commits (
+                repo_id UUID,
+                hash String,
+                message Nullable(String),
+                author_name Nullable(String),
+                author_email Nullable(String),
+                author_when DateTime64(3, 'UTC'),
+                committer_name Nullable(String),
+                committer_email Nullable(String),
+                committer_when DateTime64(3, 'UTC'),
+                parents UInt32,
+                _mergestat_synced_at DateTime64(3, 'UTC')
+            ) ENGINE = ReplacingMergeTree(_mergestat_synced_at)
+            ORDER BY (repo_id, hash)
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS git_commit_stats (
+                repo_id UUID,
+                commit_hash String,
+                file_path String,
+                additions Int32,
+                deletions Int32,
+                old_file_mode String,
+                new_file_mode String,
+                _mergestat_synced_at DateTime64(3, 'UTC')
+            ) ENGINE = ReplacingMergeTree(_mergestat_synced_at)
+            ORDER BY (repo_id, commit_hash, file_path)
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS git_blame (
+                repo_id UUID,
+                path String,
+                line_no UInt32,
+                author_email Nullable(String),
+                author_name Nullable(String),
+                author_when Nullable(DateTime64(3, 'UTC')),
+                commit_hash Nullable(String),
+                line Nullable(String),
+                _mergestat_synced_at DateTime64(3, 'UTC')
+            ) ENGINE = ReplacingMergeTree(_mergestat_synced_at)
+            ORDER BY (repo_id, path, line_no)
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS git_pull_requests (
+                repo_id UUID,
+                number UInt32,
+                title Nullable(String),
+                state Nullable(String),
+                author_name Nullable(String),
+                author_email Nullable(String),
+                created_at DateTime64(3, 'UTC'),
+                merged_at Nullable(DateTime64(3, 'UTC')),
+                closed_at Nullable(DateTime64(3, 'UTC')),
+                head_branch Nullable(String),
+                base_branch Nullable(String),
+                _mergestat_synced_at DateTime64(3, 'UTC')
+            ) ENGINE = ReplacingMergeTree(_mergestat_synced_at)
+            ORDER BY (repo_id, number)
+            """,
+        ]
+
+        async with self._lock:
+            for stmt in stmts:
+                await asyncio.to_thread(self.client.command, stmt)
+
+    async def _insert_rows(
+        self, table: str, columns: List[str], rows: List[Dict[str, Any]]
+    ) -> None:
+        if not rows:
+            return
+        assert self.client is not None
+        matrix = [[row.get(col) for col in columns] for row in rows]
+        async with self._lock:
+            await asyncio.to_thread(
+                self.client.insert, table, matrix, column_names=columns
+            )
+
+    async def _has_any(self, table: str, repo_id: uuid.UUID) -> bool:
+        assert self.client is not None
+        query = f"SELECT 1 FROM {table} WHERE repo_id = {{repo_id:UUID}} LIMIT 1"
+        async with self._lock:
+            result = await asyncio.to_thread(
+                self.client.query, query, parameters={"repo_id": str(repo_id)}
+            )
+        return bool(getattr(result, "result_rows", None))
+
+    async def insert_repo(self, repo: Repo) -> None:
+        assert self.client is not None
+        repo_id = self._normalize_uuid(getattr(repo, "id"))
+        async with self._lock:
+            existing = await asyncio.to_thread(
+                self.client.query,
+                "SELECT 1 FROM repos WHERE id = {id:UUID} LIMIT 1",
+                parameters={"id": str(repo_id)},
+            )
+        if getattr(existing, "result_rows", None):
+            return
+
+        synced_at = self._normalize_datetime(datetime.now(timezone.utc))
+        created_at = (
+            self._normalize_datetime(getattr(repo, "created_at", None)) or synced_at
+        )
+
+        row = {
+            "id": repo_id,
+            "repo": getattr(repo, "repo"),
+            "ref": getattr(repo, "ref", None),
+            "created_at": created_at,
+            "settings": self._json_or_none(getattr(repo, "settings", None)),
+            "tags": self._json_or_none(getattr(repo, "tags", None)),
+            "_mergestat_synced_at": synced_at,
+        }
+        await self._insert_rows(
+            "repos",
+            [
+                "id",
+                "repo",
+                "ref",
+                "created_at",
+                "settings",
+                "tags",
+                "_mergestat_synced_at",
+            ],
+            [row],
+        )
+
+    async def has_any_git_files(self, repo_id) -> bool:
+        return await self._has_any("git_files", self._normalize_uuid(repo_id))
+
+    async def has_any_git_commit_stats(self, repo_id) -> bool:
+        return await self._has_any("git_commit_stats", self._normalize_uuid(repo_id))
+
+    async def has_any_git_blame(self, repo_id) -> bool:
+        return await self._has_any("git_blame", self._normalize_uuid(repo_id))
+
+    async def insert_git_file_data(self, file_data: List[GitFile]) -> None:
+        if not file_data:
+            return
+        synced_at_default = self._normalize_datetime(datetime.now(timezone.utc))
+        rows: List[Dict[str, Any]] = []
+        for item in file_data:
+            if isinstance(item, dict):
+                rows.append(
+                    {
+                        "repo_id": self._normalize_uuid(item.get("repo_id")),
+                        "path": item.get("path"),
+                        "executable": 1 if item.get("executable") else 0,
+                        "contents": item.get("contents"),
+                        "_mergestat_synced_at": self._normalize_datetime(
+                            item.get("_mergestat_synced_at") or synced_at_default
+                        ),
+                    }
+                )
+            else:
+                rows.append(
+                    {
+                        "repo_id": self._normalize_uuid(getattr(item, "repo_id")),
+                        "path": getattr(item, "path"),
+                        "executable": 1 if getattr(item, "executable") else 0,
+                        "contents": getattr(item, "contents"),
+                        "_mergestat_synced_at": self._normalize_datetime(
+                            getattr(item, "_mergestat_synced_at", None)
+                            or synced_at_default
+                        ),
+                    }
+                )
+
+        await self._insert_rows(
+            "git_files",
+            ["repo_id", "path", "executable", "contents", "_mergestat_synced_at"],
+            rows,
+        )
+
+    async def insert_git_commit_data(self, commit_data: List[GitCommit]) -> None:
+        if not commit_data:
+            return
+        synced_at_default = self._normalize_datetime(datetime.now(timezone.utc))
+        rows: List[Dict[str, Any]] = []
+        for item in commit_data:
+            if isinstance(item, dict):
+                rows.append(
+                    {
+                        "repo_id": self._normalize_uuid(item.get("repo_id")),
+                        "hash": item.get("hash"),
+                        "message": item.get("message"),
+                        "author_name": item.get("author_name"),
+                        "author_email": item.get("author_email"),
+                        "author_when": self._normalize_datetime(
+                            item.get("author_when")
+                        ),
+                        "committer_name": item.get("committer_name"),
+                        "committer_email": item.get("committer_email"),
+                        "committer_when": self._normalize_datetime(
+                            item.get("committer_when")
+                        ),
+                        "parents": int(item.get("parents") or 0),
+                        "_mergestat_synced_at": self._normalize_datetime(
+                            item.get("_mergestat_synced_at") or synced_at_default
+                        ),
+                    }
+                )
+            else:
+                rows.append(
+                    {
+                        "repo_id": self._normalize_uuid(getattr(item, "repo_id")),
+                        "hash": getattr(item, "hash"),
+                        "message": getattr(item, "message"),
+                        "author_name": getattr(item, "author_name"),
+                        "author_email": getattr(item, "author_email"),
+                        "author_when": self._normalize_datetime(
+                            getattr(item, "author_when")
+                        ),
+                        "committer_name": getattr(item, "committer_name"),
+                        "committer_email": getattr(item, "committer_email"),
+                        "committer_when": self._normalize_datetime(
+                            getattr(item, "committer_when")
+                        ),
+                        "parents": int(getattr(item, "parents") or 0),
+                        "_mergestat_synced_at": self._normalize_datetime(
+                            getattr(item, "_mergestat_synced_at", None)
+                            or synced_at_default
+                        ),
+                    }
+                )
+
+        await self._insert_rows(
+            "git_commits",
+            [
+                "repo_id",
+                "hash",
+                "message",
+                "author_name",
+                "author_email",
+                "author_when",
+                "committer_name",
+                "committer_email",
+                "committer_when",
+                "parents",
+                "_mergestat_synced_at",
+            ],
+            rows,
+        )
+
+    async def insert_git_commit_stats(self, commit_stats: List[GitCommitStat]) -> None:
+        if not commit_stats:
+            return
+        synced_at_default = self._normalize_datetime(datetime.now(timezone.utc))
+        rows: List[Dict[str, Any]] = []
+        for item in commit_stats:
+            if isinstance(item, dict):
+                rows.append(
+                    {
+                        "repo_id": self._normalize_uuid(item.get("repo_id")),
+                        "commit_hash": item.get("commit_hash"),
+                        "file_path": item.get("file_path"),
+                        "additions": int(item.get("additions") or 0),
+                        "deletions": int(item.get("deletions") or 0),
+                        "old_file_mode": item.get("old_file_mode") or "unknown",
+                        "new_file_mode": item.get("new_file_mode") or "unknown",
+                        "_mergestat_synced_at": self._normalize_datetime(
+                            item.get("_mergestat_synced_at") or synced_at_default
+                        ),
+                    }
+                )
+            else:
+                rows.append(
+                    {
+                        "repo_id": self._normalize_uuid(getattr(item, "repo_id")),
+                        "commit_hash": getattr(item, "commit_hash"),
+                        "file_path": getattr(item, "file_path"),
+                        "additions": int(getattr(item, "additions") or 0),
+                        "deletions": int(getattr(item, "deletions") or 0),
+                        "old_file_mode": getattr(item, "old_file_mode", None)
+                        or "unknown",
+                        "new_file_mode": getattr(item, "new_file_mode", None)
+                        or "unknown",
+                        "_mergestat_synced_at": self._normalize_datetime(
+                            getattr(item, "_mergestat_synced_at", None)
+                            or synced_at_default
+                        ),
+                    }
+                )
+
+        await self._insert_rows(
+            "git_commit_stats",
+            [
+                "repo_id",
+                "commit_hash",
+                "file_path",
+                "additions",
+                "deletions",
+                "old_file_mode",
+                "new_file_mode",
+                "_mergestat_synced_at",
+            ],
+            rows,
+        )
+
+    async def insert_blame_data(self, data_batch: List[GitBlame]) -> None:
+        if not data_batch:
+            return
+        synced_at_default = self._normalize_datetime(datetime.now(timezone.utc))
+        rows: List[Dict[str, Any]] = []
+        for item in data_batch:
+            if isinstance(item, dict):
+                rows.append(
+                    {
+                        "repo_id": self._normalize_uuid(item.get("repo_id")),
+                        "path": item.get("path"),
+                        "line_no": int(item.get("line_no") or 0),
+                        "author_email": item.get("author_email"),
+                        "author_name": item.get("author_name"),
+                        "author_when": self._normalize_datetime(
+                            item.get("author_when")
+                        ),
+                        "commit_hash": item.get("commit_hash"),
+                        "line": item.get("line"),
+                        "_mergestat_synced_at": self._normalize_datetime(
+                            item.get("_mergestat_synced_at") or synced_at_default
+                        ),
+                    }
+                )
+            else:
+                rows.append(
+                    {
+                        "repo_id": self._normalize_uuid(getattr(item, "repo_id")),
+                        "path": getattr(item, "path"),
+                        "line_no": int(getattr(item, "line_no") or 0),
+                        "author_email": getattr(item, "author_email"),
+                        "author_name": getattr(item, "author_name"),
+                        "author_when": self._normalize_datetime(
+                            getattr(item, "author_when")
+                        ),
+                        "commit_hash": getattr(item, "commit_hash"),
+                        "line": getattr(item, "line"),
+                        "_mergestat_synced_at": self._normalize_datetime(
+                            getattr(item, "_mergestat_synced_at", None)
+                            or synced_at_default
+                        ),
+                    }
+                )
+
+        await self._insert_rows(
+            "git_blame",
+            [
+                "repo_id",
+                "path",
+                "line_no",
+                "author_email",
+                "author_name",
+                "author_when",
+                "commit_hash",
+                "line",
+                "_mergestat_synced_at",
+            ],
+            rows,
+        )
+
+    async def insert_git_pull_requests(self, pr_data: List[GitPullRequest]) -> None:
+        if not pr_data:
+            return
+        synced_at_default = self._normalize_datetime(datetime.now(timezone.utc))
+        rows: List[Dict[str, Any]] = []
+        for item in pr_data:
+            if isinstance(item, dict):
+                rows.append(
+                    {
+                        "repo_id": self._normalize_uuid(item.get("repo_id")),
+                        "number": int(item.get("number") or 0),
+                        "title": item.get("title"),
+                        "state": item.get("state"),
+                        "author_name": item.get("author_name"),
+                        "author_email": item.get("author_email"),
+                        "created_at": self._normalize_datetime(item.get("created_at")),
+                        "merged_at": self._normalize_datetime(item.get("merged_at")),
+                        "closed_at": self._normalize_datetime(item.get("closed_at")),
+                        "head_branch": item.get("head_branch"),
+                        "base_branch": item.get("base_branch"),
+                        "_mergestat_synced_at": self._normalize_datetime(
+                            item.get("_mergestat_synced_at") or synced_at_default
+                        ),
+                    }
+                )
+            else:
+                rows.append(
+                    {
+                        "repo_id": self._normalize_uuid(getattr(item, "repo_id")),
+                        "number": int(getattr(item, "number") or 0),
+                        "title": getattr(item, "title"),
+                        "state": getattr(item, "state"),
+                        "author_name": getattr(item, "author_name"),
+                        "author_email": getattr(item, "author_email"),
+                        "created_at": self._normalize_datetime(
+                            getattr(item, "created_at")
+                        ),
+                        "merged_at": self._normalize_datetime(
+                            getattr(item, "merged_at")
+                        ),
+                        "closed_at": self._normalize_datetime(
+                            getattr(item, "closed_at")
+                        ),
+                        "head_branch": getattr(item, "head_branch"),
+                        "base_branch": getattr(item, "base_branch"),
+                        "_mergestat_synced_at": self._normalize_datetime(
+                            getattr(item, "_mergestat_synced_at", None)
+                            or synced_at_default
+                        ),
+                    }
+                )
+
+        await self._insert_rows(
+            "git_pull_requests",
+            [
+                "repo_id",
+                "number",
+                "title",
+                "state",
+                "author_name",
+                "author_email",
+                "created_at",
+                "merged_at",
+                "closed_at",
+                "head_branch",
+                "base_branch",
+                "_mergestat_synced_at",
+            ],
+            rows,
+        )

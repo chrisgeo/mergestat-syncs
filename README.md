@@ -92,15 +92,16 @@ asyncio.run(main())
 
 ## Database Configuration
 
-This project supports PostgreSQL, MongoDB, and SQLite as storage backends. You can configure the database backend using environment variables or command-line arguments.
+This project supports PostgreSQL, MongoDB, SQLite, and ClickHouse as storage backends. You can configure the database backend using environment variables or command-line arguments.
 
 ### Environment Variables
 
-- **`DB_TYPE`** (optional): Specifies the database backend to use. Valid values are `postgres`, `mongo`, or `sqlite`. Default: `postgres`
+- **`DB_TYPE`** (optional): Specifies the database backend to use. Valid values are `postgres`, `mongo`, `sqlite`, or `clickhouse`. Default: `postgres`
 - **`DB_CONN_STRING`** (required): The connection string for your database.
   - For PostgreSQL: `postgresql+asyncpg://user:password@host:port/database`
   - For MongoDB: `mongodb://host:port` or `mongodb://user:password@host:port`
   - For SQLite: `sqlite+aiosqlite:///path/to/database.db` or `sqlite+aiosqlite:///:memory:` for in-memory
+  - For ClickHouse: `clickhouse://user:password@host:8123/database`
 - **`DB_ECHO`** (optional): Enable SQL query logging for PostgreSQL and SQLite. Set to `true`, `1`, or `yes` (case-insensitive) to enable. Any other value (including `false`, `0`, `no`, or unset) disables it. Default: `false`. Note: Enabling this in production can expose sensitive data and impact performance.
 - **`MONGO_DB_NAME`** (optional): The name of the MongoDB database to use. If not specified, the script will use the database specified in the connection string, or default to `mergestat`.
 - **`REPO_PATH`** (optional): Path to the git repository to analyze. Default: `.` (current directory)
@@ -115,7 +116,7 @@ You can also configure the database using command-line arguments, which will ove
 #### Core Arguments
 
 - **`--db`**: Database connection string (auto-detects database type from URL scheme)
-- **`--db-type`**: Database backend to use (`postgres`, `mongo`, or `sqlite`) - optional if URL scheme is clear
+- **`--db-type`**: Database backend to use (`postgres`, `mongo`, `sqlite`, or `clickhouse`) - optional if URL scheme is clear
 - **`--connector`**: Connector type (`local`, `github`, or `gitlab`)
 - **`--auth`**: Authentication token (works for both GitHub and GitLab)
 - **`--repo-path`**: Path to the git repository (for local mode)
@@ -374,9 +375,21 @@ For a typical repository with 1000 files and 10,000 commits:
   python git_mergestat.py
   ```
 
+#### Using ClickHouse
+
+- No migrations required - tables are created automatically using `ReplacingMergeTree`
+- Best for analytics and large datasets
+- Example setup:
+
+  ```bash
+  export DB_TYPE=clickhouse
+  export DB_CONN_STRING="clickhouse://default:@localhost:8123/default"
+  python git_mergestat.py
+  ```
+
 #### Switching Between Databases
 
 - The different backends use different storage mechanisms and are not directly compatible
-- Data is not automatically migrated when switching between PostgreSQL, MongoDB, and SQLite
+- Data is not automatically migrated when switching between PostgreSQL, MongoDB, SQLite, and ClickHouse
 - If you need to switch backends, you'll need to re-run the analysis to populate the new database
 - PostgreSQL and MongoDB can run simultaneously on the same machine using different ports (see `compose.yml`)
