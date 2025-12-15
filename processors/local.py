@@ -46,6 +46,15 @@ def _extract_commit_info(
 def _compute_commit_stats_sync(commit: Any, repo_id: uuid.UUID) -> List[GitCommitStat]:
     """Helper to compute commit stats (git diff) in a thread."""
     stats: List[GitCommitStat] = []
+    commit_stats: Dict[str, Dict[str, int]] = {}
+
+    try:
+        stats_attr = getattr(commit, "stats", None)
+        if stats_attr and hasattr(stats_attr, "files"):
+            commit_stats = stats_attr.files or {}
+    except Exception:
+        commit_stats = {}
+
     try:
         if commit.parents:
             diffs = commit.parents[0].diff(commit, create_patch=False)
@@ -60,31 +69,11 @@ def _compute_commit_stats_sync(commit: Any, repo_id: uuid.UUID) -> List[GitCommi
         if not file_path:
             continue
 
-        # Basic stats (additions/deletions/file mode changes)
-        # diff.diff is bytes with the patch, but we disabled create_patch=False
-        # So we rely on diff.insertions / diff.deletions if available, but
-        # GitPython diff objects without 'create_patch=True' might not populate line counts directly
-        # efficiently without parsing.
-        # However, for pure 'stat' we assume we want simple file change tracking or expensive diff?
-        # The original code seemed to rely on `diff.diff` or similar if it was parsing lines.
-        # Wait, the original code had:
-        # additions=0, deletions=0 ...
-        # actually GitPython diff does not provide insertions/deletions easily without patch.
-        # Let's assume standard behavior or minimal stats for now matching previous logic.
-
-        # NOTE: Previous logic used simple placeholders or expensive iter_change_type?
-        # Let's assume 0 for add/del if not easily available to avoid slowdown,
-        # or check if we can get it cheap.
-
-        # GitPython 'diff' object attributes:
-        # a_mode, b_mode, new_file, deleted_file, renamed_file
-
+        file_stat = commit_stats.get(file_path, {})
         old_mode = str(diff.a_mode) if diff.a_mode else "000000"
         new_mode = str(diff.b_mode) if diff.b_mode else "000000"
-
-        # Approximate add/del or leave 0
-        additions = 0
-        deletions = 0
+        additions = file_stat.get("insertions", 0) if isinstance(file_stat, dict) else 0
+        deletions = file_stat.get("deletions", 0) if isinstance(file_stat, dict) else 0
 
         stats.append(
             GitCommitStat(
@@ -133,8 +122,9 @@ async def process_git_commits(
     try:
         commit_count = 0
         for commit in commits:
-            # Check 'since' again if the iterator didn't filter it?
-            # efficient iterator usually handles it.
+            commit_dt = _normalize_datetime(commit.committed_datetime)
+            if since and commit_dt < since:
+                continue
 
             # Run extraction in thread
             git_commit, error = await loop.run_in_executor(
@@ -183,6 +173,10 @@ async def process_git_commit_stats(
     try:
         commit_count = 0
         for commit in commits:
+            commit_dt = _normalize_datetime(commit.committed_datetime)
+            if since and commit_dt < since:
+                continue
+
             # Run blocking git diff in executor
             stats = await loop.run_in_executor(
                 None, _compute_commit_stats_sync, commit, repo.id

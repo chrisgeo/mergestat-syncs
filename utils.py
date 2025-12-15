@@ -124,7 +124,7 @@ def collect_changed_files(repo_root: Union[str, Path], commits: Iterable) -> Lis
     Collect unique file paths touched by the provided commits.
     Expects iterable of GitPython commit objects.
     """
-    root_path = Path(repo_root)
+    root_path = Path(repo_root).resolve()
     paths = set()
 
     for commit in commits:
@@ -144,7 +144,7 @@ def collect_changed_files(repo_root: Union[str, Path], commits: Iterable) -> Lis
             # We construct full path to check existence, but return relative paths?
             # Original code returned Paths.
             # Original code: candidate = root_path / file_path; if candidate.exists(): paths.add(candidate)
-            candidate = root_path / file_path
+            candidate = (root_path / file_path).resolve()
             if candidate.exists():
                 paths.add(candidate)
 
