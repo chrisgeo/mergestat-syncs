@@ -1,4 +1,6 @@
+tqdm
 sqlalchemy
+clickhouse-connect
 psycopg2-binary
 asyncpg
 aiosqlite

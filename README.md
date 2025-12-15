@@ -21,7 +21,7 @@ The GitHub connector supports batch processing of repositories with:
 
 - **Pattern matching** - Filter repositories using fnmatch-style patterns (e.g., `chrisgeo/m*`, `*/api-*`)
 - **Configurable batch size** - Process repositories in batches to manage memory and API usage
-- **Rate limiting** - Configurable delays between batches to avoid hitting API limits
+- **Rate limiting** - Delay between batches plus shared backoff across workers (avoids stampedes; honors server reset/`Retry-After` when available)
 - **Async processing** - Process multiple repositories concurrently for better performance
 - **Callbacks** - Get notified as each repository is processed
 
@@ -92,15 +92,16 @@ asyncio.run(main())
 
 ## Database Configuration
 
-This project supports PostgreSQL, MongoDB, and SQLite as storage backends. You can configure the database backend using environment variables or command-line arguments.
+This project supports PostgreSQL, MongoDB, SQLite, and ClickHouse as storage backends. You can configure the database backend using environment variables or command-line arguments.
 
 ### Environment Variables
 
-- **`DB_TYPE`** (optional): Specifies the database backend to use. Valid values are `postgres`, `mongo`, or `sqlite`. Default: `postgres`
+- **`DB_TYPE`** (optional): Specifies the database backend to use. Valid values are `postgres`, `mongo`, `sqlite`, or `clickhouse`. Default: `postgres`
 - **`DB_CONN_STRING`** (required): The connection string for your database.
   - For PostgreSQL: `postgresql+asyncpg://user:password@host:port/database`
   - For MongoDB: `mongodb://host:port` or `mongodb://user:password@host:port`
   - For SQLite: `sqlite+aiosqlite:///path/to/database.db` or `sqlite+aiosqlite:///:memory:` for in-memory
+  - For ClickHouse: `clickhouse://user:password@host:8123/database`
 - **`DB_ECHO`** (optional): Enable SQL query logging for PostgreSQL and SQLite. Set to `true`, `1`, or `yes` (case-insensitive) to enable. Any other value (including `false`, `0`, `no`, or unset) disables it. Default: `false`. Note: Enabling this in production can expose sensitive data and impact performance.
 - **`MONGO_DB_NAME`** (optional): The name of the MongoDB database to use. If not specified, the script will use the database specified in the connection string, or default to `mergestat`.
 - **`REPO_PATH`** (optional): Path to the git repository to analyze. Default: `.` (current directory)
@@ -115,7 +116,7 @@ You can also configure the database using command-line arguments, which will ove
 #### Core Arguments
 
 - **`--db`**: Database connection string (auto-detects database type from URL scheme)
-- **`--db-type`**: Database backend to use (`postgres`, `mongo`, or `sqlite`) - optional if URL scheme is clear
+- **`--db-type`**: Database backend to use (`postgres`, `mongo`, `sqlite`, or `clickhouse`) - optional if URL scheme is clear
 - **`--connector`**: Connector type (`local`, `github`, or `gitlab`)
 - **`--auth`**: Authentication token (works for both GitHub and GitLab)
 - **`--repo-path`**: Path to the git repository (for local mode)
@@ -125,7 +126,7 @@ You can also configure the database using command-line arguments, which will ove
 
 - **`--github-owner`**: GitHub repository owner/organization
 - **`--github-repo`**: GitHub repository name
-- **`--gitlab-url`**: GitLab instance URL (default: https://gitlab.com)
+- **`--gitlab-url`**: GitLab instance URL (default: <https://gitlab.com>)
 - **`--gitlab-project-id`**: GitLab project ID (numeric)
 
 #### Batch Processing Options
@@ -225,6 +226,7 @@ SQLite connection strings use the following format:
 - **In-memory**: `sqlite+aiosqlite:///:memory:` (data is lost when the process exits)
 
 SQLite is ideal for:
+
 - Local development and testing
 - Single-user scenarios
 - Small to medium-sized repositories
@@ -246,6 +248,7 @@ The script includes several configuration options to optimize performance:
   - Connections are recycled every hour
 
 **Example for large repositories:**
+
 ```bash
 export BATCH_SIZE=500
 export MAX_WORKERS=8
@@ -253,6 +256,7 @@ python git_mergestat.py
 ```
 
 **Example for resource-constrained environments:**
+
 ```bash
 export BATCH_SIZE=50
 export MAX_WORKERS=2
@@ -264,29 +268,34 @@ python git_mergestat.py
 This project includes several key performance optimizations to speed up git data processing:
 
 ### 1. **Increased Batch Size** (10x improvement)
+
 - **Changed from**: 10 records per batch
 - **Changed to**: 100 records per batch (configurable)
 - **Impact**: Reduces database round-trips by 10x, significantly improving insertion speed
 - **Configuration**: Set `BATCH_SIZE=200` for even larger batches
 
 ### 2. **Parallel Git Blame Processing** (4-8x improvement)
+
 - **Implementation**: Uses asyncio with configurable worker pool
 - **Default**: 4 parallel workers processing files concurrently
 - **Impact**: Multi-core CPU utilization, dramatically faster blame processing
 - **Configuration**: Set `MAX_WORKERS=8` for more powerful machines
 
 ### 3. **Database Connection Pooling** (PostgreSQL)
+
 - **Pool size**: 20 connections (up from default 5)
 - **Max overflow**: 30 additional connections (up from default 10)
 - **Impact**: Better handling of concurrent operations, reduced connection overhead
 - **Auto-configured**: No manual setup required
 
 ### 4. **Optimized Bulk Operations**
+
 - All database insertions use bulk operations
 - MongoDB operations use `ordered=False` for better performance
 - SQLAlchemy uses `add_all()` for efficient batch inserts
 
 ### 5. **Smart File Filtering**
+
 - Skips binary files (images, videos, archives, etc.)
 - Skips files larger than 1MB for content reading
 - Reduces unnecessary I/O and processing time
@@ -374,9 +383,21 @@ For a typical repository with 1000 files and 10,000 commits:
   python git_mergestat.py
   ```
 
+#### Using ClickHouse
+
+- No migrations required - tables are created automatically using `ReplacingMergeTree`
+- Best for analytics and large datasets
+- Example setup:
+
+  ```bash
+  export DB_TYPE=clickhouse
+  export DB_CONN_STRING="clickhouse://default:@localhost:8123/default"
+  python git_mergestat.py
+  ```
+
 #### Switching Between Databases
 
 - The different backends use different storage mechanisms and are not directly compatible
-- Data is not automatically migrated when switching between PostgreSQL, MongoDB, and SQLite
+- Data is not automatically migrated when switching between PostgreSQL, MongoDB, SQLite, and ClickHouse
 - If you need to switch backends, you'll need to re-run the analysis to populate the new database
 - PostgreSQL and MongoDB can run simultaneously on the same machine using different ports (see `compose.yml`)

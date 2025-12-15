@@ -10,11 +10,30 @@ from typing import Any, Dict, Optional
 
 import requests
 
-from connectors.exceptions import (APIException, AuthenticationException,
-                                   RateLimitException)
+from connectors.exceptions import (
+    APIException,
+    AuthenticationException,
+    RateLimitException,
+)
 from connectors.utils.retry import retry_with_backoff
 
 logger = logging.getLogger(__name__)
+
+
+def _github_reset_delay_seconds(
+    response: requests.Response,
+) -> Optional[float]:
+    reset = response.headers.get("X-RateLimit-Reset")
+    if not reset:
+        return None
+    try:
+        reset_epoch = float(reset)
+    except ValueError:
+        return None
+
+    import time
+
+    return max(0.0, reset_epoch - time.time())
 
 
 class GitHubGraphQLClient:
@@ -81,7 +100,10 @@ class GitHubGraphQLClient:
                 # Could be rate limit or other forbidden error
                 rate_limit_remaining = response.headers.get("X-RateLimit-Remaining")
                 if rate_limit_remaining == "0":
-                    raise RateLimitException("GitHub API rate limit exceeded")
+                    raise RateLimitException(
+                        "GitHub API rate limit exceeded",
+                        retry_after_seconds=_github_reset_delay_seconds(response),
+                    )
                 raise APIException(f"GitHub API forbidden: {response.text}")
             elif response.status_code != 200:
                 raise APIException(
@@ -98,10 +120,10 @@ class GitHubGraphQLClient:
 
             return data.get("data", {})
 
-        except requests.exceptions.Timeout:
-            raise APIException("Request timeout")
-        except requests.exceptions.RequestException as e:
-            raise APIException(f"Request failed: {e}")
+        except requests.exceptions.Timeout as exc:
+            raise APIException("Request timeout") from exc
+        except requests.exceptions.RequestException as exc:
+            raise APIException(f"Request failed: {exc}") from exc
 
     def get_blame(
         self,
@@ -151,7 +173,13 @@ class GitHubGraphQLClient:
             "ref": ref,
         }
 
-        logger.debug(f"Fetching blame for {owner}/{repo}:{path} at ref {ref}")
+        logger.debug(
+            "Fetching blame for %s/%s:%s at ref %s",
+            owner,
+            repo,
+            path,
+            ref,
+        )
         result = self.query(query, variables)
 
         return result

@@ -9,16 +9,35 @@ from sqlalchemy import select
 
 from models import GitBlame, GitCommit, GitCommitStat, GitFile, Repo
 from models.git import Base
-from storage import MongoStore, SQLAlchemyStore, create_store, detect_db_type, model_to_dict
+from storage import (
+    ClickHouseStore,
+    MongoStore,
+    SQLAlchemyStore,
+    create_store,
+    detect_db_type,
+    model_to_dict,
+)
 
 
 class TestDetectDbType:
     """Tests for the detect_db_type function."""
 
+    def test_detect_clickhouse(self):
+        """Test detection of ClickHouse connection strings."""
+        assert detect_db_type("clickhouse://localhost:8123/default") == "clickhouse"
+        assert (
+            detect_db_type("clickhouse+http://localhost:8123/default") == "clickhouse"
+        )
+        assert (
+            detect_db_type("clickhouse+https://localhost:8443/default") == "clickhouse"
+        )
+
     def test_detect_mongodb(self):
         """Test detection of MongoDB connection strings."""
         assert detect_db_type("mongodb://localhost:27017/mydb") == "mongo"
-        assert detect_db_type("mongodb+srv://user:pass@cluster.mongodb.net/db") == "mongo"
+        assert (
+            detect_db_type("mongodb+srv://user:pass@cluster.mongodb.net/db") == "mongo"
+        )
 
     def test_detect_postgresql(self):
         """Test detection of PostgreSQL connection strings."""
@@ -69,13 +88,15 @@ class TestCreateStore:
         store = create_store("sqlite+aiosqlite:///:memory:")
         assert isinstance(store, SQLAlchemyStore)
 
+    def test_create_clickhouse_store(self):
+        """Test creation of ClickHouseStore from connection string."""
+        store = create_store("clickhouse://localhost:8123/default")
+        assert isinstance(store, ClickHouseStore)
+
     def test_create_store_with_explicit_db_type(self):
         """Test creation with explicit db_type overriding auto-detection."""
         # Force PostgreSQL even though URL looks like SQLite
-        store = create_store(
-            "postgresql+asyncpg://localhost/mydb",
-            db_type="postgres"
-        )
+        store = create_store("postgresql+asyncpg://localhost/mydb", db_type="postgres")
         assert isinstance(store, SQLAlchemyStore)
 
     def test_create_store_unsupported_type_raises(self):
@@ -570,6 +591,63 @@ async def test_sqlalchemy_store_multiple_operations(sqlalchemy_store):
             select(GitCommit).where(GitCommit.repo_id == test_repo_id)
         )
         assert len(commit_result.scalars().all()) == 1
+
+
+# ClickHouse Tests
+
+
+@pytest.mark.asyncio
+async def test_clickhouse_store_context_manager_initializes_and_creates_tables():
+    mock_client = MagicMock()
+    mock_client.command = MagicMock()
+    mock_client.insert = MagicMock()
+    mock_client.query = MagicMock(return_value=MagicMock(result_rows=[]))
+    mock_client.close = MagicMock()
+
+    with patch(
+        "storage.clickhouse_connect.get_client", return_value=mock_client
+    ) as get_client:
+        store = ClickHouseStore("clickhouse://localhost:8123/default")
+        async with store as s:
+            assert s.client is mock_client
+
+    get_client.assert_called_once_with(dsn="clickhouse://localhost:8123/default")
+    assert mock_client.command.call_count == 6
+    mock_client.close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_clickhouse_store_insert_git_file_data_calls_insert():
+    test_repo_id = uuid.uuid4()
+    file_data = [
+        GitFile(
+            repo_id=test_repo_id,
+            path="file.txt",
+            executable=False,
+            contents="content",
+        )
+    ]
+
+    mock_client = MagicMock()
+    mock_client.command = MagicMock()
+    mock_client.insert = MagicMock()
+    mock_client.query = MagicMock(return_value=MagicMock(result_rows=[]))
+    mock_client.close = MagicMock()
+
+    with patch("storage.clickhouse_connect.get_client", return_value=mock_client):
+        store = ClickHouseStore("clickhouse://localhost:8123/default")
+        async with store:
+            await store.insert_git_file_data(file_data)
+
+    args, kwargs = mock_client.insert.call_args
+    assert args[0] == "git_files"
+    assert kwargs["column_names"] == [
+        "repo_id",
+        "path",
+        "executable",
+        "contents",
+        "_mergestat_synced_at",
+    ]
 
 
 # MongoDB Tests
