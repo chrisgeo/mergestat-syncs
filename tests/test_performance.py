@@ -19,7 +19,7 @@ from utils import BATCH_SIZE, MAX_WORKERS
 class TestBatchSizeConfiguration:
     """Test that batch size is properly configurable."""
 
-    def test_batch_size_defaults_to_100(self):
+    def test_batch_size_defaults_to_1000(self):
         """Test that BATCH_SIZE defaults to 1000."""
         # BATCH_SIZE is imported directly from utils
         assert BATCH_SIZE == 1000
@@ -28,7 +28,7 @@ class TestBatchSizeConfiguration:
         """Test that BATCH_SIZE can be configured via environment variable."""
         with patch.dict(os.environ, {"BATCH_SIZE": "250"}):
             # Re-evaluate the expression
-            batch_size = int(os.getenv("BATCH_SIZE", "100"))
+            batch_size = int(os.getenv("BATCH_SIZE", "1000"))
             assert batch_size == 250
 
 
