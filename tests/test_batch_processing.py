@@ -133,10 +133,12 @@ async def test_process_gitlab_projects_batch_upserts_during_sync_processing(
     import time
 
     import git_mergestat
+    import utils
+    import processors.gitlab
     from connectors.gitlab import GitLabBatchResult
 
     # Force connectors availability for this test.
-    monkeypatch.setattr(git_mergestat, "CONNECTORS_AVAILABLE", True)
+    monkeypatch.setattr(utils, "CONNECTORS_AVAILABLE", True)
 
     inserted = threading.Event()
 
@@ -178,7 +180,7 @@ async def test_process_gitlab_projects_batch_upserts_during_sync_processing(
         def close(self):
             return
 
-    monkeypatch.setattr(git_mergestat, "GitLabConnector", DummyConnector)
+    monkeypatch.setattr(processors.gitlab, "GitLabConnector", DummyConnector)
 
     await git_mergestat.process_gitlab_projects_batch(
         store=store,
@@ -199,9 +201,11 @@ async def test_process_github_repos_batch_upserts_during_async_processing(monkey
     import asyncio
 
     import git_mergestat
+    import utils
+    import processors.github
 
     # Force connectors availability for this test.
-    monkeypatch.setattr(git_mergestat, "CONNECTORS_AVAILABLE", True)
+    monkeypatch.setattr(utils, "CONNECTORS_AVAILABLE", True)
 
     # A store stub that records when insert_repo is called.
     inserted_event = asyncio.Event()
@@ -248,7 +252,7 @@ async def test_process_github_repos_batch_upserts_during_async_processing(monkey
         def close(self):
             return
 
-    monkeypatch.setattr(git_mergestat, "GitHubConnector", DummyConnector)
+    monkeypatch.setattr(processors.github, "GitHubConnector", DummyConnector)
 
     await git_mergestat.process_github_repos_batch(
         store=store,
