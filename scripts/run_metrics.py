@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 import os
 import sys
 import uuid
@@ -290,7 +291,7 @@ def _run_clickhouse(db_url: str, limit_commits: int) -> int:
         try:
             client.close()
         except Exception:
-            pass
+            logging.error("Error closing ClickHouse client", exc_info=True)
 
     commits = [c for c in (_commit_from_row(r) for r in commits_rows) if c is not None]
     stats = [s for s in (_commit_stat_from_row(r) for r in stats_rows) if s is not None]
