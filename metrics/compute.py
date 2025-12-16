@@ -238,7 +238,7 @@ def compute_daily_metrics(
     repos.update(repo_id for (repo_id, _author) in user_aggs.keys())
     repos.update(pr["repo_id"] for pr in pull_request_rows)
     repo_metrics: List[RepoMetricsDailyRecord] = []
-    for repo_id in sorted(repos, key=lambda r: str(r)):
+    for repo_id in sorted(repos, key=str):
         repo_users = [u for u in user_metrics if u.repo_id == repo_id]
         commits_count = sum(u.commits_count for u in repo_users)
         total_loc_touched = sum(u.loc_added + u.loc_deleted for u in repo_users)
