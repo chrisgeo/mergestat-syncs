@@ -7,6 +7,7 @@ from typing import List, Optional, Sequence
 from pymongo import MongoClient, ReplaceOne
 
 from metrics.schemas import CommitMetricsRecord, RepoMetricsDailyRecord, UserMetricsDailyRecord
+import logging
 
 
 def _day_to_mongo_datetime(day: date) -> datetime:
@@ -38,8 +39,8 @@ class MongoMetricsSink:
     def close(self) -> None:
         try:
             self.client.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logging.warning("Failed to close MongoDB client: %s", e)
 
     def ensure_indexes(self) -> None:
         self.db["repo_metrics_daily"].create_index([("repo_id", 1), ("day", 1)])
