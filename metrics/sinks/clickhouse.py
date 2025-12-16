@@ -5,9 +5,10 @@ from datetime import date, datetime, timezone
 from typing import List, Optional, Sequence
 
 import clickhouse_connect
-
+import logging
 from metrics.schemas import CommitMetricsRecord, RepoMetricsDailyRecord, UserMetricsDailyRecord
 
+logger = logging.getLogger(__name__)
 
 def _dt_to_clickhouse_datetime(value: datetime) -> datetime:
     if value.tzinfo is None:
@@ -32,8 +33,8 @@ class ClickHouseMetricsSink:
     def close(self) -> None:
         try:
             self.client.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Exception occurred when closing ClickHouse client: %s", e, exc_info=True)
 
     def ensure_tables(self) -> None:
         stmts = [
