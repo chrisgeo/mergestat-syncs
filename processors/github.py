@@ -158,6 +158,11 @@ def _sync_github_prs_to_store(
 
     Runs in a worker thread; uses run_coroutine_threadsafe to write batches.
     """
+    logging.info(
+        "Fetching PRs for %s/%s...",
+        owner,
+        repo_name,
+    )
     gh_repo = connector.github.get_repo(f"{owner}/{repo_name}")
     batch: List[GitPullRequest] = []
     total = 0
@@ -165,6 +170,7 @@ def _sync_github_prs_to_store(
     if gate is None:
         gate = RateLimitGate(RateLimitConfig(initial_backoff_seconds=1.0))
 
+    # per_page is set at Github client level during connector initialization
     pr_iter = iter(gh_repo.get_pulls(state=state))
     while True:
         try:
@@ -253,6 +259,13 @@ def _sync_github_prs_to_store(
                 store.insert_git_pull_requests(batch),
                 loop,
             ).result()
+            logging.debug(
+                "Stored batch of %d PRs for %s/%s (total: %d)",
+                len(batch),
+                owner,
+                repo_name,
+                total,
+            )
             batch.clear()
 
     if batch:
@@ -260,6 +273,13 @@ def _sync_github_prs_to_store(
             store.insert_git_pull_requests(batch),
             loop,
         ).result()
+
+    logging.info(
+        "Fetched %d PRs for %s/%s",
+        total,
+        owner,
+        repo_name,
+    )
 
     return total
 
@@ -305,6 +325,10 @@ async def _backfill_github_missing_data(
     max_commits: Optional[int],
 ) -> None:
     # Logic copied from git_mergestat.py
+    logging.info(
+        "Backfilling data for %s...",
+        repo_full_name,
+    )
     owner, repo_name = _split_full_name(repo_full_name)
 
     if not (
@@ -352,6 +376,11 @@ async def _backfill_github_missing_data(
                         batch.clear()
                 if batch:
                     await store.insert_git_file_data(batch)
+                logging.info(
+                    "Backfilled %d files for %s",
+                    len(file_paths),
+                    repo_full_name,
+                )
         except Exception as e:
             logging.warning(
                 f"Failed to backfill GitHub files for {repo_full_name}: {e}"
@@ -359,6 +388,10 @@ async def _backfill_github_missing_data(
 
     if needs_commit_stats:
         try:
+            logging.info(
+                "Backfilling commit stats for %s...",
+                repo_full_name,
+            )
             commits_iter = gh_repo.get_commits()
             commit_stats_batch: List[GitCommitStat] = []
             commit_count = 0
@@ -384,6 +417,11 @@ async def _backfill_github_missing_data(
                         )
                         if len(commit_stats_batch) >= BATCH_SIZE:
                             await store.insert_git_commit_stats(commit_stats_batch)
+                            logging.debug(
+                                "Stored batch of %d commit stats for %s",
+                                len(commit_stats_batch),
+                                repo_full_name,
+                            )
                             commit_stats_batch.clear()
                 except Exception as e:
                     logging.debug(
@@ -395,6 +433,11 @@ async def _backfill_github_missing_data(
 
             if commit_stats_batch:
                 await store.insert_git_commit_stats(commit_stats_batch)
+            logging.info(
+                "Backfilled commit stats for %d commits in %s",
+                commit_count,
+                repo_full_name,
+            )
         except Exception as e:
             logging.warning(
                 "Failed to backfill GitHub commit stats for %s: %s",
@@ -404,7 +447,13 @@ async def _backfill_github_missing_data(
 
     if needs_blame and file_paths:
         try:
+            logging.info(
+                "Backfilling blame for %d files in %s...",
+                len(file_paths),
+                repo_full_name,
+            )
             blame_batch: List[GitBlame] = []
+            processed_files = 0
             for path in file_paths:
                 try:
                     blame = connector.get_file_blame(
@@ -413,6 +462,7 @@ async def _backfill_github_missing_data(
                         path=path,
                         ref=default_branch,
                     )
+                    processed_files += 1
                 except Exception as e:
                     logging.debug(
                         f"Failed blame fetch for {repo_full_name}:{path}: {e}"
@@ -438,10 +488,20 @@ async def _backfill_github_missing_data(
                         )
                         if len(blame_batch) >= BATCH_SIZE:
                             await store.insert_blame_data(blame_batch)
+                            logging.debug(
+                                "Stored batch of %d blame entries for %s",
+                                len(blame_batch),
+                                repo_full_name,
+                            )
                             blame_batch.clear()
 
             if blame_batch:
                 await store.insert_blame_data(blame_batch)
+            logging.info(
+                "Backfilled blame for %d files in %s",
+                processed_files,
+                repo_full_name,
+            )
         except Exception as e:
             logging.warning(
                 f"Failed to backfill GitHub blame for {repo_full_name}: {e}"

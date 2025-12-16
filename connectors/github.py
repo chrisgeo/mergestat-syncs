@@ -433,6 +433,7 @@ class GitHubConnector(GitConnector):
             gh_repo = self.github.get_repo(f"{owner}/{repo}")
             prs = []
 
+            # per_page is set at Github client level during initialization
             for gh_pr in gh_repo.get_pulls(state=state):
                 if max_prs and len(prs) >= max_prs:
                     break

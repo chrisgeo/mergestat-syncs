@@ -401,3 +401,15 @@ For a typical repository with 1000 files and 10,000 commits:
 - Data is not automatically migrated when switching between PostgreSQL, MongoDB, SQLite, and ClickHouse
 - If you need to switch backends, you'll need to re-run the analysis to populate the new database
 - PostgreSQL and MongoDB can run simultaneously on the same machine using different ports (see `compose.yml`)
+
+### Local Repository Pull Request Handling Warning
+
+**Important:** When processing local repositories, pull request records are inferred from merge commit messages and local refs. These inferences are estimation-based and highly volatile:
+
+- Dates (created_at, merged_at) may be inaccurate due to limited information in local repositories
+- PR states (open/closed/merged) are estimated from commit history
+- Some PRs may be missed entirely if they don't match expected patterns
+- The accuracy depends heavily on repository history and commit message conventions
+
+This behavior is different from GitHub/GitLab connectors which provide accurate PR data directly from the provider API.
+

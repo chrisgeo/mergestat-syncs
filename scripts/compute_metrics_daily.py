@@ -1,0 +1,65 @@
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+import uuid
+from datetime import date
+from pathlib import Path
+
+# Allow `python scripts/compute_metrics_daily.py` from repo root.
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from metrics.job_daily import run_daily_metrics_job  # noqa: E402
+
+
+def _parse_date(value: str) -> date:
+    try:
+        return date.fromisoformat(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"Invalid date '{value}', expected YYYY-MM-DD") from exc
+
+
+def _parse_uuid(value: str) -> uuid.UUID:
+    try:
+        return uuid.UUID(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"Invalid UUID '{value}'") from exc
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Compute and persist daily Git metrics.")
+    parser.add_argument("--date", required=True, type=_parse_date, help="Target day (UTC) as YYYY-MM-DD.")
+    parser.add_argument(
+        "--db",
+        default=os.getenv("DB_CONN_STRING") or os.getenv("DATABASE_URL"),
+        help="Database URI (ClickHouse, MongoDB, or SQLite). Defaults to DB_CONN_STRING/DATABASE_URL.",
+    )
+    parser.add_argument(
+        "--backfill",
+        type=int,
+        default=1,
+        help="Compute N days ending at --date (inclusive). Default: 1.",
+    )
+    parser.add_argument("--repo-id", type=_parse_uuid, help="Optional repo_id UUID filter.")
+
+    args = parser.parse_args()
+
+    try:
+        run_daily_metrics_job(
+            db_url=args.db,
+            day=args.date,
+            backfill_days=max(1, int(args.backfill)),
+            repo_id=args.repo_id,
+            include_commit_metrics=True,
+        )
+        return 0
+    except Exception as exc:
+        print(f"Failed to compute daily metrics: {exc.__class__.__name__}: {exc}")
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
