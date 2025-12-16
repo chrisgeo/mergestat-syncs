@@ -107,6 +107,10 @@ def _fetch_gitlab_commit_stats_sync(gl_project, commit_hashes, repo_id, max_stat
 
 def _fetch_gitlab_mrs_sync(connector, project_id, repo_id, max_mrs):
     """Sync helper to fetch GitLab Merge Requests."""
+    logging.info(
+        "Fetching merge requests for project %d...",
+        project_id,
+    )
     mrs = connector.get_merge_requests(
         project_id=project_id, state="all", max_mrs=max_mrs
     )
@@ -129,6 +133,11 @@ def _fetch_gitlab_mrs_sync(connector, project_id, repo_id, max_mrs):
             base_branch=mr.base_branch,
         )
         pr_objects.append(git_pr)
+    logging.info(
+        "Fetched %d merge requests for project %d",
+        len(pr_objects),
+        project_id,
+    )
     return pr_objects
 
 
@@ -146,6 +155,10 @@ def _sync_gitlab_mrs_to_store(
 
     Runs in a worker thread; uses run_coroutine_threadsafe to write batches.
     """
+    logging.info(
+        "Fetching merge requests for project %d...",
+        project_id,
+    )
     batch: List[GitPullRequest] = []
     total = 0
     page = 1
@@ -221,6 +234,12 @@ def _sync_gitlab_mrs_to_store(
                     store.insert_git_pull_requests(batch),
                     loop,
                 ).result()
+                logging.debug(
+                    "Stored batch of %d MRs for project %d (total: %d)",
+                    len(batch),
+                    project_id,
+                    total,
+                )
                 batch.clear()
 
         page += 1
@@ -231,6 +250,11 @@ def _sync_gitlab_mrs_to_store(
             loop,
         ).result()
 
+    logging.info(
+        "Fetched %d merge requests for project %d",
+        total,
+        project_id,
+    )
     return total
 
 

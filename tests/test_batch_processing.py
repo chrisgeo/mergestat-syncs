@@ -235,12 +235,14 @@ async def test_process_github_repos_batch_upserts_during_async_processing(monkey
 
     class DummyRepo:
         """Mock GitHub repository object."""
+
         def get_pulls(self, state="all"):
             """Return empty iterator for PRs."""
             return iter([])
 
     class DummyGithub:
         """Mock PyGithub Github object."""
+
         def get_repo(self, full_name: str):
             """Return a dummy repo."""
             return DummyRepo()
