@@ -1,11 +1,14 @@
 name: Integration Tests
+env:
+    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
 on:
     push:
         branches: [ "main" ]
     workflow_dispatch:
 jobs:
     integration:
-        if: ${{ secrets.GH_TOKEN != '' || secrets.GL_TOKEN != '' }}
+        if: ${{ env.GITHUB_TOKEN != '' || env.GITLAB_TOKEN != '' }}
         name: Integration Tests (conditional)
         runs-on: ubuntu-latest
         steps:
