@@ -640,6 +640,39 @@ async def process_gitlab_projects_batch(
         stored_count += 1
         logging.debug(f"Stored project ({stored_count}): {db_repo.repo}")
 
+        # Fetch commits and stats to populate git_commits/git_commit_stats.
+        commit_limit = max_commits_per_project or 100
+        try:
+            gl_project = await loop.run_in_executor(
+                None, connector.gitlab.projects.get, project_info.id
+            )
+            commit_hashes, commit_objects = await loop.run_in_executor(
+                None,
+                _fetch_gitlab_commits_sync,
+                gl_project,
+                commit_limit,
+                db_repo.id,
+            )
+            if commit_objects:
+                await store.insert_git_commit_data(commit_objects)
+
+            stats_objects = await loop.run_in_executor(
+                None,
+                _fetch_gitlab_commit_stats_sync,
+                gl_project,
+                commit_hashes,
+                db_repo.id,
+                min(commit_limit, 50),
+            )
+            if stats_objects:
+                await store.insert_git_commit_stats(stats_objects)
+        except Exception as e:
+            logging.warning(
+                "Failed to fetch commits for GitLab project %s: %s",
+                project_info.full_name,
+                e,
+            )
+
         # Fetch ALL merge requests for batch-processed projects, storing in batches.
         try:
             async with mr_semaphore:
@@ -699,6 +732,10 @@ async def process_gitlab_projects_batch(
             logging.warning(f"  ✗ Failed: {result.project.full_name}: {result.error}")
 
         if results_queue is not None:
+            try:
+                running_loop = asyncio.get_running_loop()
+            except RuntimeError:
+                running_loop = None
 
             def _enqueue() -> None:
                 assert results_queue is not None
@@ -707,7 +744,10 @@ async def process_gitlab_projects_batch(
                 except asyncio.QueueFull:
                     asyncio.create_task(results_queue.put(result))
 
-            loop.call_soon_threadsafe(_enqueue)
+            if running_loop is loop:
+                _enqueue()
+            else:
+                loop.call_soon_threadsafe(_enqueue)
 
     try:
         results_queue = asyncio.Queue(maxsize=max(1, max_concurrent * 2))

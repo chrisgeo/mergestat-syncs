@@ -60,19 +60,41 @@ def _fetch_github_commits_sync(gh_repo, max_commits, repo_id):
             commit.commit.committer.name if commit.commit.committer else "Unknown"
         )
 
+        # Safely obtain emails: prefer commit metadata (no extra API calls),
+        # fallback to user.email but guard against API-triggered exceptions (e.g., 404).
+        def _safe_user_email(user):
+            try:
+                return getattr(user, "email", None)
+            except Exception:
+                return None
+
+        author_email = None
+        if getattr(commit, "commit", None) and getattr(commit.commit, "author", None):
+            author_email = getattr(commit.commit.author, "email", None)
+        if not author_email:
+            author_email = _safe_user_email(author_login)
+
+        committer_email = None
+        if getattr(commit, "commit", None) and getattr(
+            commit.commit, "committer", None
+        ):
+            committer_email = getattr(commit.commit.committer, "email", None)
+        if not committer_email:
+            committer_email = _safe_user_email(committer_login)
+
         git_commit = GitCommit(
             repo_id=repo_id,
             hash=commit.sha,
             message=commit.commit.message,
             author_name=author_name,
-            author_email=None,
+            author_email=author_email,
             author_when=(
                 commit.commit.author.date
                 if commit.commit.author
                 else datetime.now(timezone.utc)
             ),
             committer_name=committer_name,
-            committer_email=None,
+            committer_email=committer_email,
             committer_when=(
                 commit.commit.committer.date
                 if commit.commit.committer
@@ -700,6 +722,36 @@ async def process_github_repos_batch(
         stored_count += 1
         logging.debug(f"Stored repository ({stored_count}): {db_repo.repo}")
 
+        # Fetch commits and stats to populate git_commits/git_commit_stats.
+        commit_limit = max_commits_per_repo or 100
+        try:
+            gh_repo = connector.github.get_repo(repo_info.full_name)
+            raw_commits, commit_objects = await loop.run_in_executor(
+                None,
+                _fetch_github_commits_sync,
+                gh_repo,
+                commit_limit,
+                db_repo.id,
+            )
+            if commit_objects:
+                await store.insert_git_commit_data(commit_objects)
+
+            stats_objects = await loop.run_in_executor(
+                None,
+                _fetch_github_commit_stats_sync,
+                raw_commits,
+                db_repo.id,
+                min(commit_limit, 50),
+            )
+            if stats_objects:
+                await store.insert_git_commit_stats(stats_objects)
+        except Exception as e:
+            logging.warning(
+                "Failed to fetch commits for GitHub repo %s: %s",
+                repo_info.full_name,
+                e,
+            )
+
         # Fetch ALL PRs for batch-processed repos, storing in batches.
         try:
             owner, repo_name = _split_full_name(repo_info.full_name)
@@ -770,6 +822,10 @@ async def process_github_repos_batch(
             )
 
         if results_queue is not None:
+            try:
+                running_loop = asyncio.get_running_loop()
+            except RuntimeError:
+                running_loop = None
 
             def _enqueue() -> None:
                 assert results_queue is not None
@@ -778,7 +834,10 @@ async def process_github_repos_batch(
                 except asyncio.QueueFull:
                     asyncio.create_task(results_queue.put(result))
 
-            loop.call_soon_threadsafe(_enqueue)
+            if running_loop is loop:
+                _enqueue()
+            else:
+                loop.call_soon_threadsafe(_enqueue)
 
     try:
         results_queue = asyncio.Queue(maxsize=max(1, max_concurrent * 2))
