@@ -2,11 +2,13 @@
 Tests for batch repository processing features.
 """
 
+from datetime import datetime, timezone
 from unittest.mock import Mock, patch
 
 import pytest
 
 from connectors import GitHubConnector, BatchResult, match_repo_pattern
+from models.git import GitCommit, GitCommitStat, get_repo_uuid_from_repo
 
 
 @pytest.mark.asyncio
@@ -140,13 +142,26 @@ async def test_process_gitlab_projects_batch_upserts_during_sync_processing(
     # Force connectors availability for this test.
     monkeypatch.setattr(utils, "CONNECTORS_AVAILABLE", True)
 
+    monkeypatch.setattr(
+        processors.gitlab, "_fetch_gitlab_commits_sync", lambda *args, **kwargs: ([], [])
+    )
+    monkeypatch.setattr(
+        processors.gitlab, "_fetch_gitlab_commit_stats_sync", lambda *args, **kwargs: []
+    )
+
     inserted = threading.Event()
 
     class DummyStore:
         async def insert_repo(self, repo):
             inserted.set()
 
+        async def insert_git_commit_data(self, commit_data):
+            return
+
         async def insert_git_commit_stats(self, commit_stats):
+            return
+
+        async def insert_git_pull_requests(self, pr_data):
             return
 
     store = DummyStore()
@@ -163,6 +178,9 @@ async def test_process_gitlab_projects_batch_upserts_during_sync_processing(
         def __init__(self, url: str, private_token: str):
             self.url = url
             self.private_token = private_token
+            self.rest_client = Mock(get_merge_requests=lambda **kwargs: [])
+            self.gitlab = Mock()
+            self.gitlab.projects = Mock(get=lambda project_id: None)
 
         def get_projects_with_stats(self, **kwargs):
             on_project_complete = kwargs.get("on_project_complete")
@@ -207,6 +225,13 @@ async def test_process_github_repos_batch_upserts_during_async_processing(monkey
     # Force connectors availability for this test.
     monkeypatch.setattr(utils, "CONNECTORS_AVAILABLE", True)
 
+    monkeypatch.setattr(
+        processors.github, "_fetch_github_commits_sync", lambda *args, **kwargs: ([], [])
+    )
+    monkeypatch.setattr(
+        processors.github, "_fetch_github_commit_stats_sync", lambda *args, **kwargs: []
+    )
+
     # A store stub that records when insert_repo is called.
     inserted_event = asyncio.Event()
 
@@ -214,7 +239,13 @@ async def test_process_github_repos_batch_upserts_during_async_processing(monkey
         async def insert_repo(self, repo):
             inserted_event.set()
 
+        async def insert_git_commit_data(self, commit_data):
+            return
+
         async def insert_git_commit_stats(self, commit_stats):
+            return
+
+        async def insert_git_pull_requests(self, pr_data):
             return
 
     store = DummyStore()
@@ -279,6 +310,239 @@ async def test_process_github_repos_batch_upserts_during_async_processing(monkey
         rate_limit_delay=0,
         use_async=True,
     )
+
+
+@pytest.mark.asyncio
+async def test_process_github_repos_batch_stores_commits_and_stats(monkeypatch):
+    """Batch GitHub processing should persist commits and stats for metrics."""
+    import git_mergestat
+    import utils
+    import processors.github
+
+    # Force connectors availability and stub API helpers.
+    monkeypatch.setattr(utils, "CONNECTORS_AVAILABLE", True)
+
+    recorded_commits = []
+    recorded_stats = []
+
+    class DummyStore:
+        async def insert_repo(self, repo):
+            return
+
+        async def insert_git_commit_data(self, commit_data):
+            recorded_commits.extend(commit_data)
+
+        async def insert_git_commit_stats(self, commit_stats):
+            recorded_stats.extend(commit_stats)
+
+        async def insert_git_pull_requests(self, pr_data):
+            return
+
+    repo = Mock()
+    repo.id = 321
+    repo.full_name = "org/repo-metrics"
+    repo.url = "https://example.com/org/repo-metrics"
+    repo.default_branch = "main"
+    repo.language = "Python"
+
+    stats = Mock()
+    stats.total_commits = 1
+    stats.additions = 2
+    stats.deletions = 1
+
+    result = BatchResult(repository=repo, stats=stats, success=True)
+
+    def fake_fetch_commits(gh_repo, max_commits, repo_id):
+        commit = GitCommit(
+            repo_id=repo_id,
+            hash="abc123",
+            message="msg",
+            author_name="alice",
+            author_email=None,
+            author_when=datetime.now(timezone.utc),
+            committer_name="alice",
+            committer_email=None,
+            committer_when=datetime.now(timezone.utc),
+            parents=1,
+        )
+        return ["raw"], [commit]
+
+    def fake_fetch_commit_stats(raw_commits, repo_id, max_stats):
+        return [
+            GitCommitStat(
+                repo_id=repo_id,
+                commit_hash="abc123",
+                file_path="file.txt",
+                additions=1,
+                deletions=0,
+                old_file_mode="unknown",
+                new_file_mode="unknown",
+            )
+        ]
+
+    class DummyRepo:
+        def get_pulls(self, state="all"):
+            return iter([])
+
+    class DummyGithub:
+        def get_repo(self, full_name: str):
+            return DummyRepo()
+
+    class DummyConnector:
+        def __init__(self, token: str):
+            self.github = DummyGithub()
+
+        async def get_repos_with_stats_async(self, **kwargs):
+            on_repo_complete = kwargs.get("on_repo_complete")
+            if on_repo_complete:
+                on_repo_complete(result)
+            return [result]
+
+        def get_rate_limit(self):
+            return {"remaining": 0, "limit": 0}
+
+        def close(self):
+            return
+
+    monkeypatch.setattr(processors.github, "GitHubConnector", DummyConnector)
+    monkeypatch.setattr(processors.github, "_fetch_github_commits_sync", fake_fetch_commits)
+    monkeypatch.setattr(
+        processors.github, "_fetch_github_commit_stats_sync", fake_fetch_commit_stats
+    )
+
+    store = DummyStore()
+
+    await git_mergestat.process_github_repos_batch(
+        store=store,
+        token="test_token",
+        org_name="org",
+        pattern="org/*",
+        batch_size=1,
+        max_concurrent=1,
+        rate_limit_delay=0,
+        use_async=True,
+    )
+
+    assert any(c.hash == "abc123" for c in recorded_commits)
+    expected_repo_id = get_repo_uuid_from_repo(repo.full_name)
+    assert all(c.repo_id == expected_repo_id for c in recorded_commits)
+    assert "abc123" in {s.commit_hash for s in recorded_stats}
+
+
+@pytest.mark.asyncio
+async def test_process_gitlab_projects_batch_stores_commits_and_stats(monkeypatch):
+    """Batch GitLab processing should persist commits and stats for metrics."""
+    import git_mergestat
+    import utils
+    import processors.gitlab
+    from connectors.gitlab import GitLabBatchResult
+
+    monkeypatch.setattr(utils, "CONNECTORS_AVAILABLE", True)
+
+    recorded_commits = []
+    recorded_stats = []
+
+    class DummyStore:
+        async def insert_repo(self, repo):
+            return
+
+        async def insert_git_commit_data(self, commit_data):
+            recorded_commits.extend(commit_data)
+
+        async def insert_git_commit_stats(self, commit_stats):
+            recorded_stats.extend(commit_stats)
+
+        async def insert_git_pull_requests(self, pr_data):
+            return
+
+    project = Mock()
+    project.id = 456
+    project.full_name = "group/proj-metrics"
+    project.url = "https://example.com/group/proj-metrics"
+    project.default_branch = "main"
+
+    result = GitLabBatchResult(project=project, stats=None, success=True)
+
+    def fake_fetch_commits(gl_project, max_commits, repo_id):
+        commit = GitCommit(
+            repo_id=repo_id,
+            hash="gitlab123",
+            message="msg",
+            author_name="bob",
+            author_email=None,
+            author_when=datetime.now(timezone.utc),
+            committer_name="bob",
+            committer_email=None,
+            committer_when=datetime.now(timezone.utc),
+            parents=1,
+        )
+        return ["raw"], [commit]
+
+    def fake_fetch_commit_stats(gl_project, commit_hashes, repo_id, max_stats):
+        return [
+            GitCommitStat(
+                repo_id=repo_id,
+                commit_hash="gitlab123",
+                file_path="file.txt",
+                additions=2,
+                deletions=1,
+                old_file_mode="unknown",
+                new_file_mode="unknown",
+            )
+        ]
+
+    class DummyProjects:
+        def get(self, project_id):
+            return object()
+
+    class DummyGitlab:
+        def __init__(self):
+            self.projects = DummyProjects()
+
+    class DummyRestClient:
+        def get_merge_requests(self, **kwargs):
+            return []
+
+    class DummyConnector:
+        def __init__(self, url: str, private_token: str):
+            self.url = url
+            self.private_token = private_token
+            self.gitlab = DummyGitlab()
+            self.rest_client = DummyRestClient()
+
+        async def get_projects_with_stats_async(self, **kwargs):
+            on_project_complete = kwargs.get("on_project_complete")
+            if on_project_complete:
+                on_project_complete(result)
+            return [result]
+
+        def close(self):
+            return
+
+    monkeypatch.setattr(processors.gitlab, "GitLabConnector", DummyConnector)
+    monkeypatch.setattr(processors.gitlab, "_fetch_gitlab_commits_sync", fake_fetch_commits)
+    monkeypatch.setattr(
+        processors.gitlab, "_fetch_gitlab_commit_stats_sync", fake_fetch_commit_stats
+    )
+
+    store = DummyStore()
+
+    await git_mergestat.process_gitlab_projects_batch(
+        store=store,
+        token="test_token",
+        gitlab_url="https://gitlab.com",
+        group_name="group",
+        pattern="group/*",
+        batch_size=1,
+        max_concurrent=1,
+        rate_limit_delay=0,
+        use_async=True,
+    )
+
+    assert any(c.hash == "gitlab123" for c in recorded_commits)
+    expected_repo_id = get_repo_uuid_from_repo(project.full_name)
+    assert all(c.repo_id == expected_repo_id for c in recorded_commits)
+    assert "gitlab123" in {s.commit_hash for s in recorded_stats}
 
 
 class TestPatternMatching:
