@@ -21,7 +21,7 @@ def _parse_datetime(value: Any) -> Optional[datetime]:
             return None
         # Jira commonly uses "+0000" offsets (no colon); normalize for fromisoformat.
         raw = raw.replace("Z", "+00:00")
-        if re.search(r"[+-]\\d{4}$", raw):
+        if re.search(r"[+-]\d{4}$", raw):
             raw = raw[:-2] + ":" + raw[-2:]
         try:
             dt = datetime.fromisoformat(raw)
