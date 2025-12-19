@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, Optional
 
 from connectors.utils.graphql import GitHubGraphQLClient
 from connectors.utils.rate_limit_queue import RateLimitConfig, RateLimitGate
