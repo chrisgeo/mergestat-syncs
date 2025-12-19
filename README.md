@@ -1,7 +1,10 @@
-# Development Team / IC Health Metrics (SPACE-like)
-Development Team and Developers' operational help should be available for all. 
+# dev-health-ops
 
-This project's goal is to provide the tools availble, and potential quick-win implementations for anyone interested by providing integregations that cover a majority of the popular tooling.
+Formerly `mergestat-syncs`.
+
+Development team and developers' operational help should be available for all.
+
+This project's goal is to provide tools and quick-win implementations by integrating with a majority of popular tooling.
 
 ## Private Repository Support ✅
 
@@ -150,22 +153,20 @@ Work items are fetched from provider APIs during metrics computation (no separat
 
 ## Database Configuration
 
-This project supports PostgreSQL, MongoDB, SQLite, and ClickHouse as storage backends. You can configure the database backend using environment variables or command-line arguments.
+This project supports PostgreSQL, MongoDB, SQLite, and ClickHouse as storage backends.
 
 ### Environment Variables
 
-- **`DB_TYPE`** (optional): Specifies the database backend to use. Valid values are `postgres`, `mongo`, `sqlite`, or `clickhouse`. Default: `postgres`
-- **`DB_CONN_STRING`** (required): The connection string for your database.
-  - For PostgreSQL: `postgresql+asyncpg://user:password@host:port/database`
-  - For MongoDB: `mongodb://host:port` or `mongodb://user:password@host:port`
-  - For SQLite: `sqlite+aiosqlite:///path/to/database.db` or `sqlite+aiosqlite:///:memory:` for in-memory
-  - For ClickHouse: `clickhouse://user:password@host:8123/database`
+- **`DB_CONN_STRING` / `DATABASE_URL`** (optional): Default DB URI for `python cli.py metrics daily --db ...` and for Alembic migrations.
 - **`DB_ECHO`** (optional): Enable SQL query logging for PostgreSQL and SQLite. Set to `true`, `1`, or `yes` (case-insensitive) to enable. Any other value (including `false`, `0`, `no`, or unset) disables it. Default: `false`. Note: Enabling this in production can expose sensitive data and impact performance.
 - **`MONGO_DB_NAME`** (optional): The name of the MongoDB database to use. If not specified, the script will use the database specified in the connection string, or default to `mergestat`.
-- **`REPO_PATH`** (optional): Path to the git repository to analyze. Default: `.` (current directory)
 - **`REPO_UUID`** (optional): UUID for the repository. If not provided, a deterministic UUID will be derived from the git repository's remote URL (or repository path if no remote exists). This ensures the same repository always gets the same UUID across runs.
-- **`BATCH_SIZE`** (optional): Number of records to batch before inserting into the database. Higher values can improve performance but use more memory. Default: `100`
 - **`MAX_WORKERS`** (optional): Number of parallel workers for processing git blame data. Higher values can speed up processing but use more CPU and memory. Default: `4`
+- **`LOG_LEVEL`** (optional): Logging level (e.g. `INFO`, `DEBUG`). Default: `INFO`
+- **`DISABLE_DOTENV`** (optional): Set to `1` to disable `.env` loading from the repo root.
+- **`GITHUB_TOKEN`** (optional): Default GitHub token when `--auth` is not provided.
+- **`GITLAB_TOKEN`** (optional): Default GitLab token when `--auth` is not provided.
+- **`GITLAB_URL`** (optional): Default GitLab base URL when `--gitlab-url` is not provided (default: `https://gitlab.com`).
 
 ### Command-Line Arguments
 
@@ -173,19 +174,18 @@ You can also configure the database using command-line arguments, which will ove
 
 #### Core Arguments
 
-- **`--db`**: Database connection string (auto-detects database type from URL scheme)
-- **`--db-type`**: Database backend to use (`postgres`, `mongo`, `sqlite`, or `clickhouse`) - optional if URL scheme is clear
-- **`--connector`**: Connector type (`local`, `github`, or `gitlab`)
+- **`--db`**: Database connection string (required for `sync`; optional for `metrics daily` if `DB_CONN_STRING`/`DATABASE_URL` is set)
+- **`--db-type`**: Database backend override (`postgres`, `mongo`, `sqlite`, or `clickhouse`) - optional if URL scheme is clear
 - **`--auth`**: Authentication token (works for both GitHub and GitLab)
 - **`--repo-path`**: Path to the git repository (for local mode)
-- **`--since` / `--start-date`**: Lower-bound date/time for local mode. Commits, per-file stats, and blame are limited to changes at or after this timestamp. Uses ISO formats (e.g., `2024-01-01` or `2024-01-01T00:00:00`).
+- **`--since`**: Lower-bound date/time for local mode. Commits, per-file stats, and blame are limited to changes at or after this timestamp. Uses ISO formats (e.g., `2024-01-01` or `2024-01-01T00:00:00`).
 
 #### Connector-Specific Arguments
 
-- **`--github-owner`**: GitHub repository owner/organization
-- **`--github-repo`**: GitHub repository name
+- **`--owner`**: GitHub repository owner/organization
+- **`--repo`**: GitHub repository name
 - **`--gitlab-url`**: GitLab instance URL (default: <https://gitlab.com>)
-- **`--gitlab-project-id`**: GitLab project ID (numeric)
+- **`--project-id`**: GitLab project ID (numeric)
 
 #### Batch Processing Options
 
@@ -215,7 +215,7 @@ python cli.py sync local \
   --db "sqlite+aiosqlite:///mergestat.db" \
   --repo-path /path/to/repo \
   --since 2024-01-01
-  # Blame is limited to files touched by commits on/after this date.
+# Blame is limited to files touched by commits on/after this date.
 
 # Using SQLite (file-based, auto-detected)
 python cli.py sync local --db "sqlite+aiosqlite:///mergestat.db"
@@ -240,7 +240,7 @@ python cli.py sync gitlab \
 python cli.py sync github \
   --db "sqlite+aiosqlite:///mergestat.db" \
   --auth "$GITHUB_TOKEN" \
-  --search-pattern "chrisgeo/merge*" \
+  --search-pattern "chrisgeo/dev-health-*" \
   --group "chrisgeo" \
   --batch-size 5 \
   --max-concurrent 2 \
@@ -291,8 +291,6 @@ Note: SQLite does not use connection pooling since it is a file-based database.
 
 The script includes several configuration options to optimize performance:
 
-- **`BATCH_SIZE`**: Controls how many records are batched before database insertion. Higher values (e.g., 200-500) can improve throughput but increase memory usage. Lower values (e.g., 50) reduce memory usage but may be slower.
-
 - **`MAX_WORKERS`**: Controls parallel processing of git blame data. Set this based on your CPU cores (e.g., 2-8). Higher values speed up processing but use more CPU and memory.
 
 - **Connection Pooling**: PostgreSQL automatically uses connection pooling with these defaults:
@@ -303,17 +301,15 @@ The script includes several configuration options to optimize performance:
 **Example for large repositories:**
 
 ```bash
-export BATCH_SIZE=500
 export MAX_WORKERS=8
-python cli.py sync local
+python cli.py sync local --db "sqlite+aiosqlite:///mergestat.db" --repo-path .
 ```
 
 **Example for resource-constrained environments:**
 
 ```bash
-export BATCH_SIZE=50
 export MAX_WORKERS=2
-python cli.py sync local
+python cli.py sync local --db "sqlite+aiosqlite:///mergestat.db" --repo-path .
 ```
 
 ## Performance Optimizations
@@ -322,10 +318,8 @@ This project includes several key performance optimizations to speed up git data
 
 ### 1. **Increased Batch Size** (10x improvement)
 
-- **Changed from**: 10 records per batch
-- **Changed to**: 100 records per batch (configurable)
-- **Impact**: Reduces database round-trips by 10x, significantly improving insertion speed
-- **Configuration**: Set `BATCH_SIZE=200` for even larger batches
+- **Batching**: Uses batched inserts to reduce database round-trips
+- **Impact**: Significantly reduces database round-trips, improving insertion speed
 
 ### 2. **Parallel Git Blame Processing** (4-8x improvement)
 
@@ -380,15 +374,12 @@ For a typical repository with 1000 files and 10,000 commits:
   # Start PostgreSQL with Docker Compose
   docker compose up postgres -d
 
-  # Run migrations
+  # Run migrations (Alembic reads DB_CONN_STRING)
+  export DB_CONN_STRING="postgresql+asyncpg://postgres:postgres@localhost:5333/postgres"
   alembic upgrade head
 
-  # Set environment variables
-  export DB_TYPE=postgres
-  export DB_CONN_STRING="postgresql+asyncpg://postgres:postgres@localhost:5333/postgres"
-
-  # Run the script
-  python cli.py sync local
+  # Sync a local repo
+  python cli.py sync local --db "$DB_CONN_STRING" --repo-path .
   ```
 
 #### Using MongoDB
@@ -402,13 +393,8 @@ For a typical repository with 1000 files and 10,000 commits:
   # Start MongoDB with Docker Compose
   docker compose up mongo -d
 
-  # Set environment variables
-  export DB_TYPE=mongo
-  export DB_CONN_STRING="mongodb://localhost:27017"
-  export MONGO_DB_NAME="mergestat"
-
-  # Run the script
-  python cli.py sync local
+  export MONGO_DB_NAME="mergestat" # optional if not in URI
+  python cli.py sync local --db "mongodb://localhost:27017" --repo-path .
   ```
 
 #### Using SQLite
@@ -420,20 +406,13 @@ For a typical repository with 1000 files and 10,000 commits:
 - Example setup:
 
   ```bash
-  # Set environment variables for file-based SQLite
-  export DB_TYPE=sqlite
-  export DB_CONN_STRING="sqlite+aiosqlite:///mergestat.db"
-
-  # Run the script
-  python cli.py sync local
+  python cli.py sync local --db "sqlite+aiosqlite:///mergestat.db" --repo-path .
   ```
 
   Or for in-memory database (data lost when process exits):
 
   ```bash
-  export DB_TYPE=sqlite
-  export DB_CONN_STRING="sqlite+aiosqlite:///:memory:"
-  python cli.py sync local
+  python cli.py sync local --db "sqlite+aiosqlite:///:memory:" --repo-path .
   ```
 
 #### Using ClickHouse
@@ -443,9 +422,7 @@ For a typical repository with 1000 files and 10,000 commits:
 - Example setup:
 
   ```bash
-  export DB_TYPE=clickhouse
-  export DB_CONN_STRING="clickhouse://default:@localhost:8123/default"
-  python cli.py sync local
+  python cli.py sync local --db "clickhouse://default:@localhost:8123/default" --repo-path .
   ```
 
 #### Switching Between Databases
