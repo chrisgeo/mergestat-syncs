@@ -134,7 +134,6 @@ async def test_process_gitlab_projects_batch_upserts_during_sync_processing(
     import threading
     import time
 
-    import git_mergestat
     import utils
     import processors.gitlab
     from connectors.gitlab import GitLabBatchResult
@@ -200,7 +199,7 @@ async def test_process_gitlab_projects_batch_upserts_during_sync_processing(
 
     monkeypatch.setattr(processors.gitlab, "GitLabConnector", DummyConnector)
 
-    await git_mergestat.process_gitlab_projects_batch(
+    await processors.gitlab.process_gitlab_projects_batch(
         store=store,
         token="test_token",
         gitlab_url="https://gitlab.com",
@@ -215,10 +214,9 @@ async def test_process_gitlab_projects_batch_upserts_during_sync_processing(
 
 @pytest.mark.asyncio
 async def test_process_github_repos_batch_upserts_during_async_processing(monkeypatch):
-    """Ensure git_mergestat async batch mode upserts as repos complete."""
+    """Ensure async batch mode upserts as repos complete."""
     import asyncio
 
-    import git_mergestat
     import utils
     import processors.github
 
@@ -300,7 +298,7 @@ async def test_process_github_repos_batch_upserts_during_async_processing(monkey
 
     monkeypatch.setattr(processors.github, "GitHubConnector", DummyConnector)
 
-    await git_mergestat.process_github_repos_batch(
+    await processors.github.process_github_repos_batch(
         store=store,
         token="test_token",
         org_name="org",
@@ -315,7 +313,6 @@ async def test_process_github_repos_batch_upserts_during_async_processing(monkey
 @pytest.mark.asyncio
 async def test_process_github_repos_batch_stores_commits_and_stats(monkeypatch):
     """Batch GitHub processing should persist commits and stats for metrics."""
-    import git_mergestat
     import utils
     import processors.github
 
@@ -412,7 +409,7 @@ async def test_process_github_repos_batch_stores_commits_and_stats(monkeypatch):
 
     store = DummyStore()
 
-    await git_mergestat.process_github_repos_batch(
+    await processors.github.process_github_repos_batch(
         store=store,
         token="test_token",
         org_name="org",
@@ -432,7 +429,6 @@ async def test_process_github_repos_batch_stores_commits_and_stats(monkeypatch):
 @pytest.mark.asyncio
 async def test_process_gitlab_projects_batch_stores_commits_and_stats(monkeypatch):
     """Batch GitLab processing should persist commits and stats for metrics."""
-    import git_mergestat
     import utils
     import processors.gitlab
     from connectors.gitlab import GitLabBatchResult
@@ -527,7 +523,7 @@ async def test_process_gitlab_projects_batch_stores_commits_and_stats(monkeypatc
 
     store = DummyStore()
 
-    await git_mergestat.process_gitlab_projects_batch(
+    await processors.gitlab.process_gitlab_projects_batch(
         store=store,
         token="test_token",
         gitlab_url="https://gitlab.com",

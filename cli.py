@@ -2,13 +2,19 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import logging
 import os
 import subprocess
-import sys
 from datetime import date
 from pathlib import Path
 from typing import List, Optional
+
+from processors.github import process_github_repo, process_github_repos_batch
+from processors.gitlab import process_gitlab_project, process_gitlab_projects_batch
+from processors.local import process_local_repo
+from storage import create_store, detect_db_type
+from utils import _parse_since
 
 REPO_ROOT = Path(__file__).resolve().parent
 
@@ -51,29 +57,40 @@ def _parse_date(value: str) -> date:
         ) from exc
 
 
-def _run_git_mergestat(args: List[str]) -> int:
-    cmd = [sys.executable, str(REPO_ROOT / "git_mergestat.py")] + args
-    return subprocess.run(cmd, check=False).returncode
+def _resolve_db_type(db_url: str, db_type: Optional[str]) -> str:
+    if db_type:
+        resolved = db_type.lower()
+    else:
+        try:
+            resolved = detect_db_type(db_url)
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from exc
+
+    if resolved not in {"postgres", "mongo", "sqlite", "clickhouse"}:
+        raise SystemExit("DB_TYPE must be 'postgres', 'mongo', 'sqlite', or 'clickhouse'")
+    return resolved
+
+
+async def _run_with_store(db_url: str, db_type: str, handler) -> None:
+    store = create_store(db_url, db_type)
+    async with store:
+        await handler(store)
 
 
 def _cmd_sync_local(ns: argparse.Namespace) -> int:
-    args: List[str] = [
-        "--db",
-        ns.db,
-        "--connector",
-        "local",
-        "--repo-path",
-        ns.repo_path,
-    ]
-    if ns.db_type:
-        args += ["--db-type", ns.db_type]
-    if ns.since:
-        args += ["--since", ns.since]
-    if ns.fetch_blame:
-        args += ["--fetch-blame"]
-    if ns.max_commits_per_repo:
-        args += ["--max-commits-per-repo", str(ns.max_commits_per_repo)]
-    return _run_git_mergestat(args)
+    db_type = _resolve_db_type(ns.db, ns.db_type)
+    since = _parse_since(ns.since)
+
+    async def _handler(store):
+        await process_local_repo(
+            store=store,
+            repo_path=ns.repo_path,
+            since=since,
+            fetch_blame=ns.fetch_blame,
+        )
+
+    asyncio.run(_run_with_store(ns.db, db_type, _handler))
+    return 0
 
 
 def _cmd_sync_github(ns: argparse.Namespace) -> int:
@@ -81,41 +98,42 @@ def _cmd_sync_github(ns: argparse.Namespace) -> int:
     if not token:
         raise SystemExit("Missing GitHub token (pass --auth or set GITHUB_TOKEN).")
 
-    args: List[str] = [
-        "--db",
-        ns.db,
-        "--connector",
-        "github",
-        "--auth",
-        token,
-    ]
-    if ns.db_type:
-        args += ["--db-type", ns.db_type]
-    if ns.fetch_blame:
-        args += ["--fetch-blame"]
-    if ns.max_commits_per_repo:
-        args += ["--max-commits-per-repo", str(ns.max_commits_per_repo)]
+    db_type = _resolve_db_type(ns.db, ns.db_type)
 
-    if ns.search_pattern:
-        args += ["--search-pattern", ns.search_pattern]
-        if ns.group:
-            args += ["--group", ns.group]
-        if ns.batch_size:
-            args += ["--batch-size", str(ns.batch_size)]
-        if ns.max_concurrent:
-            args += ["--max-concurrent", str(ns.max_concurrent)]
-        if ns.rate_limit_delay is not None:
-            args += ["--rate-limit-delay", str(ns.rate_limit_delay)]
-        if ns.max_repos:
-            args += ["--max-repos", str(ns.max_repos)]
-        if ns.use_async:
-            args += ["--use-async"]
-        return _run_git_mergestat(args)
+    async def _handler(store):
+        if ns.search_pattern:
+            org_name = ns.group
+            user_name = ns.owner if not ns.group else None
+            await process_github_repos_batch(
+                store=store,
+                token=token,
+                org_name=org_name,
+                user_name=user_name,
+                pattern=ns.search_pattern,
+                batch_size=ns.batch_size,
+                max_concurrent=ns.max_concurrent,
+                rate_limit_delay=ns.rate_limit_delay,
+                max_commits_per_repo=ns.max_commits_per_repo,
+                max_repos=ns.max_repos,
+                use_async=ns.use_async,
+            )
+            return
 
-    if not (ns.owner and ns.repo):
-        raise SystemExit("GitHub sync requires --owner and --repo (or --search-pattern for batch).")
-    args += ["--github-owner", ns.owner, "--github-repo", ns.repo]
-    return _run_git_mergestat(args)
+        if not (ns.owner and ns.repo):
+            raise SystemExit(
+                "GitHub sync requires --owner and --repo (or --search-pattern for batch)."
+            )
+        await process_github_repo(
+            store,
+            ns.owner,
+            ns.repo,
+            token,
+            fetch_blame=ns.fetch_blame,
+            max_commits=ns.max_commits_per_repo or 100,
+        )
+
+    asyncio.run(_run_with_store(ns.db, db_type, _handler))
+    return 0
 
 
 def _cmd_sync_gitlab(ns: argparse.Namespace) -> int:
@@ -123,43 +141,40 @@ def _cmd_sync_gitlab(ns: argparse.Namespace) -> int:
     if not token:
         raise SystemExit("Missing GitLab token (pass --auth or set GITLAB_TOKEN).")
 
-    args: List[str] = [
-        "--db",
-        ns.db,
-        "--connector",
-        "gitlab",
-        "--auth",
-        token,
-    ]
-    if ns.db_type:
-        args += ["--db-type", ns.db_type]
-    if ns.gitlab_url:
-        args += ["--gitlab-url", ns.gitlab_url]
-    if ns.fetch_blame:
-        args += ["--fetch-blame"]
-    if ns.max_commits_per_repo:
-        args += ["--max-commits-per-repo", str(ns.max_commits_per_repo)]
+    db_type = _resolve_db_type(ns.db, ns.db_type)
 
-    if ns.search_pattern:
-        args += ["--search-pattern", ns.search_pattern]
-        if ns.group:
-            args += ["--group", ns.group]
-        if ns.batch_size:
-            args += ["--batch-size", str(ns.batch_size)]
-        if ns.max_concurrent:
-            args += ["--max-concurrent", str(ns.max_concurrent)]
-        if ns.rate_limit_delay is not None:
-            args += ["--rate-limit-delay", str(ns.rate_limit_delay)]
-        if ns.max_repos:
-            args += ["--max-repos", str(ns.max_repos)]
-        if ns.use_async:
-            args += ["--use-async"]
-        return _run_git_mergestat(args)
+    async def _handler(store):
+        if ns.search_pattern:
+            await process_gitlab_projects_batch(
+                store=store,
+                token=token,
+                gitlab_url=ns.gitlab_url,
+                group_name=ns.group,
+                pattern=ns.search_pattern,
+                batch_size=ns.batch_size,
+                max_concurrent=ns.max_concurrent,
+                rate_limit_delay=ns.rate_limit_delay,
+                max_commits_per_project=ns.max_commits_per_repo,
+                max_projects=ns.max_repos,
+                use_async=ns.use_async,
+            )
+            return
 
-    if ns.project_id is None:
-        raise SystemExit("GitLab sync requires --project-id (or --search-pattern for batch).")
-    args += ["--gitlab-project-id", str(ns.project_id)]
-    return _run_git_mergestat(args)
+        if ns.project_id is None:
+            raise SystemExit(
+                "GitLab sync requires --project-id (or --search-pattern for batch)."
+            )
+        await process_gitlab_project(
+            store,
+            ns.project_id,
+            token,
+            ns.gitlab_url,
+            fetch_blame=ns.fetch_blame,
+            max_commits=ns.max_commits_per_repo or 100,
+        )
+
+    asyncio.run(_run_with_store(ns.db, db_type, _handler))
+    return 0
 
 
 def _cmd_metrics_daily(ns: argparse.Namespace) -> int:

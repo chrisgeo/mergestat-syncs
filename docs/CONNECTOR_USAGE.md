@@ -1,6 +1,6 @@
 # Using `cli.py` with GitHub and GitLab Connectors
 
-The `cli.py` front end wraps `git_mergestat.py` and exposes the three connector modes through unified subcommands:
+The `cli.py` front end exposes the three connector modes through unified subcommands:
 
 1. **Local Repository Mode** (default) - Analyzes a local git repository
 2. **GitHub Connector Mode** - Fetches data from GitHub API

@@ -42,6 +42,8 @@ SKIP_EXTENSIONS = {
     ".o",
     ".obj",
     ".bin",
+    ".bak",
+    ".tmp",
     ".svg",
     ".eot",
     ".ttf",

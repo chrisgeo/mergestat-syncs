@@ -7,7 +7,8 @@ from unittest.mock import Mock
 
 import pytest
 
-import git_mergestat
+from processors.local import process_git_commits
+from utils import collect_changed_files, iter_commits_since
 
 
 class DummyPerson:
@@ -39,7 +40,7 @@ def test_iter_commits_since_filters_old_commits():
     repo.iter_commits.return_value = [recent, old]
 
     since = now - timedelta(days=1)
-    commits = list(git_mergestat.iter_commits_since(repo, since))
+    commits = list(iter_commits_since(repo, since))
 
     assert commits == [recent]
 
@@ -59,7 +60,7 @@ async def test_process_git_commits_respects_since(monkeypatch):
         async def insert_git_commit_data(self, data):
             inserted.extend(data)
 
-    await git_mergestat.process_git_commits(
+    await process_git_commits(
         repo,
         DummyStore(),
         commits=[recent, old],
@@ -94,6 +95,6 @@ def test_collect_changed_files_tracks_paths(tmp_path):
         CommitWithDiff("missing", now, "deleted.txt"),
     ]
 
-    paths = git_mergestat.collect_changed_files(tmp_path, commits)
+    paths = collect_changed_files(tmp_path, commits)
 
     assert paths == [tracked_file]

@@ -2,13 +2,14 @@
 
 Purpose: compact, actionable rules for an AI coding agent (Copilot-like) working in this repository.
 
-- Start by reading `git_mergestat.py` and `connectors/__init__.py` to understand boundaries.
+- Start by reading `cli.py`, `processors/local.py`, and `connectors/__init__.py` to understand boundaries.
 - Prefer minimal, surgical changes. Use `apply_patch` for edits and keep surrounding style.
-- Use `manage_todo_list` to create and track multi-step tasks; mark steps as you go.
+- Use the plan tool (`update_plan`) to create and track multi-step tasks; mark steps as you go.
 
 ## Architecture & flows
 
-- `git_mergestat.py` dispatches `local`, `github`, and `gitlab` flows.
+- `cli.py` dispatches `local`, `github`, and `gitlab` sync flows and calls the processors.
+- Local sync orchestration lives in `processors/local.py` (`process_local_repo`).
 - Connectors live in `connectors/` and must handle pagination, rate-limits, and provide batch helpers.
 - Processors in `processors/` implement the pipeline: commits → PRs → commit-stats → files/blame.
 
