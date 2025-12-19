@@ -99,8 +99,8 @@ class JiraClient:
     def close(self) -> None:
         try:
             self.session.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Error while closing JiraClient session", exc_info=exc)
 
     def _url(self, path: str) -> str:
         return f"{self.auth.base_url}{path}"
