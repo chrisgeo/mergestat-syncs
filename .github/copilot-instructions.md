@@ -32,7 +32,7 @@ await process_github_repos_batch(store, token="$GITHUB_TOKEN", org_name="myorg",
 
 ```bash
 export DB_CONN_STRING="sqlite+aiosqlite:///mergestat.db"
-python git_mergestat.py --db "$DB_CONN_STRING" --connector local --repo-path .
+python cli.py sync local --db "$DB_CONN_STRING" --repo-path .
 ```
 
 - Quick Postgres run (dev):
@@ -41,7 +41,7 @@ python git_mergestat.py --db "$DB_CONN_STRING" --connector local --repo-path .
 docker compose up postgres -d
 export DB_CONN_STRING="postgresql+asyncpg://postgres:postgres@localhost:5432/postgres"
 alembic upgrade head
-python git_mergestat.py --db "$DB_CONN_STRING" --connector local --repo-path .
+python cli.py sync local --db "$DB_CONN_STRING" --repo-path .
 ```
 
 Common pitfalls & heuristics

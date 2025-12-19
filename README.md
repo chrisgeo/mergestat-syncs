@@ -90,6 +90,67 @@ asyncio.run(main())
 | `chrisgeo/*` | All repositories owned by `chrisgeo` |
 | `*sync*` | Any repository with `sync` in the name |
 
+## Developer Health Metrics (Work + Git) + Grafana ✅
+
+This repo can compute daily “developer health” metrics and provision Grafana dashboards on top of:
+
+- **Git + PR/MR facts** (from GitHub/GitLab/local syncs)
+- **Work tracking items** (Jira issues, GitHub issues/Projects, GitLab issues)
+
+Jira is **not** a replacement for pull request data — it’s used to track associated project work (throughput, WIP, work-item cycle/lead times). PR metrics still come from the Git provider data (e.g., GitHub PRs / GitLab MRs) synced by `git_mergestat.py`.
+
+**Docs**
+
+- Metrics definitions + tables: `docs/metrics.md`
+- Task tracker configuration (Jira/GitHub/GitLab, status mapping, teams): `docs/task_trackers.md`
+- Grafana dashboards + provisioning: `docs/grafana.md`
+
+### Quickstart (ClickHouse + Grafana)
+
+1) Start ClickHouse + Grafana:
+
+```bash
+python cli.py grafana up
+```
+
+1) Sync Git data into ClickHouse (choose one):
+
+```bash
+# Local repo
+python cli.py sync local --db "clickhouse://localhost:8123/default" --repo-path .
+
+# GitHub repo
+python cli.py sync github --db "clickhouse://localhost:8123/default" --owner <owner> --repo <repo>
+
+# GitLab project
+python cli.py sync gitlab --db "clickhouse://localhost:8123/default" --project-id <id>
+```
+
+1) Compute derived metrics (Git + Work Items):
+
+```bash
+# One day
+python cli.py metrics daily --date 2025-02-01 --db "clickhouse://localhost:8123/default" --provider all
+
+# Backfill last 30 days ending at date
+python cli.py metrics daily --date 2025-02-01 --backfill 30 --db "clickhouse://localhost:8123/default" --provider all
+```
+
+1) Open Grafana:
+
+- <http://localhost:3000> (default `admin` / `admin`)
+- Dashboards are provisioned under the “Developer Health” folder.
+
+### “Download” work tracking data (Jira/GitHub/GitLab)
+
+Work items are fetched from provider APIs during metrics computation (no separate sync command yet). This is separate from PR ingestion:
+
+- Configure credentials + mapping (see `docs/task_trackers.md`)
+- Run metrics job with `--provider jira|github|gitlab|all` (e.g. `python cli.py metrics daily ... --provider jira`)
+- To skip work tracking calls entirely: `--provider none`
+
+`cli.py` automatically loads a local `.env` file from the repo root (without overriding already-set environment variables). Disable with `DISABLE_DOTENV=1`.
+
 ## Database Configuration
 
 This project supports PostgreSQL, MongoDB, SQLite, and ClickHouse as storage backends. You can configure the database backend using environment variables or command-line arguments.
@@ -147,44 +208,40 @@ Example usage:
 
 ```bash
 # Using PostgreSQL (auto-detected from URL)
-python git_mergestat.py --db "postgresql+asyncpg://user:pass@localhost:5432/mergestat"
+python cli.py sync local --db "postgresql+asyncpg://user:pass@localhost:5432/mergestat"
 
 # Using MongoDB (auto-detected from URL)
-python git_mergestat.py --db "mongodb://localhost:27017"
+python cli.py sync local --db "mongodb://localhost:27017"
 
 # Local repo filtered to recent activity
-python git_mergestat.py \
+python cli.py sync local \
   --db "sqlite+aiosqlite:///mergestat.db" \
-  --connector local \
   --repo-path /path/to/repo \
   --since 2024-01-01
   # Blame is limited to files touched by commits on/after this date.
 
 # Using SQLite (file-based, auto-detected)
-python git_mergestat.py --db "sqlite+aiosqlite:///mergestat.db"
+python cli.py sync local --db "sqlite+aiosqlite:///mergestat.db"
 
 # Using SQLite (in-memory)
-python git_mergestat.py --db "sqlite+aiosqlite:///:memory:"
+python cli.py sync local --db "sqlite+aiosqlite:///:memory:"
 
 # GitHub repository with unified auth
-python git_mergestat.py \
+python cli.py sync github \
   --db "postgresql+asyncpg://user:pass@localhost:5432/mergestat" \
-  --connector github \
   --auth "$GITHUB_TOKEN" \
-  --github-owner torvalds \
-  --github-repo linux
+  --owner torvalds \
+  --repo linux
 
 # GitLab project with unified auth
-python git_mergestat.py \
+python cli.py sync gitlab \
   --db "mongodb://localhost:27017" \
-  --connector gitlab \
   --auth "$GITLAB_TOKEN" \
-  --gitlab-project-id 278964
+  --project-id 278964
 
 # Batch process repositories matching a pattern (GitHub)
-python git_mergestat.py \
+python cli.py sync github \
   --db "sqlite+aiosqlite:///mergestat.db" \
-  --connector github \
   --auth "$GITHUB_TOKEN" \
   --search-pattern "chrisgeo/merge*" \
   --group "chrisgeo" \
@@ -194,9 +251,8 @@ python git_mergestat.py \
   --use-async
 
 # Batch process projects matching a pattern (GitLab)
-python git_mergestat.py \
+python cli.py sync gitlab \
   --db "sqlite+aiosqlite:///mergestat.db" \
-  --connector gitlab \
   --auth "$GITLAB_TOKEN" \
   --gitlab-url "https://gitlab.com" \
   --group "mygroup" \
@@ -252,7 +308,7 @@ The script includes several configuration options to optimize performance:
 ```bash
 export BATCH_SIZE=500
 export MAX_WORKERS=8
-python git_mergestat.py
+python cli.py sync local
 ```
 
 **Example for resource-constrained environments:**
@@ -260,7 +316,7 @@ python git_mergestat.py
 ```bash
 export BATCH_SIZE=50
 export MAX_WORKERS=2
-python git_mergestat.py
+python cli.py sync local
 ```
 
 ## Performance Optimizations
@@ -335,7 +391,7 @@ For a typical repository with 1000 files and 10,000 commits:
   export DB_CONN_STRING="postgresql+asyncpg://postgres:postgres@localhost:5333/postgres"
 
   # Run the script
-  python git_mergestat.py
+  python cli.py sync local
   ```
 
 #### Using MongoDB
@@ -355,7 +411,7 @@ For a typical repository with 1000 files and 10,000 commits:
   export MONGO_DB_NAME="mergestat"
 
   # Run the script
-  python git_mergestat.py
+  python cli.py sync local
   ```
 
 #### Using SQLite
@@ -372,7 +428,7 @@ For a typical repository with 1000 files and 10,000 commits:
   export DB_CONN_STRING="sqlite+aiosqlite:///mergestat.db"
 
   # Run the script
-  python git_mergestat.py
+  python cli.py sync local
   ```
 
   Or for in-memory database (data lost when process exits):
@@ -380,7 +436,7 @@ For a typical repository with 1000 files and 10,000 commits:
   ```bash
   export DB_TYPE=sqlite
   export DB_CONN_STRING="sqlite+aiosqlite:///:memory:"
-  python git_mergestat.py
+  python cli.py sync local
   ```
 
 #### Using ClickHouse
@@ -392,7 +448,7 @@ For a typical repository with 1000 files and 10,000 commits:
   ```bash
   export DB_TYPE=clickhouse
   export DB_CONN_STRING="clickhouse://default:@localhost:8123/default"
-  python git_mergestat.py
+  python cli.py sync local
   ```
 
 #### Switching Between Databases
@@ -412,4 +468,3 @@ For a typical repository with 1000 files and 10,000 commits:
 - The accuracy depends heavily on repository history and commit message conventions
 
 This behavior is different from GitHub/GitLab connectors which provide accurate PR data directly from the provider API.
-

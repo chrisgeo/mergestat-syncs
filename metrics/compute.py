@@ -9,10 +9,12 @@ from metrics.schemas import (
     CommitMetricsRecord,
     CommitStatRow,
     DailyMetricsResult,
+    PullRequestReviewRow,
     PullRequestRow,
     RepoMetricsDailyRecord,
     UserMetricsDailyRecord,
 )
+from providers.teams import TeamResolver
 
 
 def commit_size_bucket(total_loc: int) -> str:
@@ -75,6 +77,30 @@ def _mean(values: Sequence[float]) -> float:
     return float(sum(values)) / float(len(values))
 
 
+def _percentile(values: Sequence[float], percentile: float) -> float:
+    """
+    Compute a percentile using linear interpolation between closest ranks.
+
+    Returns 0.0 when values is empty.
+    """
+    if not values:
+        return 0.0
+    if percentile <= 0:
+        return float(min(values))
+    if percentile >= 100:
+        return float(max(values))
+
+    sorted_vals = sorted(float(v) for v in values)
+    if len(sorted_vals) == 1:
+        return float(sorted_vals[0])
+
+    rank = (len(sorted_vals) - 1) * (float(percentile) / 100.0)
+    lo = int(rank)
+    hi = min(lo + 1, len(sorted_vals) - 1)
+    frac = rank - lo
+    return sorted_vals[lo] * (1.0 - frac) + sorted_vals[hi] * frac
+
+
 @dataclass
 class _CommitAgg:
     repo_id: uuid.UUID
@@ -111,12 +137,24 @@ class _UserAgg:
     prs_authored: int = 0
     prs_merged: int = 0
     pr_cycle_times: List[float] = None  # type: ignore[assignment]
+    pr_first_review_times: List[float] = None  # type: ignore[assignment]
+    pr_review_times: List[float] = None  # type: ignore[assignment]
+    pr_pickup_times: List[float] = None  # type: ignore[assignment]
+    prs_with_first_review: int = 0
+    reviews_given: int = 0
+    changes_requested_given: int = 0
 
     def __post_init__(self) -> None:
         if self.files is None:
             self.files = set()
         if self.pr_cycle_times is None:
             self.pr_cycle_times = []
+        if self.pr_first_review_times is None:
+            self.pr_first_review_times = []
+        if self.pr_review_times is None:
+            self.pr_review_times = []
+        if self.pr_pickup_times is None:
+            self.pr_pickup_times = []
 
 
 def compute_daily_metrics(
@@ -124,8 +162,11 @@ def compute_daily_metrics(
     day: date,
     commit_stat_rows: List[CommitStatRow],
     pull_request_rows: List[PullRequestRow],
+    pull_request_review_rows: Optional[List[PullRequestReviewRow]] = None,
     computed_at: datetime,
     include_commit_metrics: bool = True,
+    large_pr_total_loc_threshold: int = 1000,
+    team_resolver: Optional[TeamResolver] = None,
 ) -> DailyMetricsResult:
     """
     Compute daily commit/user/repo metrics for a single UTC day.
@@ -183,6 +224,13 @@ def compute_daily_metrics(
 
     # 3) Process PR rows for the day window.
     repo_cycle_times: Dict[uuid.UUID, List[float]] = {}
+    repo_first_review_times: Dict[uuid.UUID, List[float]] = {}
+    repo_review_times: Dict[uuid.UUID, List[float]] = {}
+    repo_pickup_times: Dict[uuid.UUID, List[float]] = {}
+    repo_large_prs: Dict[uuid.UUID, int] = {}
+    repo_rework_prs: Dict[uuid.UUID, int] = {}
+    repo_prs_with_first_review: Dict[uuid.UUID, int] = {}
+
     for pr in pull_request_rows:
         author_identity = _normalize_identity(pr.get("author_email"), pr.get("author_name"))
         user_key = (pr["repo_id"], author_identity)
@@ -204,15 +252,96 @@ def compute_daily_metrics(
                 ua.pr_cycle_times.append(float(cycle_hours))
                 repo_cycle_times.setdefault(pr["repo_id"], []).append(float(cycle_hours))
 
+                # Optional PR size facts.
+                additions = int(pr.get("additions") or 0)
+                deletions = int(pr.get("deletions") or 0)
+                total_loc = max(0, additions) + max(0, deletions)
+                if total_loc >= int(large_pr_total_loc_threshold):
+                    repo_large_prs[pr["repo_id"]] = int(repo_large_prs.get(pr["repo_id"], 0)) + 1
+
+                changes_requested_count = int(pr.get("changes_requested_count") or 0)
+                if changes_requested_count > 0:
+                    repo_rework_prs[pr["repo_id"]] = int(repo_rework_prs.get(pr["repo_id"], 0)) + 1
+
+                # Optional collaboration facts (first review/comment timestamps).
+                first_review_at = pr.get("first_review_at")
+                if isinstance(first_review_at, datetime):
+                    first_review_at_utc = _to_utc(first_review_at)
+                    ua.prs_with_first_review += 1
+                    repo_prs_with_first_review[pr["repo_id"]] = int(
+                        repo_prs_with_first_review.get(pr["repo_id"], 0)
+                    ) + 1
+
+                    fr_hours = (first_review_at_utc - created_at).total_seconds() / 3600.0
+                    ua.pr_first_review_times.append(float(fr_hours))
+                    repo_first_review_times.setdefault(pr["repo_id"], []).append(float(fr_hours))
+
+                    review_hours = (merged_at_utc - first_review_at_utc).total_seconds() / 3600.0
+                    ua.pr_review_times.append(float(review_hours))
+                    repo_review_times.setdefault(pr["repo_id"], []).append(float(review_hours))
+
+                first_comment_at = pr.get("first_comment_at")
+                interaction_dt = None
+                if isinstance(first_comment_at, datetime):
+                    interaction_dt = _to_utc(first_comment_at)
+                if isinstance(first_review_at, datetime):
+                    fr_dt = _to_utc(first_review_at)
+                    interaction_dt = fr_dt if interaction_dt is None else min(interaction_dt, fr_dt)
+                if interaction_dt is not None:
+                    pickup_hours = (interaction_dt - created_at).total_seconds() / 3600.0
+                    ua.pr_pickup_times.append(float(pickup_hours))
+                    repo_pickup_times.setdefault(pr["repo_id"], []).append(float(pickup_hours))
+
+    # 3b) Review participation (reviews submitted in day window).
+    if pull_request_review_rows:
+        for review in pull_request_review_rows:
+            submitted_at = _to_utc(review["submitted_at"])
+            if not (start <= submitted_at < end):
+                continue
+            reviewer = (review.get("reviewer") or "unknown").strip() or "unknown"
+            user_key = (review["repo_id"], reviewer)
+            ua = user_aggs.get(user_key)
+            if ua is None:
+                ua = _UserAgg(repo_id=review["repo_id"], day=day, author_identity=reviewer)
+                user_aggs[user_key] = ua
+
+            ua.reviews_given += 1
+            state = (review.get("state") or "").strip().lower()
+            if state in {"changes_requested", "changes-requested"}:
+                ua.changes_requested_given += 1
+
     # 4) Finalize user metrics records.
     user_metrics: List[UserMetricsDailyRecord] = []
     for (repo_id, author_identity), ua in sorted(user_aggs.items(), key=lambda kv: (str(kv[0][0]), kv[0][1])):
+        team_id = None
+        team_name = None
+        if team_resolver is not None:
+            team_id, team_name = team_resolver.resolve(author_identity)
         commits_count = int(ua.commits_count)
         total_loc_touched = int(ua.loc_added) + int(ua.loc_deleted)
         avg_commit_size_loc = (total_loc_touched / commits_count) if commits_count else 0.0
 
         avg_pr_cycle = _mean(ua.pr_cycle_times)
         median_pr_cycle = _median(ua.pr_cycle_times)
+        pr_cycle_p75 = _percentile(ua.pr_cycle_times, 75.0)
+        pr_cycle_p90 = _percentile(ua.pr_cycle_times, 90.0)
+
+        pr_first_review_p50 = (
+            _percentile(ua.pr_first_review_times, 50.0)
+            if ua.pr_first_review_times
+            else None
+        )
+        pr_first_review_p90 = (
+            _percentile(ua.pr_first_review_times, 90.0)
+            if ua.pr_first_review_times
+            else None
+        )
+        pr_review_time_p50 = (
+            _percentile(ua.pr_review_times, 50.0) if ua.pr_review_times else None
+        )
+        pr_pickup_p50 = (
+            _percentile(ua.pr_pickup_times, 50.0) if ua.pr_pickup_times else None
+        )
 
         user_metrics.append(
             UserMetricsDailyRecord(
@@ -229,6 +358,17 @@ def compute_daily_metrics(
                 prs_merged=int(ua.prs_merged),
                 avg_pr_cycle_hours=float(avg_pr_cycle),
                 median_pr_cycle_hours=float(median_pr_cycle),
+                pr_cycle_p75_hours=float(pr_cycle_p75),
+                pr_cycle_p90_hours=float(pr_cycle_p90),
+                prs_with_first_review=int(ua.prs_with_first_review),
+                pr_first_review_p50_hours=float(pr_first_review_p50) if pr_first_review_p50 is not None else None,
+                pr_first_review_p90_hours=float(pr_first_review_p90) if pr_first_review_p90 is not None else None,
+                pr_review_time_p50_hours=float(pr_review_time_p50) if pr_review_time_p50 is not None else None,
+                pr_pickup_time_p50_hours=float(pr_pickup_p50) if pr_pickup_p50 is not None else None,
+                reviews_given=int(ua.reviews_given),
+                changes_requested_given=int(ua.changes_requested_given),
+                team_id=team_id,
+                team_name=team_name,
                 computed_at=computed_at_utc,
             )
         )
@@ -247,7 +387,20 @@ def compute_daily_metrics(
 
         avg_commit_size_loc = (total_loc_touched / commits_count) if commits_count else 0.0
         large_commit_ratio = (large_commits_count / commits_count) if commits_count else 0.0
-        median_repo_cycle = _median(repo_cycle_times.get(repo_id, []))
+        repo_cycles = repo_cycle_times.get(repo_id, [])
+        median_repo_cycle = _median(repo_cycles)
+        pr_cycle_p75 = _percentile(repo_cycles, 75.0)
+        pr_cycle_p90 = _percentile(repo_cycles, 90.0)
+
+        repo_first_reviews = repo_first_review_times.get(repo_id, [])
+        repo_review_times_list = repo_review_times.get(repo_id, [])
+        repo_pickups = repo_pickup_times.get(repo_id, [])
+
+        large_pr_count = int(repo_large_prs.get(repo_id, 0) or 0)
+        rework_pr_count = int(repo_rework_prs.get(repo_id, 0) or 0)
+        prs_with_first_review = int(repo_prs_with_first_review.get(repo_id, 0) or 0)
+        large_pr_ratio = (large_pr_count / prs_merged) if prs_merged else 0.0
+        pr_rework_ratio = (rework_pr_count / prs_merged) if prs_merged else 0.0
 
         repo_metrics.append(
             RepoMetricsDailyRecord(
@@ -259,6 +412,15 @@ def compute_daily_metrics(
                 large_commit_ratio=float(large_commit_ratio),
                 prs_merged=int(prs_merged),
                 median_pr_cycle_hours=float(median_repo_cycle),
+                pr_cycle_p75_hours=float(pr_cycle_p75),
+                pr_cycle_p90_hours=float(pr_cycle_p90),
+                prs_with_first_review=int(prs_with_first_review),
+                pr_first_review_p50_hours=float(_percentile(repo_first_reviews, 50.0)) if repo_first_reviews else None,
+                pr_first_review_p90_hours=float(_percentile(repo_first_reviews, 90.0)) if repo_first_reviews else None,
+                pr_review_time_p50_hours=float(_percentile(repo_review_times_list, 50.0)) if repo_review_times_list else None,
+                pr_pickup_time_p50_hours=float(_percentile(repo_pickups, 50.0)) if repo_pickups else None,
+                large_pr_ratio=float(large_pr_ratio),
+                pr_rework_ratio=float(pr_rework_ratio),
                 computed_at=computed_at_utc,
             )
         )

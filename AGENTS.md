@@ -17,7 +17,7 @@ Purpose: compact, actionable rules for an AI coding agent (Copilot-like) working
 - Run the sync:
 
 ```bash
-python git_mergestat.py --db "<DB_CONN>" --connector local --repo-path /path/to/repo
+python cli.py sync local --db "<DB_CONN>" --repo-path /path/to/repo
 ```
 
 - Run tests: `pytest -q` or `pytest tests/test_github_connector.py -q`.

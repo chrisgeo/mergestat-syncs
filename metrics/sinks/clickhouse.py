@@ -2,11 +2,21 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from datetime import date, datetime, timezone
+from pathlib import Path
 from typing import List, Optional, Sequence
 
 import clickhouse_connect
 import logging
-from metrics.schemas import CommitMetricsRecord, RepoMetricsDailyRecord, UserMetricsDailyRecord
+from metrics.schemas import (
+    CommitMetricsRecord,
+    RepoMetricsDailyRecord,
+    TeamMetricsDailyRecord,
+    UserMetricsDailyRecord,
+    WorkItemCycleTimeRecord,
+    WorkItemMetricsDailyRecord,
+    WorkItemStateDurationDailyRecord,
+    WorkItemUserMetricsDailyRecord,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -36,72 +46,22 @@ class ClickHouseMetricsSink:
         except Exception as e:
             logger.warning("Exception occurred when closing ClickHouse client: %s", e, exc_info=True)
 
-    def ensure_tables(self) -> None:
-        stmts = [
-            """
-            CREATE TABLE IF NOT EXISTS repo_metrics_daily (
-                repo_id UUID,
-                day Date,
-                commits_count UInt32,
-                total_loc_touched UInt32,
-                avg_commit_size_loc Float64,
-                large_commit_ratio Float64,
-                prs_merged UInt32,
-                median_pr_cycle_hours Float64,
-                computed_at DateTime('UTC')
-            ) ENGINE MergeTree
-            PARTITION BY toYYYYMM(day)
-            ORDER BY (repo_id, day)
-            """,
-            """
-            CREATE TABLE IF NOT EXISTS user_metrics_daily (
-                repo_id UUID,
-                day Date,
-                author_email String,
-                commits_count UInt32,
-                loc_added UInt32,
-                loc_deleted UInt32,
-                files_changed UInt32,
-                large_commits_count UInt32,
-                avg_commit_size_loc Float64,
-                prs_authored UInt32,
-                prs_merged UInt32,
-                avg_pr_cycle_hours Float64,
-                median_pr_cycle_hours Float64,
-                review_response_count UInt32,
-                avg_review_response_hours Float64,
-                median_review_response_hours Float64,
-                computed_at DateTime('UTC')
-            ) ENGINE MergeTree
-            PARTITION BY toYYYYMM(day)
-            ORDER BY (repo_id, author_email, day)
-            """,
-            """
-            CREATE TABLE IF NOT EXISTS commit_metrics (
-                repo_id UUID,
-                commit_hash String,
-                day Date,
-                author_email String,
-                total_loc UInt32,
-                files_changed UInt32,
-                size_bucket LowCardinality(String),
-                computed_at DateTime('UTC')
-            ) ENGINE MergeTree
-            PARTITION BY toYYYYMM(day)
-            ORDER BY (repo_id, day, author_email, commit_hash)
-            """,
-        ]
-        for stmt in stmts:
-            self.client.command(stmt)
+    def _apply_sql_migrations(self) -> None:
+        migrations_dir = Path(__file__).resolve().parents[2] / "migrations" / "clickhouse"
+        if not migrations_dir.exists():
+            return
 
-        # Forward-compatible columns (older tables may exist without these).
-        alter_stmts = [
-            "ALTER TABLE user_metrics_daily ADD COLUMN IF NOT EXISTS review_response_count UInt32",
-            "ALTER TABLE user_metrics_daily ADD COLUMN IF NOT EXISTS avg_review_response_hours Float64",
-            "ALTER TABLE user_metrics_daily ADD COLUMN IF NOT EXISTS median_review_response_hours Float64",
-        ]
-        for stmt in alter_stmts:
-            self.client.command(stmt)
+        for path in sorted(migrations_dir.glob("*.sql")):
+            sql = path.read_text(encoding="utf-8")
+            # Very small splitter: migrations are expected to contain only DDL.
+            for stmt in sql.split(";"):
+                stmt = stmt.strip()
+                if not stmt:
+                    continue
+                self.client.command(stmt)
+
+    def ensure_tables(self) -> None:
+        self._apply_sql_migrations()
 
     def write_repo_metrics(self, rows: Sequence[RepoMetricsDailyRecord]) -> None:
         if not rows:
@@ -117,6 +77,15 @@ class ClickHouseMetricsSink:
                 "large_commit_ratio",
                 "prs_merged",
                 "median_pr_cycle_hours",
+                "pr_cycle_p75_hours",
+                "pr_cycle_p90_hours",
+                "prs_with_first_review",
+                "pr_first_review_p50_hours",
+                "pr_first_review_p90_hours",
+                "pr_review_time_p50_hours",
+                "pr_pickup_time_p50_hours",
+                "large_pr_ratio",
+                "pr_rework_ratio",
                 "computed_at",
             ],
             rows,
@@ -141,9 +110,17 @@ class ClickHouseMetricsSink:
                 "prs_merged",
                 "avg_pr_cycle_hours",
                 "median_pr_cycle_hours",
-                "review_response_count",
-                "avg_review_response_hours",
-                "median_review_response_hours",
+                "pr_cycle_p75_hours",
+                "pr_cycle_p90_hours",
+                "prs_with_first_review",
+                "pr_first_review_p50_hours",
+                "pr_first_review_p90_hours",
+                "pr_review_time_p50_hours",
+                "pr_pickup_time_p50_hours",
+                "reviews_given",
+                "changes_requested_given",
+                "team_id",
+                "team_name",
                 "computed_at",
             ],
             rows,
@@ -162,6 +139,121 @@ class ClickHouseMetricsSink:
                 "total_loc",
                 "files_changed",
                 "size_bucket",
+                "computed_at",
+            ],
+            rows,
+        )
+
+    def write_team_metrics(self, rows: Sequence[TeamMetricsDailyRecord]) -> None:
+        if not rows:
+            return
+        self._insert_rows(
+            "team_metrics_daily",
+            [
+                "day",
+                "team_id",
+                "team_name",
+                "commits_count",
+                "after_hours_commits_count",
+                "weekend_commits_count",
+                "after_hours_commit_ratio",
+                "weekend_commit_ratio",
+                "computed_at",
+            ],
+            rows,
+        )
+
+    def write_work_item_metrics(self, rows: Sequence[WorkItemMetricsDailyRecord]) -> None:
+        if not rows:
+            return
+        self._insert_rows(
+            "work_item_metrics_daily",
+            [
+                "day",
+                "provider",
+                "work_scope_id",
+                "team_id",
+                "team_name",
+                "items_started",
+                "items_completed",
+                "items_started_unassigned",
+                "items_completed_unassigned",
+                "wip_count_end_of_day",
+                "wip_unassigned_end_of_day",
+                "cycle_time_p50_hours",
+                "cycle_time_p90_hours",
+                "lead_time_p50_hours",
+                "lead_time_p90_hours",
+                "wip_age_p50_hours",
+                "wip_age_p90_hours",
+                "bug_completed_ratio",
+                "story_points_completed",
+                "computed_at",
+            ],
+            rows,
+        )
+
+    def write_work_item_user_metrics(self, rows: Sequence[WorkItemUserMetricsDailyRecord]) -> None:
+        if not rows:
+            return
+        self._insert_rows(
+            "work_item_user_metrics_daily",
+            [
+                "day",
+                "provider",
+                "work_scope_id",
+                "user_identity",
+                "team_id",
+                "team_name",
+                "items_started",
+                "items_completed",
+                "wip_count_end_of_day",
+                "cycle_time_p50_hours",
+                "cycle_time_p90_hours",
+                "computed_at",
+            ],
+            rows,
+        )
+
+    def write_work_item_cycle_times(self, rows: Sequence[WorkItemCycleTimeRecord]) -> None:
+        if not rows:
+            return
+        self._insert_rows(
+            "work_item_cycle_times",
+            [
+                "work_item_id",
+                "provider",
+                "day",
+                "work_scope_id",
+                "team_id",
+                "team_name",
+                "assignee",
+                "type",
+                "status",
+                "created_at",
+                "started_at",
+                "completed_at",
+                "cycle_time_hours",
+                "lead_time_hours",
+                "computed_at",
+            ],
+            rows,
+        )
+
+    def write_work_item_state_durations(self, rows: Sequence[WorkItemStateDurationDailyRecord]) -> None:
+        if not rows:
+            return
+        self._insert_rows(
+            "work_item_state_durations_daily",
+            [
+                "day",
+                "provider",
+                "work_scope_id",
+                "team_id",
+                "team_name",
+                "status",
+                "duration_hours",
+                "items_touched",
                 "computed_at",
             ],
             rows,

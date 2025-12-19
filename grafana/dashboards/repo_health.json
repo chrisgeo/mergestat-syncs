@@ -1,0 +1,108 @@
+{
+  "uid": "repo-health",
+  "title": "Repo Health",
+  "tags": ["mergestat", "developer-health"],
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5m",
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "repo_id",
+        "label": "Repo",
+        "type": "query",
+        "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+        "refresh": 1,
+        "query": "SELECT repo AS __text, toString(id) AS __value FROM repos ORDER BY repo",
+        "multi": false,
+        "includeAll": false
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Commits / Day",
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT day AS time, argMax(commits_count, computed_at) AS value FROM repo_metrics_daily WHERE repo_id = toUUID('${repo_id}') AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day ORDER BY day"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "PRs Merged / Day",
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT day AS time, argMax(prs_merged, computed_at) AS value FROM repo_metrics_daily WHERE repo_id = toUUID('${repo_id}') AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day ORDER BY day"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "PR Cycle Time (p50 / p90) — hours",
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "legendFormat": "p50",
+          "rawSql": "SELECT day AS time, argMax(median_pr_cycle_hours, computed_at) AS value FROM repo_metrics_daily WHERE repo_id = toUUID('${repo_id}') AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day ORDER BY day"
+        },
+        {
+          "refId": "B",
+          "format": "time_series",
+          "rawQuery": true,
+          "legendFormat": "p90",
+          "rawSql": "SELECT day AS time, argMax(pr_cycle_p90_hours, computed_at) AS value FROM repo_metrics_daily WHERE repo_id = toUUID('${repo_id}') AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day ORDER BY day"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Large Change Ratios",
+      "description": "Large commits are computed from commit LOC; large PRs require PR size facts (optional).",
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "percentunit" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "legendFormat": "Large commit ratio",
+          "rawSql": "SELECT day AS time, argMax(large_commit_ratio, computed_at) AS value FROM repo_metrics_daily WHERE repo_id = toUUID('${repo_id}') AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day ORDER BY day"
+        },
+        {
+          "refId": "B",
+          "format": "time_series",
+          "rawQuery": true,
+          "legendFormat": "Large PR ratio",
+          "rawSql": "SELECT day AS time, argMax(large_pr_ratio, computed_at) AS value FROM repo_metrics_daily WHERE repo_id = toUUID('${repo_id}') AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day ORDER BY day"
+        }
+      ]
+    }
+  ]
+}
+

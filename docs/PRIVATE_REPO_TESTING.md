@@ -32,7 +32,7 @@ python examples/private_repo_example.py
 
 #### 1. Create a GitHub Token
 
-1. Go to https://github.com/settings/tokens
+1. Go to <https://github.com/settings/tokens>
 2. Click "Generate new token" → "Generate new token (classic)"
 3. Give it a descriptive name: "MergeStat Private Repo Test"
 4. Select scopes:
@@ -53,27 +53,31 @@ export GITHUB_PRIVATE_REPO=myusername/my-private-repo
 #### 3. Run Tests
 
 **Option A: Run the example script**
+
 ```bash
 python examples/private_repo_example.py
 ```
 
 **Option B: Run integration tests**
+
 ```bash
 pytest tests/test_private_repo_access.py::TestGitHubPrivateRepoAccess -v
 ```
 
 **Option C: Test with actual data sync**
+
 ```bash
-python git_mergestat.py \
+python cli.py sync github \
   --db "postgresql+asyncpg://localhost:5432/mergestat" \
-  --github-token "$GITHUB_TOKEN" \
-  --github-owner myusername \
-  --github-repo my-private-repo
+  --auth "$GITHUB_TOKEN" \
+  --owner myusername \
+  --repo my-private-repo
 ```
 
 #### 4. Verify Success
 
 The test should:
+
 - ✅ Successfully list the private repository
 - ✅ Fetch repository statistics
 - ✅ Get contributors list
@@ -110,26 +114,30 @@ export GITLAB_URL=https://gitlab.example.com
 #### 3. Run Tests
 
 **Option A: Run the example script**
+
 ```bash
 python examples/private_repo_example.py
 ```
 
 **Option B: Run integration tests**
+
 ```bash
 pytest tests/test_private_repo_access.py::TestGitLabPrivateProjectAccess -v
 ```
 
 **Option C: Test with actual data sync**
+
 ```bash
-python git_mergestat.py \
+python cli.py sync gitlab \
   --db "postgresql+asyncpg://localhost:5432/mergestat" \
-  --gitlab-token "$GITLAB_TOKEN" \
-  --gitlab-project-id 12345
+  --auth "$GITLAB_TOKEN" \
+  --project-id 12345
 ```
 
 #### 4. Verify Success
 
 The test should:
+
 - ✅ Successfully access the private project
 - ✅ Fetch project statistics
 - ✅ Get contributors list
@@ -141,23 +149,27 @@ The test should:
 ### GitHub Issues
 
 **Problem**: `404 Not Found` error
+
 - **Cause**: Token doesn't have access to the repository or lacks `repo` scope
-- **Solution**: 
+- **Solution**:
   1. Verify the repository exists and you have access
-  2. Check token has `repo` scope at https://github.com/settings/tokens
+  2. Check token has `repo` scope at <https://github.com/settings/tokens>
   3. Generate a new token with correct scopes if needed
 
 **Problem**: `401 Unauthorized` error
+
 - **Cause**: Invalid or expired token
 - **Solution**: Generate a new token
 
 **Problem**: Rate limit exceeded
+
 - **Cause**: Too many API requests
 - **Solution**: Wait for rate limit to reset or use a different token
 
 ### GitLab Issues
 
 **Problem**: `404 Not Found` or `401 Unauthorized` error
+
 - **Cause**: Token doesn't have access to the project or lacks required scopes
 - **Solution**:
   1. Verify the project exists and you have access
@@ -165,12 +177,14 @@ The test should:
   3. Generate a new token with correct scopes if needed
 
 **Problem**: Project ID vs Project Path
+
 - **Cause**: Using project path when numeric ID is expected or vice versa
-- **Solution**: 
+- **Solution**:
   - For `git_mergestat.py`: Use numeric project ID
   - For connector methods: Can use either project name or ID
 
 **Problem**: Self-hosted GitLab connection issues
+
 - **Cause**: Incorrect URL or network issues
 - **Solution**: Verify `GITLAB_URL` is correct and accessible
 
@@ -263,6 +277,7 @@ When running tests in CI/CD pipelines:
    - Other CI: Use secure secret storage
 
 2. **Skip integration tests by default**
+
    ```yaml
    # GitHub Actions example
    - name: Run tests
@@ -272,6 +287,7 @@ When running tests in CI/CD pipelines:
    ```
 
 3. **Optional: Run integration tests with secrets**
+
    ```yaml
    # Only run on main branch or with specific label
    - name: Run integration tests
