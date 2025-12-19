@@ -10,6 +10,7 @@ from metrics.schemas import (
 )
 from models.work_items import WorkItem
 from providers.teams import TeamResolver
+import logging
 
 
 def _utc_day_window(day: date) -> Tuple[datetime, datetime]:
@@ -159,7 +160,12 @@ def compute_work_item_metrics_daily(
                 try:
                     bucket["story_points_completed"] = float(bucket["story_points_completed"]) + float(item.story_points)
                 except Exception:
-                    pass
+                    # Ignore invalid story_points values for this work item but log for diagnostics.
+                    logging.getLogger(__name__).warning(
+                        "Failed to convert story_points for work item %s: %r",
+                        getattr(item, "work_item_id", None),
+                        item.story_points,
+                    )
 
             if ub is not None:
                 ub["items_completed"] = int(ub["items_completed"]) + 1
