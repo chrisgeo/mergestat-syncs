@@ -97,8 +97,8 @@ def fetch_jira_work_items(
     logger.info("Fetched %d Jira work items (since %s)", len(work_items), updated_since)
     try:
         client.close()
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Failed to close Jira client: %s", exc)
     return work_items, transitions
 
 
