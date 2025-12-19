@@ -346,7 +346,7 @@ async def _backfill_github_missing_data(
     default_branch: str,
     max_commits: Optional[int],
 ) -> None:
-    # Logic copied from git_mergestat.py
+    # Logic matches the CLI sync orchestration.
     logging.info(
         "Backfilling data for %s...",
         repo_full_name,

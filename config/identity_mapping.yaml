@@ -1,0 +1,13 @@
+version: 1
+
+# Optional identity aliases for consistent per-user metrics across providers.
+#
+# Canonical identities should be stable and human-meaningful (prefer email).
+# Aliases can include:
+# - provider-qualified usernames: "github:octocat", "gitlab:alice"
+# - Jira account IDs: "jira:accountid:abcd1234"
+# - Display names when emails are unavailable
+#
+# This file ships empty by default; populate for your org.
+identities: []
+

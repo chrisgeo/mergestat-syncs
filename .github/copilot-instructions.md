@@ -4,11 +4,30 @@ This file orients AI coding agents to the mergestat-syncs repository: key archit
 
 **Quick start & workflows**
 
+- Local sync: `python cli.py sync local --db "$DB_CONN_STRING" --repo-path .`
+- GitHub sync: `python cli.py sync github --db "$DB_CONN_STRING" --owner <owner> --repo <repo>`
+- GitLab sync: `python cli.py sync gitlab --db "$DB_CONN_STRING" --project-id <id>`
+- Metrics: `python cli.py metrics daily --date YYYY-MM-DD --db "$DB_CONN_STRING" --provider all`
+
 **Big-picture architecture**
+
+- `cli.py` dispatches sync/metrics flows and calls processors directly.
+- `processors/` implement data pipelines; `processors/local.py` orchestrates local sync.
+- `connectors/` wrap GitHub/GitLab API access with pagination + rate limits.
+- `storage.py` abstracts DB backends (Postgres/Mongo/SQLite/ClickHouse).
+- `utils.py` holds shared helpers (parsing, git iteration, file filtering).
 
 **Project-specific conventions & patterns**
 
+- CLI args override env vars (`DB_CONN_STRING`, `DB_TYPE`, `GITHUB_TOKEN`, `GITLAB_TOKEN`, `REPO_PATH`).
+- Performance knobs: `BATCH_SIZE` and `MAX_WORKERS`.
+- Prefer async batch helpers for network I/O; respect `RateLimitGate` backoff.
+- Keep DB writes batched; avoid concurrent writes with SQLite.
+
 **How to add or modify connectors**
+
+- Export new connectors in `connectors/__init__.py`.
+- Follow existing pagination/rate limit patterns in `connectors/github.py` and `connectors/gitlab.py`.
 
 **Connectors — concrete examples & notes**
 
@@ -32,7 +51,7 @@ await process_github_repos_batch(store, token="$GITHUB_TOKEN", org_name="myorg",
 
 ```bash
 export DB_CONN_STRING="sqlite+aiosqlite:///mergestat.db"
-python git_mergestat.py --db "$DB_CONN_STRING" --connector local --repo-path .
+python cli.py sync local --db "$DB_CONN_STRING" --repo-path .
 ```
 
 - Quick Postgres run (dev):
@@ -41,7 +60,7 @@ python git_mergestat.py --db "$DB_CONN_STRING" --connector local --repo-path .
 docker compose up postgres -d
 export DB_CONN_STRING="postgresql+asyncpg://postgres:postgres@localhost:5432/postgres"
 alembic upgrade head
-python git_mergestat.py --db "$DB_CONN_STRING" --connector local --repo-path .
+python cli.py sync local --db "$DB_CONN_STRING" --repo-path .
 ```
 
 Common pitfalls & heuristics
@@ -53,7 +72,7 @@ Common pitfalls & heuristics
 
 Where to look first
 
-- For onboarding: `git_mergestat.py`, `connectors/__init__.py`, `processors/github.py`, `storage.py`, `tests/test_github_connector.py`.
+- For onboarding: `cli.py`, `processors/local.py`, `connectors/__init__.py`, `processors/github.py`, `storage.py`, `tests/test_github_connector.py`.
 - For connector patterns: `connectors/github.py` and `connectors/gitlab.py`.
 - For DB model shapes: `models/` and `alembic/versions`.
 
@@ -78,16 +97,17 @@ alembic upgrade head
 pytest tests/test_github_connector.py -q
 ```
 
-- CI-like checks: run linters/formatters listed in `requirements.txt` (e.g., `black`, `ruff`) if present. Run `black .` and `ruff .` locally.
+- CI-like checks: run linters/formatters listed in `requirements.txt` (e.g., `black`, `isort`, `flake8`) if present.
 
 **Implementation notes discovered in code**
 
 - `processors/github.py` uses a `CONNECTORS_AVAILABLE` flag to fall back when `connectors` are not installed — tests and local runs may toggle this. If you add a new connector, ensure tests import hooks or mocks account for this flag.
-- `git_mergestat.py` demonstrates how local mode composes the pipeline: `process_git_commits`, `process_local_pull_requests`, `process_git_commit_stats`, then `process_files_and_blame`. Keep that ordering for correctness when adding or modifying flow.
+- `processors/local.py` composes the local pipeline: `process_git_commits`, `process_local_pull_requests`, `process_git_commit_stats`, then `process_files_and_blame`. Keep that ordering for correctness when changing flow.
 
 **Key files to inspect for common tasks**
 
-- Entry / CLI: [git_mergestat.py](../git_mergestat.py#L1-L120)
+- Entry / CLI: [cli.py](../cli.py#L1-L200)
+- Local orchestration: [processors/local.py](../processors/local.py#L1-L200)
 - Connectors surface: [connectors/**init**.py](../connectors/__init__.py#L1-L40)
 - Core processors: [processors/](../processors/)
 - Storage/backends: [storage.py](../storage.py#L1-L200)

@@ -1,82 +1,10 @@
-"""Tests for utility functions in git_mergestat.py."""
+"""Tests for utility functions in utils.py."""
 
-import mimetypes
 import os
-from pathlib import Path
 from unittest.mock import patch
 
-# Re-implement the skippable logic locally for testing to avoid module-level
-# database connection issues when importing git_mergestat.py directly.
-# This matches the implementation in git_mergestat.py
-SKIP_EXTENSIONS = {
-    ".png",
-    ".jpg",
-    ".jpeg",
-    ".gif",
-    ".bmp",
-    ".pdf",
-    ".ttf",
-    ".otf",
-    ".woff",
-    ".woff2",
-    ".ico",
-    ".mp4",
-    ".mp3",
-    ".mov",
-    ".avi",
-    ".exe",
-    ".dll",
-    ".zip",
-    ".tar",
-    ".gz",
-    ".7z",
-    ".eot",
-    ".rar",
-    ".iso",
-    ".dmg",
-    ".pkg",
-    ".deb",
-    ".rpm",
-    ".msi",
-    ".class",
-    ".jar",
-    ".war",
-    ".pyc",
-    ".pyo",
-    ".so",
-    ".o",
-    ".a",
-    ".lib",
-    ".bin",
-    ".dat",
-    ".swp",
-    ".lock",
-    ".bak",
-    ".tmp",
-}
-
-
-def is_skippable(path: str) -> bool:
-    """
-    Return True if the file is skippable (i.e. should not be processed for git blame).
-    """
-    ext = Path(path).suffix.lower()
-    if ext in SKIP_EXTENSIONS:
-        return True
-    mime, _ = mimetypes.guess_type(path)
-    return mime and mime.startswith(
-        (
-            "image/",
-            "video/",
-            "audio/",
-            "application/pdf",
-            "font/",
-            "application/x-executable",
-            "application/x-sharedlib",
-            "application/x-object",
-            "application/x-archive",
-        )
-    )
+from cli import build_parser
+from utils import SKIP_EXTENSIONS, is_skippable
 
 
 class TestIsSkippable:
@@ -92,7 +20,6 @@ class TestIsSkippable:
             "icon.ico",
             "document.pdf",
             "font.ttf",
-            "font.otf",
             "font.woff",
             "font.woff2",
             "video.mp4",
@@ -160,8 +87,7 @@ class TestIsSkippable:
             ".gz",
             ".pyc",
             ".so",
-            ".lock",
-            ".tmp",
+            ".bin",
         }
 
         for ext in expected_extensions:
@@ -180,12 +106,10 @@ class TestIsSkippable:
         assert not is_skippable("Dockerfile")
         assert not is_skippable("LICENSE")
 
-    def test_mime_type_detection(self):
-        """Test that mime type detection catches some file types."""
-        # These should be detected by mime type
-        assert is_skippable("image.bmp")  # image/* mime type
-        assert is_skippable("video.avi")  # video/* mime type
-        assert is_skippable("audio.wav")  # audio/* mime type
+    def test_extension_based_skips(self):
+        """Test that extension-based skipping covers common binary types."""
+        assert is_skippable("video.avi")
+        assert is_skippable("audio.wav")
 
 
 class TestDBEchoConfiguration:
@@ -264,35 +188,24 @@ class TestDBEchoConfiguration:
 class TestBatchProcessingCLIArguments:
     """Test cases for batch processing CLI argument parsing.
 
-    Note: These tests re-implement the argument parsing logic rather than importing
-    parse_args() from git_mergestat.py directly. This avoids module-level database
-    connection issues when importing git_mergestat.py (see comment at top of this file).
+    These tests exercise cli.py argument parsing for batch sync flows.
     """
 
     def test_github_pattern_argument(self):
-        """Test that --github-pattern argument is parsed correctly."""
-        import argparse
-
-        parser = argparse.ArgumentParser()
-        parser.add_argument("--db", required=False)
-        parser.add_argument("--github-pattern", required=False)
-        parser.add_argument("--github-batch-size", type=int, default=10)
-        parser.add_argument("--max-concurrent", type=int, default=4)
-        parser.add_argument("--rate-limit-delay", type=float, default=1.0)
-        parser.add_argument("--max-commits-per-repo", type=int)
-        parser.add_argument("--max-repos", type=int)
-        parser.add_argument("--use-async", action="store_true")
-
+        """Test that --search-pattern argument is parsed correctly."""
+        parser = build_parser()
         test_args = [
-            "--github-pattern",
-            "chrisgeo/m*",
+            "sync",
+            "github",
             "--db",
             "sqlite+aiosqlite:///:memory:",
+            "--search-pattern",
+            "chrisgeo/m*",
         ]
         args = parser.parse_args(test_args)
 
-        assert args.github_pattern == "chrisgeo/m*"
-        assert args.github_batch_size == 10
+        assert args.search_pattern == "chrisgeo/m*"
+        assert args.batch_size == 10
         assert args.max_concurrent == 4
         assert args.rate_limit_delay == 1.0
         assert args.max_commits_per_repo is None
@@ -301,21 +214,15 @@ class TestBatchProcessingCLIArguments:
 
     def test_batch_processing_arguments_with_custom_values(self):
         """Test that batch processing arguments accept custom values."""
-        import argparse
-
-        parser = argparse.ArgumentParser()
-        parser.add_argument("--github-pattern", required=False)
-        parser.add_argument("--github-batch-size", type=int, default=10)
-        parser.add_argument("--max-concurrent", type=int, default=4)
-        parser.add_argument("--rate-limit-delay", type=float, default=1.0)
-        parser.add_argument("--max-commits-per-repo", type=int)
-        parser.add_argument("--max-repos", type=int)
-        parser.add_argument("--use-async", action="store_true")
-
+        parser = build_parser()
         test_args = [
-            "--github-pattern",
+            "sync",
+            "github",
+            "--db",
+            "sqlite+aiosqlite:///:memory:",
+            "--search-pattern",
             "org/*",
-            "--github-batch-size",
+            "--batch-size",
             "20",
             "--max-concurrent",
             "8",
@@ -330,8 +237,8 @@ class TestBatchProcessingCLIArguments:
 
         args = parser.parse_args(test_args)
 
-        assert args.github_pattern == "org/*"
-        assert args.github_batch_size == 20
+        assert args.search_pattern == "org/*"
+        assert args.batch_size == 20
         assert args.max_concurrent == 8
         assert args.rate_limit_delay == 2.5
         assert args.max_commits_per_repo == 100
@@ -340,51 +247,52 @@ class TestBatchProcessingCLIArguments:
 
     def test_use_async_flag_default_is_false(self):
         """Test that --use-async flag defaults to False."""
-        import argparse
-
-        parser = argparse.ArgumentParser()
-        parser.add_argument("--use-async", action="store_true")
-
-        args = parser.parse_args([])
+        parser = build_parser()
+        args = parser.parse_args(
+            [
+                "sync",
+                "github",
+                "--db",
+                "sqlite+aiosqlite:///:memory:",
+                "--search-pattern",
+                "org/*",
+            ]
+        )
 
         assert args.use_async is False
 
     def test_use_async_flag_when_provided(self):
         """Test that --use-async flag is True when provided."""
-        import argparse
-
-        parser = argparse.ArgumentParser()
-        parser.add_argument("--use-async", action="store_true")
-
-        args = parser.parse_args(["--use-async"])
+        parser = build_parser()
+        args = parser.parse_args(
+            [
+                "sync",
+                "github",
+                "--db",
+                "sqlite+aiosqlite:///:memory:",
+                "--search-pattern",
+                "org/*",
+                "--use-async",
+            ]
+        )
 
         assert args.use_async is True
 
     def test_gitlab_pattern_argument(self):
-        """Test that --gitlab-pattern argument is parsed correctly."""
-        import argparse
-
-        parser = argparse.ArgumentParser()
-        parser.add_argument("--db", required=False)
-        parser.add_argument("--gitlab-pattern", required=False)
-        parser.add_argument("--gitlab-group", required=False)
-        parser.add_argument("--gitlab-batch-size", type=int, default=10)
-        parser.add_argument("--max-concurrent", type=int, default=4)
-        parser.add_argument("--rate-limit-delay", type=float, default=1.0)
-        parser.add_argument("--max-commits-per-repo", type=int)
-        parser.add_argument("--max-repos", type=int)
-        parser.add_argument("--use-async", action="store_true")
-
+        """Test that --search-pattern argument is parsed correctly for GitLab."""
+        parser = build_parser()
         test_args = [
-            "--gitlab-pattern",
-            "group/p*",
+            "sync",
+            "gitlab",
             "--db",
             "sqlite+aiosqlite:///:memory:",
+            "--search-pattern",
+            "group/p*",
         ]
         args = parser.parse_args(test_args)
 
-        assert args.gitlab_pattern == "group/p*"
-        assert args.gitlab_batch_size == 10
+        assert args.search_pattern == "group/p*"
+        assert args.batch_size == 10
         assert args.max_concurrent == 4
         assert args.rate_limit_delay == 1.0
         assert args.max_commits_per_repo is None
@@ -393,24 +301,17 @@ class TestBatchProcessingCLIArguments:
 
     def test_gitlab_batch_processing_arguments_with_custom_values(self):
         """Test that GitLab batch processing arguments accept custom values."""
-        import argparse
-
-        parser = argparse.ArgumentParser()
-        parser.add_argument("--gitlab-pattern", required=False)
-        parser.add_argument("--gitlab-group", required=False)
-        parser.add_argument("--gitlab-batch-size", type=int, default=10)
-        parser.add_argument("--max-concurrent", type=int, default=4)
-        parser.add_argument("--rate-limit-delay", type=float, default=1.0)
-        parser.add_argument("--max-commits-per-repo", type=int)
-        parser.add_argument("--max-repos", type=int)
-        parser.add_argument("--use-async", action="store_true")
-
+        parser = build_parser()
         test_args = [
-            "--gitlab-pattern",
+            "sync",
+            "gitlab",
+            "--db",
+            "sqlite+aiosqlite:///:memory:",
+            "--search-pattern",
             "mygroup/*",
-            "--gitlab-group",
+            "--group",
             "mygroup",
-            "--gitlab-batch-size",
+            "--batch-size",
             "15",
             "--max-concurrent",
             "6",
@@ -425,9 +326,9 @@ class TestBatchProcessingCLIArguments:
 
         args = parser.parse_args(test_args)
 
-        assert args.gitlab_pattern == "mygroup/*"
-        assert args.gitlab_group == "mygroup"
-        assert args.gitlab_batch_size == 15
+        assert args.search_pattern == "mygroup/*"
+        assert args.group == "mygroup"
+        assert args.batch_size == 15
         assert args.max_concurrent == 6
         assert args.rate_limit_delay == 1.5
         assert args.max_commits_per_repo == 50

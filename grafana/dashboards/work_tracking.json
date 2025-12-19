@@ -1,0 +1,143 @@
+{
+  "uid": "work-tracking",
+  "title": "Work Tracking",
+  "tags": ["mergestat", "developer-health"],
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5m",
+  "time": { "from": "now-30d", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "provider",
+        "label": "Provider",
+        "type": "custom",
+        "multi": true,
+        "includeAll": true,
+        "options": [
+          { "text": "jira", "value": "jira", "selected": true },
+          { "text": "github", "value": "github", "selected": true },
+          { "text": "gitlab", "value": "gitlab", "selected": true }
+        ],
+        "current": { "text": "All", "value": "$__all" }
+      },
+      {
+        "name": "team_id",
+        "label": "Team",
+        "type": "query",
+        "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+        "refresh": 1,
+        "query": "SELECT DISTINCT team_id AS __text, team_id AS __value FROM team_metrics_daily ORDER BY team_id",
+        "multi": true,
+        "includeAll": true
+      },
+      {
+        "name": "work_scope_id",
+        "label": "Work Scope",
+        "type": "query",
+        "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+        "refresh": 1,
+        "query": "SELECT DISTINCT work_scope_id AS __text, work_scope_id AS __value FROM work_item_metrics_daily WHERE work_scope_id != '' ORDER BY work_scope_id",
+        "multi": true,
+        "includeAll": true
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Completed Work Items / Day",
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "rawQuery": true,
+          "rawSql": "SELECT day AS time, provider AS metric, sum(items_completed_latest) AS value FROM ( SELECT day, provider, ifNull(nullIf(team_id, ''), 'unassigned') AS team_id, work_scope_id, argMax(items_completed, computed_at) AS items_completed_latest FROM work_item_metrics_daily WHERE provider IN (${provider:sqlstring}) AND ifNull(nullIf(team_id, ''), 'unassigned') IN (${team_id:sqlstring}) AND work_scope_id IN (${work_scope_id:sqlstring}) AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day, provider, team_id, work_scope_id ) GROUP BY day, provider ORDER BY day"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "WIP Count (End of Day)",
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "rawQuery": true,
+          "rawSql": "SELECT day AS time, provider AS metric, sum(wip_latest) AS value FROM ( SELECT day, provider, ifNull(nullIf(team_id, ''), 'unassigned') AS team_id, work_scope_id, argMax(wip_count_end_of_day, computed_at) AS wip_latest FROM work_item_metrics_daily WHERE provider IN (${provider:sqlstring}) AND ifNull(nullIf(team_id, ''), 'unassigned') IN (${team_id:sqlstring}) AND work_scope_id IN (${work_scope_id:sqlstring}) AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day, provider, team_id, work_scope_id ) GROUP BY day, provider ORDER BY day"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Work Item Cycle Time p50 — hours",
+      "description": "Computed from per-item cycle times (requires started_at and completed_at).",
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "rawQuery": true,
+          "rawSql": "SELECT day AS time, provider AS metric, quantileTDigest(0.50)(cycle_time_hours) AS value FROM work_item_cycle_times WHERE provider IN (${provider:sqlstring}) AND ifNull(nullIf(team_id, ''), 'unassigned') IN (${team_id:sqlstring}) AND work_scope_id IN (${work_scope_id:sqlstring}) AND cycle_time_hours IS NOT NULL AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day, provider ORDER BY day"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Work Item Cycle Time p90 — hours",
+      "description": "Computed from per-item cycle times (requires started_at and completed_at).",
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "rawQuery": true,
+          "rawSql": "SELECT day AS time, provider AS metric, quantileTDigest(0.90)(cycle_time_hours) AS value FROM work_item_cycle_times WHERE provider IN (${provider:sqlstring}) AND ifNull(nullIf(team_id, ''), 'unassigned') IN (${team_id:sqlstring}) AND work_scope_id IN (${work_scope_id:sqlstring}) AND cycle_time_hours IS NOT NULL AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day, provider ORDER BY day"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Time In Status (hours/day)",
+      "description": "Sum of time spent in each normalized status category on each day (requires status transition history; Jira uses changelog).",
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 16 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "stacking": { "mode": "normal", "group": "A" } }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawQuery": true,
+          "rawSql": "SELECT day AS time, status AS metric, sum(duration_latest) AS value FROM ( SELECT day, status, provider, work_scope_id, ifNull(nullIf(team_id, ''), 'unassigned') AS team_id, argMax(duration_hours, computed_at) AS duration_latest FROM work_item_state_durations_daily WHERE provider IN (${provider:sqlstring}) AND ifNull(nullIf(team_id, ''), 'unassigned') IN (${team_id:sqlstring}) AND work_scope_id IN (${work_scope_id:sqlstring}) AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day, status, provider, work_scope_id, team_id ) GROUP BY day, status ORDER BY day"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Completed Unassigned Work Items / Day",
+      "description": "Count of completed items that had no assignee at completion time.",
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 26 },
+      "targets": [
+        {
+          "refId": "A",
+          "rawQuery": true,
+          "rawSql": "SELECT day AS time, provider AS metric, sum(done_unassigned_latest) AS value FROM ( SELECT day, provider, work_scope_id, ifNull(nullIf(team_id, ''), 'unassigned') AS team_id, argMax(items_completed_unassigned, computed_at) AS done_unassigned_latest FROM work_item_metrics_daily WHERE provider IN (${provider:sqlstring}) AND ifNull(nullIf(team_id, ''), 'unassigned') IN (${team_id:sqlstring}) AND work_scope_id IN (${work_scope_id:sqlstring}) AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day, provider, work_scope_id, team_id ) GROUP BY day, provider ORDER BY day"
+        }
+      ]
+    }
+  ]
+}

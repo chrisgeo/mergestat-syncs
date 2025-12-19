@@ -18,6 +18,27 @@ volumes:
       device: ./data/clickhouse
       o: bind
 services:
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: unless-stopped
+    environment:
+      GF_INSTALL_PLUGINS: grafana-clickhouse-datasource
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "8123"
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-stats}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-ch}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-ch}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - clickhouse
+    volumes:
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
   mongo:
     image: mongo:latest
     container_name: mongo
@@ -61,7 +82,8 @@ services:
     image: python:alpine
     environment:
       PG_URL: postgres://postgres:postgres@postgres:5432/postgres
+      DB_CONN_STRING: postgres://postgres:postgres@postgres:5432/postgres
     volumes:
       - ./:/app
     working_dir: /app
-    command: python3 git_mergestat.py
+    command: /bin/sh -c 'python3 cli.py sync local --db "$DB_CONN_STRING" --repo-path .'

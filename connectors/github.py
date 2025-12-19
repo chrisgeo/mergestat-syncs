@@ -16,7 +16,7 @@ import threading
 from datetime import datetime, timezone
 from typing import Callable, List, Optional
 
-from github import Github, GithubException, RateLimitExceededException
+from github import Auth, Github, GithubException, RateLimitExceededException
 
 from connectors.base import BatchResult, GitConnector
 from connectors.exceptions import (
@@ -84,12 +84,11 @@ class GitHubConnector(GitConnector):
         self.token = token
 
         # Initialize PyGithub client
+        auth = Auth.Token(token)
         if base_url:
-            self.github = Github(
-                base_url=base_url, login_or_token=token, per_page=per_page
-            )
+            self.github = Github(base_url=base_url, auth=auth, per_page=per_page)
         else:
-            self.github = Github(login_or_token=token, per_page=per_page)
+            self.github = Github(auth=auth, per_page=per_page)
 
         # Initialize GraphQL client for blame operations
         self.graphql = GitHubGraphQLClient(token)

@@ -1,14 +1,14 @@
-# Using git_mergestat.py with GitHub and GitLab Connectors
+# Using `cli.py` with GitHub and GitLab Connectors
 
-The `git_mergestat.py` script supports three modes of operation:
+The `cli.py` front end exposes the three connector modes through unified subcommands:
 
 1. **Local Repository Mode** (default) - Analyzes a local git repository
 2. **GitHub Connector Mode** - Fetches data from GitHub API
 3. **GitLab Connector Mode** - Fetches data from GitLab API
 
-## Simplified CLI Interface
+## Simplified Library Dispatch
 
-The CLI now supports:
+The dedicated CLI (`python cli.py sync ...`) now exposes:
 
 - **Unified authentication** with `--auth` (works for both GitHub and GitLab)
 - **Auto-detection of database type** from connection string URL scheme
@@ -22,16 +22,16 @@ This is the original mode that analyzes a local git repository.
 # Using environment variables
 export DB_CONN_STRING="postgresql+asyncpg://localhost:5432/mergestat"
 export REPO_PATH="/path/to/repo"
-python git_mergestat.py
+python cli.py sync local
 
 # Using command-line arguments (auto-detects database type from URL)
-python git_mergestat.py --db "postgresql+asyncpg://localhost:5432/mergestat" --repo-path "/path/to/repo"
+python cli.py sync local --db "postgresql+asyncpg://localhost:5432/mergestat" --repo-path "/path/to/repo"
 
 # Limit to commits and blames since a date (ISO date or datetime)
-python git_mergestat.py --db "sqlite+aiosqlite:///mergestat.db" --repo-path "/path/to/repo" --since 2024-01-01
+python cli.py sync local --db "sqlite+aiosqlite:///mergestat.db" --repo-path "/path/to/repo" --since 2024-01-01
 
-# Explicit connector type
-python git_mergestat.py --db "postgresql://..." --connector local --repo-path "/path/to/repo"
+# Explicit connector type (not needed with the CLI mode, but shown for parity)
+python cli.py sync local --db "postgresql://..." --repo-path "/path/to/repo"
 ```
 
 **How filtering works**: `--since` / `--start-date` restricts commits and commit stats to changes at or after the timestamp, and blame is limited to files touched by those filtered commits.
@@ -52,37 +52,33 @@ Fetch repository data directly from GitHub without cloning. **Fully supports bot
 ```bash
 # Public repository with unified auth
 export GITHUB_TOKEN="ghp_xxxxxxxxxxxx"
-python git_mergestat.py \
+python cli.py sync github \
   --db "postgresql+asyncpg://localhost:5432/mergestat" \
-  --connector github \
   --auth "$GITHUB_TOKEN" \
-  --github-owner torvalds \
-  --github-repo linux
+  --owner torvalds \
+  --repo linux
 
 # Private repository (token must have 'repo' scope)
-python git_mergestat.py \
+python cli.py sync github \
   --db "postgresql+asyncpg://localhost:5432/mergestat" \
-  --connector github \
   --auth "$GITHUB_TOKEN" \
-  --github-owner your-org \
-  --github-repo your-private-repo
+  --owner your-org \
+  --repo your-private-repo
 
 # Token from environment variable (GITHUB_TOKEN) - no --auth needed
 export GITHUB_TOKEN="ghp_xxxxxxxxxxxx"
-python git_mergestat.py \
+python cli.py sync github \
   --db "postgresql://..." \
-  --connector github \
-  --github-owner torvalds \
-  --github-repo linux
+  --owner torvalds \
+  --repo linux
 ```
 
 ### Batch Processing Multiple Repositories
 
 ```bash
 # Process repositories matching a pattern
-python git_mergestat.py \
+python cli.py sync github \
   --db "sqlite+aiosqlite:///mergestat.db" \
-  --connector github \
   --auth "$GITHUB_TOKEN" \
   --search-pattern "myorg/api-*" \
   --group myorg \
@@ -113,42 +109,37 @@ Fetch project data directly from GitLab (including self-hosted instances). **Ful
 
 ```bash
 # Public project on GitLab.com with unified auth
-python git_mergestat.py \
+python cli.py sync gitlab \
   --db "postgresql+asyncpg://localhost:5432/mergestat" \
-  --connector gitlab \
   --auth "$GITLAB_TOKEN" \
-  --gitlab-project-id 278964
+  --project-id 278964
 
 # Private project (token must have required scopes)
-python git_mergestat.py \
+python cli.py sync gitlab \
   --db "postgresql://..." \
-  --connector gitlab \
   --auth "$GITLAB_TOKEN" \
-  --gitlab-project-id 12345
+  --project-id 12345
 
 # Self-hosted GitLab
-python git_mergestat.py \
+python cli.py sync gitlab \
   --db "postgresql://..." \
-  --connector gitlab \
   --auth "$GITLAB_TOKEN" \
   --gitlab-url "https://gitlab.example.com" \
-  --gitlab-project-id 123
+  --project-id 123
 
 # Token from environment variable (GITLAB_TOKEN)
 export GITLAB_TOKEN="glpat-xxxxxxxxxxxx"
-python git_mergestat.py \
+python cli.py sync gitlab \
   --db "mongodb://localhost:27017" \
-  --connector gitlab \
-  --gitlab-project-id 278964
+  --project-id 278964
 ```
 
 ### Batch Processing Multiple Projects
 
 ```bash
 # Process projects matching a pattern
-python git_mergestat.py \
+python cli.py sync gitlab \
   --db "sqlite+aiosqlite:///mergestat.db" \
-  --connector gitlab \
   --auth "$GITLAB_TOKEN" \
   --gitlab-url "https://gitlab.com" \
   --group mygroup \
@@ -191,73 +182,69 @@ All modes support these environment variables:
 
 ## Command-Line Arguments
 
-```
-usage: git_mergestat.py [-h] [--db DB] [--connector {local,github,gitlab}]
-                        [--auth AUTH] [--repo-path REPO_PATH]
-                        [--db-type {postgres,mongo,sqlite,clickhouse}]
-                        [--github-owner GITHUB_OWNER] [--github-repo GITHUB_REPO]
-                        [--gitlab-url GITLAB_URL] [--gitlab-project-id GITLAB_PROJECT_ID]
-                        [-s SEARCH_PATTERN] [--batch-size BATCH_SIZE] [--group GROUP]
-                        [--max-concurrent MAX_CONCURRENT] [--rate-limit-delay RATE_LIMIT_DELAY]
-                        [--max-commits-per-repo MAX_COMMITS_PER_REPO] [--max-repos MAX_REPOS]
-                        [--use-async] [--since SINCE]
+The CLI exposes a shared `sync` command with source-specific subcommands.
 
-Core Options:
-  --db DB                       Database connection string (auto-detects type from URL)
-  --connector {local,github,gitlab}  Connector type to use
-  --auth AUTH                   Authentication token (GitHub or GitLab)
-  --repo-path REPO_PATH        Path to the local git repository
-  --since SINCE                 Lower-bound date/time for local mode. Filters commits, per-file stats, and blame to activity at or after this timestamp (ISO date or datetime).
-  --db-type {postgres,mongo,sqlite,clickhouse}  Database backend (optional, auto-detected)
+### Local mode (`python cli.py sync local`)
 
-GitHub Options:
-  --github-owner OWNER         GitHub repository owner/organization
-  --github-repo REPO           GitHub repository name
+- `--db DB` (required): Database connection string (auto-detects the backend from the URL).
+- `--repo-path PATH`: Path to the repository (`.` by default).
+- `--since / --start-date`: Lower-bound ISO date/time for commits, stats, and blame.
+- `--fetch-blame`: Include blame data (slow).
+- `--max-commits-per-repo N`: Limit analyzed commits to the most recent N.
+- `--db-type {postgres,mongo,sqlite,clickhouse}`: Optional override when the scheme is ambiguous.
 
-GitLab Options:
-  --gitlab-url URL             GitLab instance URL (default: https://gitlab.com)
-  --gitlab-project-id ID       GitLab project ID (numeric)
+### GitHub mode (`python cli.py sync github`)
 
-Batch Processing Options (work with both connectors):
-  -s, --search-pattern PATTERN fnmatch-style pattern to filter repositories/projects
-  --batch-size SIZE            Number of repos/projects per batch (default: 10)
-  --group NAME                 Organization/group name to fetch from
-  --max-concurrent N           Maximum concurrent workers (default: 4)
-  --rate-limit-delay SECONDS   Delay between batches (default: 1.0)
-  --max-commits-per-repo N     Maximum commits to analyze per repo
-  --max-repos N                Maximum repos/projects to process
-  --use-async                  Use async processing for better performance
-```
+Single-repo execution (required: `--owner` and `--repo`):
+
+- `--db DB` (required).
+- `--auth TOKEN`: Token overrides `GITHUB_TOKEN`.
+- `--owner OWNER` and `--repo REPO`: Target repository.
+
+Batch processing:
+
+- `--search-pattern PATTERN` (required for batch).
+- `--group NAME`: Organization/user that owns the repositories.
+- `--batch-size N`, `--max-concurrent N`, `--rate-limit-delay SECONDS`: Tune pagination and throughput.
+- `--max-repos N`: Stop after processing N repositories.
+- `--use-async`: Enable async workers.
+- Shared options: `--fetch-blame`, `--max-commits-per-repo`.
+
+### GitLab mode (`python cli.py sync gitlab`)
+
+- `--db DB` (required).
+- `--auth TOKEN`: Token overrides `GITLAB_TOKEN`.
+- `--project-id ID`: Required for single-project mode.
+- `--gitlab-url URL`: Defaults to `https://gitlab.com`.
+- Batch options mirror the GitHub CLI flags (`--search-pattern`, `--group`, etc.).
+- Shared tuning: `--batch-size`, `--max-concurrent`, `--rate-limit-delay`, `--max-repos`, `--use-async`, `--fetch-blame`, `--max-commits-per-repo`.
 
 ## Examples
 
 ### Analyze Linux Kernel from GitHub
 
 ```bash
-python git_mergestat.py \
+python cli.py sync github \
   --db "postgresql+asyncpg://localhost:5432/mergestat" \
-  --connector github \
   --auth "$GITHUB_TOKEN" \
-  --github-owner torvalds \
-  --github-repo linux
+  --owner torvalds \
+  --repo linux
 ```
 
 ### Analyze GitLab's GitLab from GitLab.com
 
 ```bash
-python git_mergestat.py \
+python cli.py sync gitlab \
   --db "postgresql+asyncpg://localhost:5432/mergestat" \
-  --connector gitlab \
   --auth "$GITLAB_TOKEN" \
-  --gitlab-project-id 278964
+  --project-id 278964
 ```
 
 ### Analyze Local Repository
 
 ```bash
-python git_mergestat.py \
+python cli.py sync local \
   --db "postgresql+asyncpg://localhost:5432/mergestat" \
-  --connector local \
   --repo-path "/home/user/my-project"
 ```
 
@@ -265,9 +252,8 @@ python git_mergestat.py \
 
 ```bash
 # GitHub batch processing
-python git_mergestat.py \
+python cli.py sync github \
   --db "sqlite+aiosqlite:///mergestat.db" \
-  --connector github \
   --auth "$GITHUB_TOKEN" \
   --group myorg \
   --search-pattern "myorg/api-*" \
@@ -276,9 +262,8 @@ python git_mergestat.py \
   --use-async
 
 # GitLab batch processing
-python git_mergestat.py \
+python cli.py sync gitlab \
   --db "sqlite+aiosqlite:///mergestat.db" \
-  --connector gitlab \
   --auth "$GITLAB_TOKEN" \
   --group mygroup \
   --search-pattern "mygroup/service-*" \

@@ -170,4 +170,33 @@ def test_repo_median_pr_cycle_even_count() -> None:
 
     repo_metrics = {m.repo_id: m for m in result.repo_metrics}
     assert repo_metrics[repo_id].median_pr_cycle_hours == 4.0
+    assert repo_metrics[repo_id].pr_cycle_p75_hours == 6.25
+    assert repo_metrics[repo_id].pr_cycle_p90_hours == 8.5
 
+
+def test_reviews_given_aggregation() -> None:
+    repo_id = uuid.uuid4()
+    day = date(2025, 2, 1)
+    start = datetime(2025, 2, 1, tzinfo=timezone.utc)
+
+    result = compute_daily_metrics(
+        day=day,
+        commit_stat_rows=[],
+        pull_request_rows=[],
+        pull_request_review_rows=[
+            {
+                "repo_id": repo_id,
+                "number": 123,
+                "reviewer": "reviewer@example.com",
+                "submitted_at": start + timedelta(hours=1),
+                "state": "CHANGES_REQUESTED",
+            }
+        ],
+        computed_at=start + timedelta(days=1),
+        include_commit_metrics=False,
+    )
+
+    by_user = {(m.repo_id, m.author_email): m for m in result.user_metrics}
+    reviewer = by_user[(repo_id, "reviewer@example.com")]
+    assert reviewer.reviews_given == 1
+    assert reviewer.changes_requested_given == 1

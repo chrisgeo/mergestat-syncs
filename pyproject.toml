@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mergestat-syncs"
+version = "0.1.0"
+description = "Sync GitHub/GitLab/local repositories into a Mergestat-compatible schema."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "tqdm",
+  "sqlalchemy",
+  "clickhouse-connect",
+  "psycopg2-binary",
+  "asyncpg",
+  "aiosqlite",
+  "python-gitlab",
+  "GitPython",
+  "PyGithub>=2.1.0,<3.0.0",
+  "requests",
+  "pydantic",
+  "PyYAML",
+  "typing_extensions",
+  "jira",
+  "alembic",
+  "motor",
+]
+
+[project.optional-dependencies]
+dev = [
+  "mypy",
+  "black",
+  "flake8",
+  "isort",
+  "pytest",
+  "pytest-asyncio",
+  "pytest-cov",
+]
+
+[project.scripts]
+mergestat-syncs = "cli:main"
+
+[tool.setuptools]
+packages = [
+  "analytics",
+  "connectors",
+  "connectors.utils",
+  "metrics",
+  "metrics.sinks",
+  "models",
+  "processors",
+  "providers",
+  "providers.github",
+  "providers.gitlab",
+  "providers.jira",
+]
+py-modules = ["cli", "storage", "utils"]

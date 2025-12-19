@@ -30,7 +30,7 @@ def _parse_uuid(value: str) -> uuid.UUID:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Compute and persist daily Git metrics.")
+    parser = argparse.ArgumentParser(description="Compute and persist daily developer health metrics.")
     parser.add_argument("--date", required=True, type=_parse_date, help="Target day (UTC) as YYYY-MM-DD.")
     parser.add_argument(
         "--db",
@@ -44,6 +44,18 @@ def main() -> int:
         help="Compute N days ending at --date (inclusive). Default: 1.",
     )
     parser.add_argument("--repo-id", type=_parse_uuid, help="Optional repo_id UUID filter.")
+    parser.add_argument(
+        "--sink",
+        choices=["auto", "clickhouse", "mongo", "sqlite", "both"],
+        default="auto",
+        help="Where to write derived metrics (default: auto = same as --db backend).",
+    )
+    parser.add_argument(
+        "--provider",
+        choices=["all", "jira", "github", "gitlab", "none"],
+        default="all",
+        help="Which work tracking providers to include for WorkItem metrics (default: all).",
+    )
 
     args = parser.parse_args()
 
@@ -54,6 +66,8 @@ def main() -> int:
             backfill_days=max(1, int(args.backfill)),
             repo_id=args.repo_id,
             include_commit_metrics=True,
+            sink=args.sink,
+            provider=args.provider,
         )
         return 0
     except Exception as exc:

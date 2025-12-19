@@ -1,0 +1,206 @@
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any, Dict, Iterable, Optional
+
+from connectors.utils.graphql import GitHubGraphQLClient
+from connectors.utils.rate_limit_queue import RateLimitConfig, RateLimitGate
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class GitHubAuth:
+    token: str
+    base_url: Optional[str] = None  # GitHub Enterprise REST base URL (optional)
+
+
+class GitHubWorkClient:
+    """
+    Work-tracking oriented GitHub client:
+    - Issues via PyGithub REST
+    - Projects v2 via GraphQL
+    """
+
+    def __init__(
+        self,
+        *,
+        auth: GitHubAuth,
+        per_page: int = 100,
+        gate: Optional[RateLimitGate] = None,
+    ) -> None:
+        from github import Github  # PyGithub
+
+        self.auth = auth
+        self.per_page = max(1, min(100, int(per_page)))
+        self.gate = gate or RateLimitGate(RateLimitConfig(initial_backoff_seconds=1.0))
+
+        if auth.base_url:
+            self.github = Github(
+                base_url=auth.base_url,
+                login_or_token=auth.token,
+                per_page=self.per_page,
+            )
+        else:
+            self.github = Github(
+                login_or_token=auth.token,
+                per_page=self.per_page,
+            )
+
+        # GraphQL client (api.github.com only for now).
+        self.graphql = GitHubGraphQLClient(auth.token)
+
+    def get_repo(self, *, owner: str, repo: str) -> Any:
+        return self.github.get_repo(f"{owner}/{repo}")
+
+    def iter_issues(
+        self,
+        *,
+        owner: str,
+        repo: str,
+        state: str = "all",
+        since: Optional[datetime] = None,
+        limit: Optional[int] = None,
+    ) -> Iterable[Any]:
+        gh_repo = self.get_repo(owner=owner, repo=repo)
+        issues = gh_repo.get_issues(state=state, since=since)
+        count = 0
+        for issue in issues:
+            # Exclude pull requests from issues feed.
+            if getattr(issue, "pull_request", None) is not None:
+                continue
+            yield issue
+            count += 1
+            if limit is not None and count >= int(limit):
+                return
+
+    def iter_issue_events(self, issue: Any, *, limit: Optional[int] = None) -> Iterable[Any]:
+        """
+        Iterate issue events (labeled/unlabeled/closed/reopened/assigned/...) via REST.
+        """
+        events = issue.get_events()
+        count = 0
+        for ev in events:
+            yield ev
+            count += 1
+            if limit is not None and count >= int(limit):
+                return
+
+    def iter_project_v2_items(
+        self,
+        *,
+        org_login: str,
+        project_number: int,
+        first: int = 50,
+        max_items: Optional[int] = None,
+    ) -> Iterable[Dict[str, Any]]:
+        """
+        Iterate GitHub Projects v2 items via GraphQL.
+
+        Returns raw dict nodes (parsed GraphQL response).
+        """
+        query = """
+        query($login: String!, $number: Int!, $after: String, $first: Int!) {
+          organization(login: $login) {
+            projectV2(number: $number) {
+              id
+              title
+              items(first: $first, after: $after) {
+                nodes {
+                  id
+                  createdAt
+                  updatedAt
+                  content {
+                    __typename
+                    ... on Issue {
+                      id
+                      number
+                      title
+                      url
+                      state
+                      createdAt
+                      updatedAt
+                      closedAt
+                      repository { nameWithOwner }
+                      labels(first: 50) { nodes { name } }
+                      assignees(first: 10) { nodes { login email name } }
+                      author { login email name }
+                    }
+                    ... on PullRequest {
+                      id
+                      number
+                      title
+                      url
+                      state
+                      createdAt
+                      updatedAt
+                      closedAt
+                      mergedAt
+                      repository { nameWithOwner }
+                      labels(first: 50) { nodes { name } }
+                      assignees(first: 10) { nodes { login email name } }
+                      author { login email name }
+                    }
+                    ... on DraftIssue {
+                      id
+                      title
+                      createdAt
+                      updatedAt
+                    }
+                  }
+                  fieldValues(first: 20) {
+                    nodes {
+                      __typename
+                      ... on ProjectV2ItemFieldSingleSelectValue {
+                        name
+                        field {
+                          ... on ProjectV2SingleSelectField {
+                            name
+                          }
+                        }
+                      }
+                      ... on ProjectV2ItemFieldTextValue {
+                        text
+                        field { ... on ProjectV2FieldCommon { name } }
+                      }
+                    }
+                  }
+                }
+                pageInfo { hasNextPage endCursor }
+              }
+            }
+          }
+        }
+        """
+        after = None
+        fetched = 0
+        while True:
+            self.gate.wait_sync()
+            data = self.graphql.query(
+                query,
+                variables={
+                    "login": org_login,
+                    "number": int(project_number),
+                    "after": after,
+                    "first": int(max(1, min(100, first))),
+                },
+            )
+            self.gate.reset()
+
+            org = (data or {}).get("organization") or {}
+            project = org.get("projectV2") or {}
+            items = (project.get("items") or {}).get("nodes") or []
+            page = (project.get("items") or {}).get("pageInfo") or {}
+
+            for item in items:
+                yield item
+                fetched += 1
+                if max_items is not None and fetched >= int(max_items):
+                    return
+
+            if not page.get("hasNextPage"):
+                return
+            after = page.get("endCursor")
+

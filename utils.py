@@ -6,7 +6,20 @@ from typing import Optional, Iterable, List, Union, Tuple, Set
 
 # Constants
 BATCH_SIZE = 1000
-MAX_WORKERS = os.cpu_count() or 4
+
+
+def _int_env(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None or not str(raw).strip():
+        return int(default)
+    try:
+        return max(1, int(str(raw).strip()))
+    except ValueError:
+        return int(default)
+
+
+# Keep default concurrency conservative; override via env.
+MAX_WORKERS = _int_env("MAX_WORKERS", 4)
 AGGREGATE_STATS_MARKER = "__AGGREGATE__"
 REPO_PATH = os.getenv("REPO_PATH", ".")
 SKIP_EXTENSIONS = {
@@ -29,6 +42,8 @@ SKIP_EXTENSIONS = {
     ".o",
     ".obj",
     ".bin",
+    ".bak",
+    ".tmp",
     ".svg",
     ".eot",
     ".ttf",
