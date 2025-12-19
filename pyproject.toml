@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mergestat-syncs"
+name = "dev-health-ops"
 version = "0.1.0"
-description = "Sync GitHub/GitLab/local repositories into a Mergestat-compatible schema."
+description = "Open Source Development Team Operation Analytics"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -39,7 +39,7 @@ dev = [
 ]
 
 [project.scripts]
-mergestat-syncs = "cli:main"
+dev-health-ops = "cli:main"
 
 [tool.setuptools]
 packages = [
