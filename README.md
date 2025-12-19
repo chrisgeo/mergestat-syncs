@@ -1,10 +1,7 @@
-# Git Metrics
+# Development Team / IC Health Metrics (SPACE-like)
+Development Team and Developers' operational help should be available for all. 
 
-Using Mergestat's database schema, this set of syncs will use any git repository locally, or from gitlab (github ones already exist) to allow you to more quickly add data without the complicated setup that mergestat and entails.
-
-## Why?
-
-Mostly because using mergestat's syncs are great but take a lot of time to understand. The goal of this was for a personal project to understand how my teams are doing, and with a limited budget.
+This project's goal is to provide the tools availble, and potential quick-win implementations for anyone interested by providing integregations that cover a majority of the popular tooling.
 
 ## Private Repository Support ✅
 
@@ -84,7 +81,7 @@ asyncio.run(main())
 
 | Pattern | Matches |
 |---------|---------|
-| `chrisgeo/m*` | `chrisgeo/mergestat-syncs`, `chrisgeo/my-app` |
+| `chrisgeo/m*` | `chrisgeo/dev-health-ops`, `chrisgeo/my-app` |
 | `*/api-*` | `anyorg/api-service`, `myuser/api-gateway` |
 | `org/repo` | Exactly `org/repo` |
 | `chrisgeo/*` | All repositories owned by `chrisgeo` |
