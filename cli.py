@@ -67,7 +67,9 @@ def _resolve_db_type(db_url: str, db_type: Optional[str]) -> str:
             raise SystemExit(str(exc)) from exc
 
     if resolved not in {"postgres", "mongo", "sqlite", "clickhouse"}:
-        raise SystemExit("DB_TYPE must be 'postgres', 'mongo', 'sqlite', or 'clickhouse'")
+        raise SystemExit(
+            "DB_TYPE must be 'postgres', 'mongo', 'sqlite', or 'clickhouse'"
+        )
     return resolved
 
 
@@ -194,17 +196,33 @@ def _cmd_metrics_daily(ns: argparse.Namespace) -> int:
 
 
 def _cmd_grafana_up(_ns: argparse.Namespace) -> int:
-    cmd = ["docker", "compose", "-f", str(REPO_ROOT / "grafana" / "docker-compose.yml"), "up", "-d"]
+    cmd = [
+        "docker",
+        "compose",
+        "-f",
+        str(REPO_ROOT / "grafana" / "docker-compose.yml"),
+        "up",
+        "-d",
+    ]
     return subprocess.run(cmd, check=False).returncode
 
 
 def _cmd_grafana_down(_ns: argparse.Namespace) -> int:
-    cmd = ["docker", "compose", "-f", str(REPO_ROOT / "grafana" / "docker-compose.yml"), "down"]
+    cmd = [
+        "docker",
+        "compose",
+        "-f",
+        str(REPO_ROOT / "grafana" / "docker-compose.yml"),
+        "down",
+    ]
     return subprocess.run(cmd, check=False).returncode
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="mergestat-syncs", description="Sync git data and compute developer health metrics.")
+    parser = argparse.ArgumentParser(
+        prog="dev-health-ops",
+        description="Sync git data and compute developer health metrics.",
+    )
     parser.add_argument(
         "--log-level",
         default=os.getenv("LOG_LEVEL", "INFO"),
@@ -218,16 +236,30 @@ def build_parser() -> argparse.ArgumentParser:
 
     local = sync_sub.add_parser("local", help="Sync from a local git repository.")
     local.add_argument("--db", required=True, help="Database connection string.")
-    local.add_argument("--db-type", choices=["postgres", "mongo", "sqlite", "clickhouse"], help="Optional DB backend override.")
-    local.add_argument("--repo-path", default=".", help="Path to the local git repository.")
+    local.add_argument(
+        "--db-type",
+        choices=["postgres", "mongo", "sqlite", "clickhouse"],
+        help="Optional DB backend override.",
+    )
+    local.add_argument(
+        "--repo-path", default=".", help="Path to the local git repository."
+    )
     local.add_argument("--since", help="Lower-bound ISO date/time (UTC).")
-    local.add_argument("--fetch-blame", action="store_true", help="Fetch blame data (slow).")
-    local.add_argument("--max-commits-per-repo", type=int, help="Limit commits analyzed.")
+    local.add_argument(
+        "--fetch-blame", action="store_true", help="Fetch blame data (slow)."
+    )
+    local.add_argument(
+        "--max-commits-per-repo", type=int, help="Limit commits analyzed."
+    )
     local.set_defaults(func=_cmd_sync_local)
 
     gh = sync_sub.add_parser("github", help="Sync from GitHub (single repo or batch).")
     gh.add_argument("--db", required=True, help="Database connection string.")
-    gh.add_argument("--db-type", choices=["postgres", "mongo", "sqlite", "clickhouse"], help="Optional DB backend override.")
+    gh.add_argument(
+        "--db-type",
+        choices=["postgres", "mongo", "sqlite", "clickhouse"],
+        help="Optional DB backend override.",
+    )
     gh.add_argument("--auth", help="GitHub token (defaults to GITHUB_TOKEN).")
     gh.add_argument("--owner", help="GitHub owner/org (single repo mode).")
     gh.add_argument("--repo", help="GitHub repo name (single repo mode).")
@@ -242,12 +274,24 @@ def build_parser() -> argparse.ArgumentParser:
     gh.add_argument("--max-commits-per-repo", type=int)
     gh.set_defaults(func=_cmd_sync_github)
 
-    gl = sync_sub.add_parser("gitlab", help="Sync from GitLab (single project or batch).")
+    gl = sync_sub.add_parser(
+        "gitlab", help="Sync from GitLab (single project or batch)."
+    )
     gl.add_argument("--db", required=True, help="Database connection string.")
-    gl.add_argument("--db-type", choices=["postgres", "mongo", "sqlite", "clickhouse"], help="Optional DB backend override.")
+    gl.add_argument(
+        "--db-type",
+        choices=["postgres", "mongo", "sqlite", "clickhouse"],
+        help="Optional DB backend override.",
+    )
     gl.add_argument("--auth", help="GitLab token (defaults to GITLAB_TOKEN).")
-    gl.add_argument("--gitlab-url", default=os.getenv("GITLAB_URL", "https://gitlab.com"), help="GitLab instance URL.")
-    gl.add_argument("--project-id", type=int, help="GitLab project ID (single project mode).")
+    gl.add_argument(
+        "--gitlab-url",
+        default=os.getenv("GITLAB_URL", "https://gitlab.com"),
+        help="GitLab instance URL.",
+    )
+    gl.add_argument(
+        "--project-id", type=int, help="GitLab project ID (single project mode)."
+    )
     gl.add_argument("--search-pattern", help="Batch mode pattern (e.g. 'group/*').")
     gl.add_argument("--group", help="Batch mode group name.")
     gl.add_argument("--batch-size", type=int, default=10)
@@ -263,29 +307,74 @@ def build_parser() -> argparse.ArgumentParser:
     metrics = sub.add_parser("metrics", help="Compute and write derived metrics.")
     metrics_sub = metrics.add_subparsers(dest="metrics_command", required=True)
 
-    daily = metrics_sub.add_parser("daily", help="Compute daily metrics (optionally backfill).")
-    daily.add_argument("--date", required=True, type=_parse_date, help="Target day (UTC) as YYYY-MM-DD.")
-    daily.add_argument("--backfill", type=int, default=1, help="Compute N days ending at --date (inclusive).")
-    daily.add_argument("--db", default=os.getenv("DB_CONN_STRING") or os.getenv("DATABASE_URL"), help="Source DB URI (and default sink).")
-    daily.add_argument("--repo-id", type=lambda s: __import__("uuid").UUID(s), help="Optional repo_id UUID filter.")
-    daily.add_argument("--provider", choices=["all", "jira", "github", "gitlab", "none"], default="all", help="Which work item providers to include.")
-    daily.add_argument("--sink", choices=["auto", "clickhouse", "mongo", "sqlite", "both"], default="auto", help="Where to write derived metrics.")
-    daily.add_argument("--skip-commit-metrics", action="store_true", help="Skip per-commit metrics output.")
+    daily = metrics_sub.add_parser(
+        "daily", help="Compute daily metrics (optionally backfill)."
+    )
+    daily.add_argument(
+        "--date",
+        required=True,
+        type=_parse_date,
+        help="Target day (UTC) as YYYY-MM-DD.",
+    )
+    daily.add_argument(
+        "--backfill",
+        type=int,
+        default=1,
+        help="Compute N days ending at --date (inclusive).",
+    )
+    daily.add_argument(
+        "--db",
+        default=os.getenv("DB_CONN_STRING") or os.getenv("DATABASE_URL"),
+        help="Source DB URI (and default sink).",
+    )
+    daily.add_argument(
+        "--repo-id",
+        type=lambda s: __import__("uuid").UUID(s),
+        help="Optional repo_id UUID filter.",
+    )
+    daily.add_argument(
+        "--provider",
+        choices=["all", "jira", "github", "gitlab", "none"],
+        default="all",
+        help="Which work item providers to include.",
+    )
+    daily.add_argument(
+        "--sink",
+        choices=["auto", "clickhouse", "mongo", "sqlite", "both"],
+        default="auto",
+        help="Where to write derived metrics.",
+    )
+    daily.add_argument(
+        "--skip-commit-metrics",
+        action="store_true",
+        help="Skip per-commit metrics output.",
+    )
     daily.set_defaults(func=_cmd_metrics_daily)
 
     # ---- grafana ----
-    graf = sub.add_parser("grafana", help="Start/stop the Grafana + ClickHouse dev stack.")
+    graf = sub.add_parser(
+        "grafana", help="Start/stop the Grafana + ClickHouse dev stack."
+    )
     graf_sub = graf.add_subparsers(dest="grafana_command", required=True)
-    graf_up = graf_sub.add_parser("up", help="docker compose up -d for grafana/docker-compose.yml")
+    graf_up = graf_sub.add_parser(
+        "up", help="docker compose up -d for grafana/docker-compose.yml"
+    )
     graf_up.set_defaults(func=_cmd_grafana_up)
-    graf_down = graf_sub.add_parser("down", help="docker compose down for grafana/docker-compose.yml")
+    graf_down = graf_sub.add_parser(
+        "down", help="docker compose down for grafana/docker-compose.yml"
+    )
     graf_down.set_defaults(func=_cmd_grafana_down)
 
     return parser
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    if os.getenv("DISABLE_DOTENV", "").strip().lower() not in {"1", "true", "yes", "on"}:
+    if os.getenv("DISABLE_DOTENV", "").strip().lower() not in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
         _load_dotenv(REPO_ROOT / ".env")
 
     parser = build_parser()
@@ -293,7 +382,9 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     level_name = str(getattr(ns, "log_level", "") or "INFO").upper()
     level = getattr(logging, level_name, logging.INFO)
-    logging.basicConfig(level=level, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.basicConfig(
+        level=level, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+    )
 
     func = getattr(ns, "func", None)
     if func is None:

@@ -1,6 +1,6 @@
 ## Purpose
 
-This file orients AI coding agents to the mergestat-syncs repository: key architecture, developer workflows, conventions, and integration points so you can be productive immediately.
+This file orients AI coding agents to the dev-health-ops repository: key architecture, developer workflows, conventions, and integration points so you can be productive immediately.
 
 **Quick start & workflows**
 
@@ -37,7 +37,7 @@ Concrete examples & quick commands
 
 ```py
 from connectors.github import match_repo_pattern
-assert match_repo_pattern('chrisgeo/mergestat-syncs', 'chrisgeo/m*')
+assert match_repo_pattern('chrisgeo/dev-health-ops', 'chrisgeo/m*')
 ```
 
 - Batch processing example (use the processor helper):

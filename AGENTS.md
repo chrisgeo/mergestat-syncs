@@ -45,7 +45,7 @@ If you'd like, I can insert short code examples from `connectors/github.py` or `
 
 ```py
 from connectors.github import match_repo_pattern
-assert match_repo_pattern('chrisgeo/mergestat-syncs', 'chrisgeo/m*')
+assert match_repo_pattern('chrisgeo/dev-health-ops', 'chrisgeo/m*')
 ```
 
 - `process_github_repos_batch` usage (processors/github.py):

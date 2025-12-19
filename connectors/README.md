@@ -519,4 +519,4 @@ async with SQLAlchemyStore(conn_string="postgresql+asyncpg://...") as store:
 
 ## License
 
-This code is part of the mergestat-syncs project.
+This code is part of the dev-health-ops project.

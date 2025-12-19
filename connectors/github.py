@@ -45,12 +45,12 @@ def match_repo_pattern(full_name: str, pattern: str) -> bool:
     """
     Match a repository full name against a pattern using fnmatch-style matching.
 
-    :param full_name: Repository full name (e.g., 'chrisgeo/mergestat-syncs').
+    :param full_name: Repository full name (e.g., 'chrisgeo/dev-health-ops').
     :param pattern: Pattern to match (e.g., 'chrisgeo/m*', '*/sync*', 'chrisgeo/*').
     :return: True if the pattern matches, False otherwise.
 
     Examples:
-        - 'chrisgeo/m*' matches 'chrisgeo/mergestat-syncs'
+        - 'chrisgeo/m*' matches 'chrisgeo/dev-health-ops'
         - '*/sync*' matches 'anyorg/sync-tool'
         - 'org/repo' matches exactly 'org/repo'
     """
@@ -186,7 +186,7 @@ class GitHubConnector(GitConnector):
         :return: List of Repository objects.
 
         Examples:
-            - pattern='chrisgeo/m*' matches 'chrisgeo/mergestat-syncs'
+            - pattern='chrisgeo/m*' matches 'chrisgeo/dev-health-ops'
             - pattern='*/sync*' matches 'anyorg/sync-tool'
         """
         try:
