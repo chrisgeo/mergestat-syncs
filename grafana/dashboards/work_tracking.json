@@ -54,7 +54,6 @@
       "targets": [
         {
           "refId": "A",
-          "format": "time_series",
           "rawQuery": true,
           "rawSql": "SELECT day AS time, provider AS metric, sum(items_completed_latest) AS value FROM ( SELECT day, provider, ifNull(nullIf(team_id, ''), 'unassigned') AS team_id, work_scope_id, argMax(items_completed, computed_at) AS items_completed_latest FROM work_item_metrics_daily WHERE provider IN (${provider:sqlstring}) AND ifNull(nullIf(team_id, ''), 'unassigned') IN (${team_id:sqlstring}) AND work_scope_id IN (${work_scope_id:sqlstring}) AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day, provider, team_id, work_scope_id ) GROUP BY day, provider ORDER BY day"
         }
@@ -69,7 +68,6 @@
       "targets": [
         {
           "refId": "A",
-          "format": "time_series",
           "rawQuery": true,
           "rawSql": "SELECT day AS time, provider AS metric, sum(wip_latest) AS value FROM ( SELECT day, provider, ifNull(nullIf(team_id, ''), 'unassigned') AS team_id, work_scope_id, argMax(wip_count_end_of_day, computed_at) AS wip_latest FROM work_item_metrics_daily WHERE provider IN (${provider:sqlstring}) AND ifNull(nullIf(team_id, ''), 'unassigned') IN (${team_id:sqlstring}) AND work_scope_id IN (${work_scope_id:sqlstring}) AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day, provider, team_id, work_scope_id ) GROUP BY day, provider ORDER BY day"
         }
@@ -85,7 +83,6 @@
       "targets": [
         {
           "refId": "A",
-          "format": "time_series",
           "rawQuery": true,
           "rawSql": "SELECT day AS time, provider AS metric, quantileTDigest(0.50)(cycle_time_hours) AS value FROM work_item_cycle_times WHERE provider IN (${provider:sqlstring}) AND ifNull(nullIf(team_id, ''), 'unassigned') IN (${team_id:sqlstring}) AND work_scope_id IN (${work_scope_id:sqlstring}) AND cycle_time_hours IS NOT NULL AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day, provider ORDER BY day"
         }
@@ -101,7 +98,6 @@
       "targets": [
         {
           "refId": "A",
-          "format": "time_series",
           "rawQuery": true,
           "rawSql": "SELECT day AS time, provider AS metric, quantileTDigest(0.90)(cycle_time_hours) AS value FROM work_item_cycle_times WHERE provider IN (${provider:sqlstring}) AND ifNull(nullIf(team_id, ''), 'unassigned') IN (${team_id:sqlstring}) AND work_scope_id IN (${work_scope_id:sqlstring}) AND cycle_time_hours IS NOT NULL AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day, provider ORDER BY day"
         }
@@ -123,7 +119,6 @@
       "targets": [
         {
           "refId": "A",
-          "format": "time_series",
           "rawQuery": true,
           "rawSql": "SELECT day AS time, status AS metric, sum(duration_latest) AS value FROM ( SELECT day, status, provider, work_scope_id, ifNull(nullIf(team_id, ''), 'unassigned') AS team_id, argMax(duration_hours, computed_at) AS duration_latest FROM work_item_state_durations_daily WHERE provider IN (${provider:sqlstring}) AND ifNull(nullIf(team_id, ''), 'unassigned') IN (${team_id:sqlstring}) AND work_scope_id IN (${work_scope_id:sqlstring}) AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day, status, provider, work_scope_id, team_id ) GROUP BY day, status ORDER BY day"
         }
@@ -139,7 +134,6 @@
       "targets": [
         {
           "refId": "A",
-          "format": "time_series",
           "rawQuery": true,
           "rawSql": "SELECT day AS time, provider AS metric, sum(done_unassigned_latest) AS value FROM ( SELECT day, provider, work_scope_id, ifNull(nullIf(team_id, ''), 'unassigned') AS team_id, argMax(items_completed_unassigned, computed_at) AS done_unassigned_latest FROM work_item_metrics_daily WHERE provider IN (${provider:sqlstring}) AND ifNull(nullIf(team_id, ''), 'unassigned') IN (${team_id:sqlstring}) AND work_scope_id IN (${work_scope_id:sqlstring}) AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day, provider, work_scope_id, team_id ) GROUP BY day, provider ORDER BY day"
         }

@@ -37,7 +37,7 @@ The Work Tracking dashboard supports filtering by `provider`, `team_id`, and `wo
 
 ## Expected ClickHouse tables
 
-Git facts (synced by `git_mergestat.py`):
+Git facts (synced via the CLI, e.g., `python cli.py sync ...`):
 - `repos`
 - `git_commits`
 - `git_commit_stats`

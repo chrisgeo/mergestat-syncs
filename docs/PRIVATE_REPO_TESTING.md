@@ -180,7 +180,7 @@ The test should:
 
 - **Cause**: Using project path when numeric ID is expected or vice versa
 - **Solution**:
-  - For `git_mergestat.py`: Use numeric project ID
+- For `cli.py sync gitlab`: Use numeric project ID
   - For connector methods: Can use either project name or ID
 
 **Problem**: Self-hosted GitLab connection issues

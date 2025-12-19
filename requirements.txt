@@ -17,6 +17,7 @@ pytest-cov
 requests
 pydantic
 PyYAML
+typing_extensions
 jira
 alembic
 motor

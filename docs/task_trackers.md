@@ -2,7 +2,7 @@
 
 This repo normalizes Jira issues, GitHub issues/Projects items, and GitLab issues into a unified `WorkItem` model (`models/work_items.py`) and computes daily aggregates + cycle times.
 
-Jira is used to track associated project work (planning/throughput/WIP). Pull request metrics are computed from PR/MR data synced by `git_mergestat.py` and are independent of Jira.
+Jira is used to track associated project work (planning/throughput/WIP). Pull request metrics are computed from PR/MR data synced via the CLI (`python cli.py sync ...`) and are independent of Jira.
 
 ## Provider Credentials (env vars)
 

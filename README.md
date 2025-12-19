@@ -97,7 +97,7 @@ This repo can compute daily “developer health” metrics and provision Grafana
 - **Git + PR/MR facts** (from GitHub/GitLab/local syncs)
 - **Work tracking items** (Jira issues, GitHub issues/Projects, GitLab issues)
 
-Jira is **not** a replacement for pull request data — it’s used to track associated project work (throughput, WIP, work-item cycle/lead times). PR metrics still come from the Git provider data (e.g., GitHub PRs / GitLab MRs) synced by `git_mergestat.py`.
+Jira is **not** a replacement for pull request data — it’s used to track associated project work (throughput, WIP, work-item cycle/lead times). PR metrics still come from the Git provider data (e.g., GitHub PRs / GitLab MRs) synced by the CLI (`python cli.py sync ...`).
 
 **Docs**
 

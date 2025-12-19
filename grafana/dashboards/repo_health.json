@@ -34,7 +34,6 @@
       "targets": [
         {
           "refId": "A",
-          "format": "time_series",
           "rawQuery": true,
           "rawSql": "SELECT day AS time, argMax(commits_count, computed_at) AS value FROM repo_metrics_daily WHERE repo_id = toUUID('${repo_id}') AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day ORDER BY day"
         }
@@ -49,7 +48,6 @@
       "targets": [
         {
           "refId": "A",
-          "format": "time_series",
           "rawQuery": true,
           "rawSql": "SELECT day AS time, argMax(prs_merged, computed_at) AS value FROM repo_metrics_daily WHERE repo_id = toUUID('${repo_id}') AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day ORDER BY day"
         }
@@ -64,14 +62,12 @@
       "targets": [
         {
           "refId": "A",
-          "format": "time_series",
           "rawQuery": true,
           "legendFormat": "p50",
           "rawSql": "SELECT day AS time, argMax(median_pr_cycle_hours, computed_at) AS value FROM repo_metrics_daily WHERE repo_id = toUUID('${repo_id}') AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day ORDER BY day"
         },
         {
           "refId": "B",
-          "format": "time_series",
           "rawQuery": true,
           "legendFormat": "p90",
           "rawSql": "SELECT day AS time, argMax(pr_cycle_p90_hours, computed_at) AS value FROM repo_metrics_daily WHERE repo_id = toUUID('${repo_id}') AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day ORDER BY day"
@@ -89,14 +85,12 @@
       "targets": [
         {
           "refId": "A",
-          "format": "time_series",
           "rawQuery": true,
           "legendFormat": "Large commit ratio",
           "rawSql": "SELECT day AS time, argMax(large_commit_ratio, computed_at) AS value FROM repo_metrics_daily WHERE repo_id = toUUID('${repo_id}') AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day ORDER BY day"
         },
         {
           "refId": "B",
-          "format": "time_series",
           "rawQuery": true,
           "legendFormat": "Large PR ratio",
           "rawSql": "SELECT day AS time, argMax(large_pr_ratio, computed_at) AS value FROM repo_metrics_daily WHERE repo_id = toUUID('${repo_id}') AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day ORDER BY day"
@@ -105,4 +99,3 @@
     }
   ]
 }
-

@@ -3,7 +3,8 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from typing import List, NotRequired, Optional, TypedDict
+from typing import List, Optional, TypedDict
+from typing_extensions import NotRequired
 
 
 class CommitStatRow(TypedDict):
