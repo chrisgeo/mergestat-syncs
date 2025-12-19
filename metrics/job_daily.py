@@ -316,7 +316,7 @@ def run_daily_metrics_job(
             try:
                 s.close()
             except Exception:
-                pass
+                logger.exception("Error closing sink %s", type(s).__name__)
 
 
 def _mongo_uri_from_env() -> str:
