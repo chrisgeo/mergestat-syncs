@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from metrics.schemas import WorkItemStateDurationDailyRecord
 from models.work_items import WorkItem, WorkItemStatusCategory, WorkItemStatusTransition
