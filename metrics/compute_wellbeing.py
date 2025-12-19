@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
-from typing import Dict, List, Optional, Sequence, Set, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from zoneinfo import ZoneInfo
 
