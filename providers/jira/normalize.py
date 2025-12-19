@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import re
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, List, Optional, Tuple
 
 from models.work_items import WorkItem, WorkItemStatusTransition
 from providers.identity import IdentityResolver
