@@ -428,6 +428,14 @@ class SQLAlchemyStore:
                     "closed_at": item.get("closed_at"),
                     "head_branch": item.get("head_branch"),
                     "base_branch": item.get("base_branch"),
+                    "additions": item.get("additions"),
+                    "deletions": item.get("deletions"),
+                    "changed_files": item.get("changed_files"),
+                    "first_review_at": item.get("first_review_at"),
+                    "first_comment_at": item.get("first_comment_at"),
+                    "changes_requested_count": item.get("changes_requested_count", 0),
+                    "reviews_count": item.get("reviews_count", 0),
+                    "comments_count": item.get("comments_count", 0),
                     "_mergestat_synced_at": item.get("_mergestat_synced_at")
                     or synced_at_default,
                 }
@@ -444,6 +452,16 @@ class SQLAlchemyStore:
                     "closed_at": getattr(item, "closed_at"),
                     "head_branch": getattr(item, "head_branch"),
                     "base_branch": getattr(item, "base_branch"),
+                    "additions": getattr(item, "additions", None),
+                    "deletions": getattr(item, "deletions", None),
+                    "changed_files": getattr(item, "changed_files", None),
+                    "first_review_at": getattr(item, "first_review_at", None),
+                    "first_comment_at": getattr(item, "first_comment_at", None),
+                    "changes_requested_count": getattr(
+                        item, "changes_requested_count", 0
+                    ),
+                    "reviews_count": getattr(item, "reviews_count", 0),
+                    "comments_count": getattr(item, "comments_count", 0),
                     "_mergestat_synced_at": getattr(item, "_mergestat_synced_at", None)
                     or synced_at_default,
                 }
@@ -463,6 +481,14 @@ class SQLAlchemyStore:
                 "closed_at",
                 "head_branch",
                 "base_branch",
+                "additions",
+                "deletions",
+                "changed_files",
+                "first_review_at",
+                "first_comment_at",
+                "changes_requested_count",
+                "reviews_count",
+                "comments_count",
                 "_mergestat_synced_at",
             ],
         )
@@ -771,6 +797,14 @@ class ClickHouseStore:
                 closed_at Nullable(DateTime64(3, 'UTC')),
                 head_branch Nullable(String),
                 base_branch Nullable(String),
+                additions Nullable(UInt32),
+                deletions Nullable(UInt32),
+                changed_files Nullable(UInt32),
+                first_review_at Nullable(DateTime64(3, 'UTC')),
+                first_comment_at Nullable(DateTime64(3, 'UTC')),
+                changes_requested_count UInt32 DEFAULT 0,
+                reviews_count UInt32 DEFAULT 0,
+                comments_count UInt32 DEFAULT 0,
                 _mergestat_synced_at DateTime64(3, 'UTC')
             ) ENGINE = ReplacingMergeTree(_mergestat_synced_at)
             ORDER BY (repo_id, number)
@@ -1079,6 +1113,20 @@ class ClickHouseStore:
                     "closed_at": self._normalize_datetime(item.get("closed_at")),
                     "head_branch": item.get("head_branch"),
                     "base_branch": item.get("base_branch"),
+                    "additions": item.get("additions"),
+                    "deletions": item.get("deletions"),
+                    "changed_files": item.get("changed_files"),
+                    "first_review_at": self._normalize_datetime(
+                        item.get("first_review_at")
+                    ),
+                    "first_comment_at": self._normalize_datetime(
+                        item.get("first_comment_at")
+                    ),
+                    "changes_requested_count": int(
+                        item.get("changes_requested_count", 0) or 0
+                    ),
+                    "reviews_count": int(item.get("reviews_count", 0) or 0),
+                    "comments_count": int(item.get("comments_count", 0) or 0),
                     "_mergestat_synced_at": self._normalize_datetime(
                         item.get("_mergestat_synced_at") or synced_at_default
                     ),
@@ -1096,6 +1144,20 @@ class ClickHouseStore:
                     "closed_at": self._normalize_datetime(getattr(item, "closed_at")),
                     "head_branch": getattr(item, "head_branch"),
                     "base_branch": getattr(item, "base_branch"),
+                    "additions": getattr(item, "additions", None),
+                    "deletions": getattr(item, "deletions", None),
+                    "changed_files": getattr(item, "changed_files", None),
+                    "first_review_at": self._normalize_datetime(
+                        getattr(item, "first_review_at", None)
+                    ),
+                    "first_comment_at": self._normalize_datetime(
+                        getattr(item, "first_comment_at", None)
+                    ),
+                    "changes_requested_count": int(
+                        getattr(item, "changes_requested_count", 0) or 0
+                    ),
+                    "reviews_count": int(getattr(item, "reviews_count", 0) or 0),
+                    "comments_count": int(getattr(item, "comments_count", 0) or 0),
                     "_mergestat_synced_at": self._normalize_datetime(
                         getattr(item, "_mergestat_synced_at", None) or synced_at_default
                     ),
@@ -1115,6 +1177,14 @@ class ClickHouseStore:
                 "closed_at",
                 "head_branch",
                 "base_branch",
+                "additions",
+                "deletions",
+                "changed_files",
+                "first_review_at",
+                "first_comment_at",
+                "changes_requested_count",
+                "reviews_count",
+                "comments_count",
                 "_mergestat_synced_at",
             ],
             rows,

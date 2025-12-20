@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import List, Optional, Sequence
+from typing import Any, List, Optional, Sequence
 
 import clickhouse_connect
 import logging
@@ -16,6 +16,7 @@ from metrics.schemas import (
     WorkItemMetricsDailyRecord,
     WorkItemStateDurationDailyRecord,
     WorkItemUserMetricsDailyRecord,
+    FileMetricsRecord,
 )
 
 logger = logging.getLogger(__name__)
@@ -132,6 +133,24 @@ class ClickHouseMetricsSink:
                 "review_reciprocity",
                 "team_id",
                 "team_name",
+                "computed_at",
+            ],
+            rows,
+        )
+
+    def write_file_metrics(self, rows: Sequence[FileMetricsRecord]) -> None:
+        if not rows:
+            return
+        self._insert_rows(
+            "file_metrics_daily",
+            [
+                "repo_id",
+                "day",
+                "path",
+                "churn",
+                "contributors",
+                "commits_count",
+                "hotspot_score",
                 "computed_at",
             ],
             rows,
@@ -278,9 +297,7 @@ class ClickHouseMetricsSink:
             rows,
         )
 
-    def _insert_rows(
-        self, table: str, columns: List[str], rows: Sequence[object]
-    ) -> None:
+    def _insert_rows(self, table: str, columns: List[str], rows: Sequence[Any]) -> None:
         matrix = []
         for row in rows:
             data = asdict(row)

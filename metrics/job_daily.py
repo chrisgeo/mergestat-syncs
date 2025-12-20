@@ -662,7 +662,15 @@ def _load_clickhouse_rows(
       author_email,
       author_name,
       created_at,
-      merged_at
+      merged_at,
+      first_review_at,
+      first_comment_at,
+      changes_requested_count,
+      reviews_count,
+      comments_count,
+      additions,
+      deletions,
+      changed_files
     FROM git_pull_requests
     WHERE
       (created_at >= {{start:DateTime}} AND created_at < {{end:DateTime}})
@@ -711,6 +719,18 @@ def _load_clickhouse_rows(
             "merged_at": row.get("merged_at")
             if isinstance(row.get("merged_at"), datetime)
             else None,
+            "first_review_at": row.get("first_review_at")
+            if isinstance(row.get("first_review_at"), datetime)
+            else None,
+            "first_comment_at": row.get("first_comment_at")
+            if isinstance(row.get("first_comment_at"), datetime)
+            else None,
+            "changes_requested_count": int(row.get("changes_requested_count", 0) or 0),
+            "reviews_count": int(row.get("reviews_count", 0) or 0),
+            "comments_count": int(row.get("comments_count", 0) or 0),
+            "additions": int(row.get("additions", 0) or 0),
+            "deletions": int(row.get("deletions", 0) or 0),
+            "changed_files": int(row.get("changed_files", 0) or 0),
         })
 
     return commit_rows, pr_rows

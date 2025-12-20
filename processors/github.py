@@ -326,6 +326,67 @@ def _sync_github_prs_to_store(
             or datetime.now(timezone.utc)
         )
 
+        merged_at = getattr(gh_pr, "merged_at", None)
+        closed_at = getattr(gh_pr, "closed_at", None)
+
+        # Lazy load full PR for stats (additions/deletions)
+        additions = getattr(gh_pr, "additions", 0)
+        deletions = getattr(gh_pr, "deletions", 0)
+        changed_files = getattr(gh_pr, "changed_files", 0)
+
+        # Fetch and store reviews for this PR
+        first_review_at = None
+        reviews_count = 0
+        changes_requested_count = 0
+        try:
+            reviews = connector.get_pull_request_reviews(owner, repo_name, gh_pr.number)
+            reviews_count = len(reviews)
+            if reviews:
+                review_objects = []
+                for r in reviews:
+                    review_at = r.submitted_at or created_at
+                    if first_review_at is None or review_at < first_review_at:
+                        first_review_at = review_at
+                    if r.state == "CHANGES_REQUESTED":
+                        changes_requested_count += 1
+
+                    review_objects.append(
+                        GitPullRequestReview(
+                            repo_id=repo_id,
+                            number=gh_pr.number,
+                            review_id=r.id,
+                            reviewer=r.reviewer,
+                            state=r.state,
+                            submitted_at=review_at,
+                        )
+                    )
+                asyncio.run_coroutine_threadsafe(
+                    store.insert_git_pull_request_reviews(review_objects),
+                    loop,
+                ).result()
+        except Exception as e:
+            logging.debug(f"Failed to fetch reviews for PR #{gh_pr.number}: {e}")
+
+        # Fetch first comment for "Pickup Time"
+        first_comment_at = None
+        comments_count = 0
+        try:
+            # Issue comments include top-level PR comments
+            issue_comments = gh_pr.get_issue_comments()
+            # This is a paginated list, we only need the first one's date but we want total count
+            # To avoid fetching all comments if there are many, we can just get the first page for first_comment_at
+            # and maybe the count is available on the issue object.
+            # However, for simplicity and since we are already Doing one call per PR, let's just get the first one.
+            comments_count = gh_pr.comments  # issue comments count
+            if comments_count > 0:
+                for c in issue_comments:
+                    if first_comment_at is None or c.created_at < first_comment_at:
+                        first_comment_at = c.created_at
+                    # if we only want the first one, we can break if they are sorted,
+                    # but they might not be.
+        except Exception as e:
+            logging.debug(f"Failed to fetch comments for PR #{gh_pr.number}: {e}")
+
         batch.append(
             GitPullRequest(
                 repo_id=repo_id,
@@ -335,35 +396,21 @@ def _sync_github_prs_to_store(
                 author_name=author_name,
                 author_email=author_email,
                 created_at=created_at,
-                merged_at=getattr(gh_pr, "merged_at", None),
-                closed_at=getattr(gh_pr, "closed_at", None),
+                merged_at=merged_at,
+                closed_at=closed_at,
                 head_branch=getattr(getattr(gh_pr, "head", None), "ref", None),
                 base_branch=getattr(getattr(gh_pr, "base", None), "ref", None),
+                additions=additions,
+                deletions=deletions,
+                changed_files=changed_files,
+                first_review_at=first_review_at,
+                first_comment_at=first_comment_at,
+                changes_requested_count=changes_requested_count,
+                reviews_count=reviews_count,
+                comments_count=comments_count,
             )
         )
         total += 1
-
-        # Fetch and store reviews for this PR
-        try:
-            reviews = connector.get_pull_request_reviews(owner, repo_name, gh_pr.number)
-            if reviews:
-                review_objects = [
-                    GitPullRequestReview(
-                        repo_id=repo_id,
-                        number=gh_pr.number,
-                        review_id=r.id,
-                        reviewer=r.reviewer,
-                        state=r.state,
-                        submitted_at=r.submitted_at or created_at,
-                    )
-                    for r in reviews
-                ]
-                asyncio.run_coroutine_threadsafe(
-                    store.insert_git_pull_request_reviews(review_objects),
-                    loop,
-                ).result()
-        except Exception as e:
-            logging.debug(f"Failed to fetch reviews for PR #{gh_pr.number}: {e}")
 
         if len(batch) >= batch_size:
             asyncio.run_coroutine_threadsafe(

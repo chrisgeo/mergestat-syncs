@@ -517,6 +517,20 @@ class GitPullRequest(Base):
     )
     head_branch = Column(Text, comment="name of the head branch")
     base_branch = Column(Text, comment="name of the base branch")
+    additions = Column(Integer, comment="total line additions in the PR")
+    deletions = Column(Integer, comment="total line deletions in the PR")
+    changed_files = Column(Integer, comment="total number of files changed in the PR")
+    first_review_at = Column(
+        DateTime(timezone=True), comment="timestamp of the first review"
+    )
+    first_comment_at = Column(
+        DateTime(timezone=True), comment="timestamp of the first comment"
+    )
+    changes_requested_count = Column(
+        Integer, default=0, comment="number of times changes were requested"
+    )
+    reviews_count = Column(Integer, default=0, comment="total number of reviews")
+    comments_count = Column(Integer, default=0, comment="total number of comments")
     _mergestat_synced_at = Column(
         DateTime(timezone=True),
         nullable=False,
