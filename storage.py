@@ -16,7 +16,15 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.inspection import inspect
 from sqlalchemy.orm import sessionmaker
 
-from models.git import GitBlame, GitCommit, GitCommitStat, GitFile, GitPullRequest, Repo
+from models.git import (
+    GitBlame,
+    GitCommit,
+    GitCommitStat,
+    GitFile,
+    GitPullRequest,
+    GitPullRequestReview,
+    Repo,
+)
 
 
 def detect_db_type(conn_string: str) -> str:
@@ -33,9 +41,11 @@ def detect_db_type(conn_string: str) -> str:
     conn_lower = conn_string.lower()
 
     # ClickHouse connection strings
-    if conn_lower.startswith("clickhouse://") or conn_lower.startswith(
-        ("clickhouse+http://", "clickhouse+https://", "clickhouse+native://")
-    ):
+    if conn_lower.startswith("clickhouse://") or conn_lower.startswith((
+        "clickhouse+http://",
+        "clickhouse+https://",
+        "clickhouse+native://",
+    )):
         return "clickhouse"
 
     # MongoDB connection strings
@@ -126,14 +136,12 @@ class SQLAlchemyStore:
 
         # Only add pooling parameters for databases that support them
         if "sqlite" not in conn_string.lower():
-            engine_kwargs.update(
-                {
-                    "pool_size": 20,  # Increased from default 5
-                    "max_overflow": 30,  # Increased from default 10
-                    "pool_pre_ping": True,  # Verify connections before using
-                    "pool_recycle": 3600,  # Recycle connections after 1 hour
-                }
-            )
+            engine_kwargs.update({
+                "pool_size": 20,  # Increased from default 5
+                "max_overflow": 30,  # Increased from default 10
+                "pool_pre_ping": True,  # Verify connections before using
+                "pool_recycle": 3600,  # Recycle connections after 1 hour
+            })
 
         self.engine = create_async_engine(conn_string, **engine_kwargs)
         self.session_factory = sessionmaker(
@@ -459,6 +467,50 @@ class SQLAlchemyStore:
             ],
         )
 
+    async def insert_git_pull_request_reviews(
+        self, review_data: List[GitPullRequestReview]
+    ) -> None:
+        if not review_data:
+            return
+        synced_at_default = datetime.now(timezone.utc)
+        rows: List[Dict[str, Any]] = []
+        for item in review_data:
+            if isinstance(item, dict):
+                row = {
+                    "repo_id": item.get("repo_id"),
+                    "number": item.get("number"),
+                    "review_id": item.get("review_id"),
+                    "reviewer": item.get("reviewer"),
+                    "state": item.get("state"),
+                    "submitted_at": item.get("submitted_at"),
+                    "_mergestat_synced_at": item.get("_mergestat_synced_at")
+                    or synced_at_default,
+                }
+            else:
+                row = {
+                    "repo_id": getattr(item, "repo_id"),
+                    "number": getattr(item, "number"),
+                    "review_id": getattr(item, "review_id"),
+                    "reviewer": getattr(item, "reviewer"),
+                    "state": getattr(item, "state"),
+                    "submitted_at": getattr(item, "submitted_at"),
+                    "_mergestat_synced_at": getattr(item, "_mergestat_synced_at", None)
+                    or synced_at_default,
+                }
+            rows.append(row)
+
+        await self._upsert_many(
+            GitPullRequestReview,
+            rows,
+            conflict_columns=["repo_id", "number", "review_id"],
+            update_columns=[
+                "reviewer",
+                "state",
+                "submitted_at",
+                "_mergestat_synced_at",
+            ],
+        )
+
 
 class MongoStore:
     """Async storage implementation backed by MongoDB (via Motor)."""
@@ -559,6 +611,17 @@ class MongoStore:
             "git_pull_requests",
             pr_data,
             lambda obj: f"{getattr(obj, 'repo_id')}:{getattr(obj, 'number')}",
+        )
+
+    async def insert_git_pull_request_reviews(
+        self, review_data: List[GitPullRequestReview]
+    ) -> None:
+        await self._upsert_many(
+            "git_pull_request_reviews",
+            review_data,
+            lambda obj: (
+                f"{getattr(obj, 'repo_id')}:{getattr(obj, 'number')}:{getattr(obj, 'review_id')}"
+            ),
         )
 
     async def _upsert_many(
@@ -712,6 +775,18 @@ class ClickHouseStore:
             ) ENGINE = ReplacingMergeTree(_mergestat_synced_at)
             ORDER BY (repo_id, number)
             """,
+            """
+            CREATE TABLE IF NOT EXISTS git_pull_request_reviews (
+                repo_id UUID,
+                number UInt32,
+                review_id String,
+                reviewer String,
+                state String,
+                submitted_at DateTime64(3, 'UTC'),
+                _mergestat_synced_at DateTime64(3, 'UTC')
+            ) ENGINE = ReplacingMergeTree(_mergestat_synced_at)
+            ORDER BY (repo_id, number, review_id)
+            """,
         ]
 
         async with self._lock:
@@ -795,30 +870,25 @@ class ClickHouseStore:
         rows: List[Dict[str, Any]] = []
         for item in file_data:
             if isinstance(item, dict):
-                rows.append(
-                    {
-                        "repo_id": self._normalize_uuid(item.get("repo_id")),
-                        "path": item.get("path"),
-                        "executable": 1 if item.get("executable") else 0,
-                        "contents": item.get("contents"),
-                        "_mergestat_synced_at": self._normalize_datetime(
-                            item.get("_mergestat_synced_at") or synced_at_default
-                        ),
-                    }
-                )
+                rows.append({
+                    "repo_id": self._normalize_uuid(item.get("repo_id")),
+                    "path": item.get("path"),
+                    "executable": 1 if item.get("executable") else 0,
+                    "contents": item.get("contents"),
+                    "_mergestat_synced_at": self._normalize_datetime(
+                        item.get("_mergestat_synced_at") or synced_at_default
+                    ),
+                })
             else:
-                rows.append(
-                    {
-                        "repo_id": self._normalize_uuid(getattr(item, "repo_id")),
-                        "path": getattr(item, "path"),
-                        "executable": 1 if getattr(item, "executable") else 0,
-                        "contents": getattr(item, "contents"),
-                        "_mergestat_synced_at": self._normalize_datetime(
-                            getattr(item, "_mergestat_synced_at", None)
-                            or synced_at_default
-                        ),
-                    }
-                )
+                rows.append({
+                    "repo_id": self._normalize_uuid(getattr(item, "repo_id")),
+                    "path": getattr(item, "path"),
+                    "executable": 1 if getattr(item, "executable") else 0,
+                    "contents": getattr(item, "contents"),
+                    "_mergestat_synced_at": self._normalize_datetime(
+                        getattr(item, "_mergestat_synced_at", None) or synced_at_default
+                    ),
+                })
 
         await self._insert_rows(
             "git_files",
@@ -833,50 +903,43 @@ class ClickHouseStore:
         rows: List[Dict[str, Any]] = []
         for item in commit_data:
             if isinstance(item, dict):
-                rows.append(
-                    {
-                        "repo_id": self._normalize_uuid(item.get("repo_id")),
-                        "hash": item.get("hash"),
-                        "message": item.get("message"),
-                        "author_name": item.get("author_name"),
-                        "author_email": item.get("author_email"),
-                        "author_when": self._normalize_datetime(
-                            item.get("author_when")
-                        ),
-                        "committer_name": item.get("committer_name"),
-                        "committer_email": item.get("committer_email"),
-                        "committer_when": self._normalize_datetime(
-                            item.get("committer_when")
-                        ),
-                        "parents": int(item.get("parents") or 0),
-                        "_mergestat_synced_at": self._normalize_datetime(
-                            item.get("_mergestat_synced_at") or synced_at_default
-                        ),
-                    }
-                )
+                rows.append({
+                    "repo_id": self._normalize_uuid(item.get("repo_id")),
+                    "hash": item.get("hash"),
+                    "message": item.get("message"),
+                    "author_name": item.get("author_name"),
+                    "author_email": item.get("author_email"),
+                    "author_when": self._normalize_datetime(item.get("author_when")),
+                    "committer_name": item.get("committer_name"),
+                    "committer_email": item.get("committer_email"),
+                    "committer_when": self._normalize_datetime(
+                        item.get("committer_when")
+                    ),
+                    "parents": int(item.get("parents") or 0),
+                    "_mergestat_synced_at": self._normalize_datetime(
+                        item.get("_mergestat_synced_at") or synced_at_default
+                    ),
+                })
             else:
-                rows.append(
-                    {
-                        "repo_id": self._normalize_uuid(getattr(item, "repo_id")),
-                        "hash": getattr(item, "hash"),
-                        "message": getattr(item, "message"),
-                        "author_name": getattr(item, "author_name"),
-                        "author_email": getattr(item, "author_email"),
-                        "author_when": self._normalize_datetime(
-                            getattr(item, "author_when")
-                        ),
-                        "committer_name": getattr(item, "committer_name"),
-                        "committer_email": getattr(item, "committer_email"),
-                        "committer_when": self._normalize_datetime(
-                            getattr(item, "committer_when")
-                        ),
-                        "parents": int(getattr(item, "parents") or 0),
-                        "_mergestat_synced_at": self._normalize_datetime(
-                            getattr(item, "_mergestat_synced_at", None)
-                            or synced_at_default
-                        ),
-                    }
-                )
+                rows.append({
+                    "repo_id": self._normalize_uuid(getattr(item, "repo_id")),
+                    "hash": getattr(item, "hash"),
+                    "message": getattr(item, "message"),
+                    "author_name": getattr(item, "author_name"),
+                    "author_email": getattr(item, "author_email"),
+                    "author_when": self._normalize_datetime(
+                        getattr(item, "author_when")
+                    ),
+                    "committer_name": getattr(item, "committer_name"),
+                    "committer_email": getattr(item, "committer_email"),
+                    "committer_when": self._normalize_datetime(
+                        getattr(item, "committer_when")
+                    ),
+                    "parents": int(getattr(item, "parents") or 0),
+                    "_mergestat_synced_at": self._normalize_datetime(
+                        getattr(item, "_mergestat_synced_at", None) or synced_at_default
+                    ),
+                })
 
         await self._insert_rows(
             "git_commits",
@@ -903,38 +966,31 @@ class ClickHouseStore:
         rows: List[Dict[str, Any]] = []
         for item in commit_stats:
             if isinstance(item, dict):
-                rows.append(
-                    {
-                        "repo_id": self._normalize_uuid(item.get("repo_id")),
-                        "commit_hash": item.get("commit_hash"),
-                        "file_path": item.get("file_path"),
-                        "additions": int(item.get("additions") or 0),
-                        "deletions": int(item.get("deletions") or 0),
-                        "old_file_mode": item.get("old_file_mode") or "unknown",
-                        "new_file_mode": item.get("new_file_mode") or "unknown",
-                        "_mergestat_synced_at": self._normalize_datetime(
-                            item.get("_mergestat_synced_at") or synced_at_default
-                        ),
-                    }
-                )
+                rows.append({
+                    "repo_id": self._normalize_uuid(item.get("repo_id")),
+                    "commit_hash": item.get("commit_hash"),
+                    "file_path": item.get("file_path"),
+                    "additions": int(item.get("additions") or 0),
+                    "deletions": int(item.get("deletions") or 0),
+                    "old_file_mode": item.get("old_file_mode") or "unknown",
+                    "new_file_mode": item.get("new_file_mode") or "unknown",
+                    "_mergestat_synced_at": self._normalize_datetime(
+                        item.get("_mergestat_synced_at") or synced_at_default
+                    ),
+                })
             else:
-                rows.append(
-                    {
-                        "repo_id": self._normalize_uuid(getattr(item, "repo_id")),
-                        "commit_hash": getattr(item, "commit_hash"),
-                        "file_path": getattr(item, "file_path"),
-                        "additions": int(getattr(item, "additions") or 0),
-                        "deletions": int(getattr(item, "deletions") or 0),
-                        "old_file_mode": getattr(item, "old_file_mode", None)
-                        or "unknown",
-                        "new_file_mode": getattr(item, "new_file_mode", None)
-                        or "unknown",
-                        "_mergestat_synced_at": self._normalize_datetime(
-                            getattr(item, "_mergestat_synced_at", None)
-                            or synced_at_default
-                        ),
-                    }
-                )
+                rows.append({
+                    "repo_id": self._normalize_uuid(getattr(item, "repo_id")),
+                    "commit_hash": getattr(item, "commit_hash"),
+                    "file_path": getattr(item, "file_path"),
+                    "additions": int(getattr(item, "additions") or 0),
+                    "deletions": int(getattr(item, "deletions") or 0),
+                    "old_file_mode": getattr(item, "old_file_mode", None) or "unknown",
+                    "new_file_mode": getattr(item, "new_file_mode", None) or "unknown",
+                    "_mergestat_synced_at": self._normalize_datetime(
+                        getattr(item, "_mergestat_synced_at", None) or synced_at_default
+                    ),
+                })
 
         await self._insert_rows(
             "git_commit_stats",
@@ -958,42 +1014,35 @@ class ClickHouseStore:
         rows: List[Dict[str, Any]] = []
         for item in data_batch:
             if isinstance(item, dict):
-                rows.append(
-                    {
-                        "repo_id": self._normalize_uuid(item.get("repo_id")),
-                        "path": item.get("path"),
-                        "line_no": int(item.get("line_no") or 0),
-                        "author_email": item.get("author_email"),
-                        "author_name": item.get("author_name"),
-                        "author_when": self._normalize_datetime(
-                            item.get("author_when")
-                        ),
-                        "commit_hash": item.get("commit_hash"),
-                        "line": item.get("line"),
-                        "_mergestat_synced_at": self._normalize_datetime(
-                            item.get("_mergestat_synced_at") or synced_at_default
-                        ),
-                    }
-                )
+                rows.append({
+                    "repo_id": self._normalize_uuid(item.get("repo_id")),
+                    "path": item.get("path"),
+                    "line_no": int(item.get("line_no") or 0),
+                    "author_email": item.get("author_email"),
+                    "author_name": item.get("author_name"),
+                    "author_when": self._normalize_datetime(item.get("author_when")),
+                    "commit_hash": item.get("commit_hash"),
+                    "line": item.get("line"),
+                    "_mergestat_synced_at": self._normalize_datetime(
+                        item.get("_mergestat_synced_at") or synced_at_default
+                    ),
+                })
             else:
-                rows.append(
-                    {
-                        "repo_id": self._normalize_uuid(getattr(item, "repo_id")),
-                        "path": getattr(item, "path"),
-                        "line_no": int(getattr(item, "line_no") or 0),
-                        "author_email": getattr(item, "author_email"),
-                        "author_name": getattr(item, "author_name"),
-                        "author_when": self._normalize_datetime(
-                            getattr(item, "author_when")
-                        ),
-                        "commit_hash": getattr(item, "commit_hash"),
-                        "line": getattr(item, "line"),
-                        "_mergestat_synced_at": self._normalize_datetime(
-                            getattr(item, "_mergestat_synced_at", None)
-                            or synced_at_default
-                        ),
-                    }
-                )
+                rows.append({
+                    "repo_id": self._normalize_uuid(getattr(item, "repo_id")),
+                    "path": getattr(item, "path"),
+                    "line_no": int(getattr(item, "line_no") or 0),
+                    "author_email": getattr(item, "author_email"),
+                    "author_name": getattr(item, "author_name"),
+                    "author_when": self._normalize_datetime(
+                        getattr(item, "author_when")
+                    ),
+                    "commit_hash": getattr(item, "commit_hash"),
+                    "line": getattr(item, "line"),
+                    "_mergestat_synced_at": self._normalize_datetime(
+                        getattr(item, "_mergestat_synced_at", None) or synced_at_default
+                    ),
+                })
 
         await self._insert_rows(
             "git_blame",
@@ -1018,50 +1067,39 @@ class ClickHouseStore:
         rows: List[Dict[str, Any]] = []
         for item in pr_data:
             if isinstance(item, dict):
-                rows.append(
-                    {
-                        "repo_id": self._normalize_uuid(item.get("repo_id")),
-                        "number": int(item.get("number") or 0),
-                        "title": item.get("title"),
-                        "state": item.get("state"),
-                        "author_name": item.get("author_name"),
-                        "author_email": item.get("author_email"),
-                        "created_at": self._normalize_datetime(item.get("created_at")),
-                        "merged_at": self._normalize_datetime(item.get("merged_at")),
-                        "closed_at": self._normalize_datetime(item.get("closed_at")),
-                        "head_branch": item.get("head_branch"),
-                        "base_branch": item.get("base_branch"),
-                        "_mergestat_synced_at": self._normalize_datetime(
-                            item.get("_mergestat_synced_at") or synced_at_default
-                        ),
-                    }
-                )
+                rows.append({
+                    "repo_id": self._normalize_uuid(item.get("repo_id")),
+                    "number": int(item.get("number") or 0),
+                    "title": item.get("title"),
+                    "state": item.get("state"),
+                    "author_name": item.get("author_name"),
+                    "author_email": item.get("author_email"),
+                    "created_at": self._normalize_datetime(item.get("created_at")),
+                    "merged_at": self._normalize_datetime(item.get("merged_at")),
+                    "closed_at": self._normalize_datetime(item.get("closed_at")),
+                    "head_branch": item.get("head_branch"),
+                    "base_branch": item.get("base_branch"),
+                    "_mergestat_synced_at": self._normalize_datetime(
+                        item.get("_mergestat_synced_at") or synced_at_default
+                    ),
+                })
             else:
-                rows.append(
-                    {
-                        "repo_id": self._normalize_uuid(getattr(item, "repo_id")),
-                        "number": int(getattr(item, "number") or 0),
-                        "title": getattr(item, "title"),
-                        "state": getattr(item, "state"),
-                        "author_name": getattr(item, "author_name"),
-                        "author_email": getattr(item, "author_email"),
-                        "created_at": self._normalize_datetime(
-                            getattr(item, "created_at")
-                        ),
-                        "merged_at": self._normalize_datetime(
-                            getattr(item, "merged_at")
-                        ),
-                        "closed_at": self._normalize_datetime(
-                            getattr(item, "closed_at")
-                        ),
-                        "head_branch": getattr(item, "head_branch"),
-                        "base_branch": getattr(item, "base_branch"),
-                        "_mergestat_synced_at": self._normalize_datetime(
-                            getattr(item, "_mergestat_synced_at", None)
-                            or synced_at_default
-                        ),
-                    }
-                )
+                rows.append({
+                    "repo_id": self._normalize_uuid(getattr(item, "repo_id")),
+                    "number": int(getattr(item, "number") or 0),
+                    "title": getattr(item, "title"),
+                    "state": getattr(item, "state"),
+                    "author_name": getattr(item, "author_name"),
+                    "author_email": getattr(item, "author_email"),
+                    "created_at": self._normalize_datetime(getattr(item, "created_at")),
+                    "merged_at": self._normalize_datetime(getattr(item, "merged_at")),
+                    "closed_at": self._normalize_datetime(getattr(item, "closed_at")),
+                    "head_branch": getattr(item, "head_branch"),
+                    "base_branch": getattr(item, "base_branch"),
+                    "_mergestat_synced_at": self._normalize_datetime(
+                        getattr(item, "_mergestat_synced_at", None) or synced_at_default
+                    ),
+                })
 
         await self._insert_rows(
             "git_pull_requests",
@@ -1077,6 +1115,55 @@ class ClickHouseStore:
                 "closed_at",
                 "head_branch",
                 "base_branch",
+                "_mergestat_synced_at",
+            ],
+            rows,
+        )
+
+    async def insert_git_pull_request_reviews(
+        self, review_data: List[GitPullRequestReview]
+    ) -> None:
+        if not review_data:
+            return
+        synced_at_default = self._normalize_datetime(datetime.now(timezone.utc))
+        rows: List[Dict[str, Any]] = []
+        for item in review_data:
+            if isinstance(item, dict):
+                rows.append({
+                    "repo_id": self._normalize_uuid(item.get("repo_id")),
+                    "number": int(item.get("number") or 0),
+                    "review_id": str(item.get("review_id")),
+                    "reviewer": str(item.get("reviewer")),
+                    "state": str(item.get("state")),
+                    "submitted_at": self._normalize_datetime(item.get("submitted_at")),
+                    "_mergestat_synced_at": self._normalize_datetime(
+                        item.get("_mergestat_synced_at") or synced_at_default
+                    ),
+                })
+            else:
+                rows.append({
+                    "repo_id": self._normalize_uuid(getattr(item, "repo_id")),
+                    "number": int(getattr(item, "number") or 0),
+                    "review_id": str(getattr(item, "review_id")),
+                    "reviewer": str(getattr(item, "reviewer")),
+                    "state": str(getattr(item, "state")),
+                    "submitted_at": self._normalize_datetime(
+                        getattr(item, "submitted_at")
+                    ),
+                    "_mergestat_synced_at": self._normalize_datetime(
+                        getattr(item, "_mergestat_synced_at", None) or synced_at_default
+                    ),
+                })
+
+        await self._insert_rows(
+            "git_pull_request_reviews",
+            [
+                "repo_id",
+                "number",
+                "review_id",
+                "reviewer",
+                "state",
+                "submitted_at",
                 "_mergestat_synced_at",
             ],
             rows,

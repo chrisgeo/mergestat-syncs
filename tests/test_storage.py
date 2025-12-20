@@ -612,7 +612,7 @@ async def test_clickhouse_store_context_manager_initializes_and_creates_tables()
             assert s.client is mock_client
 
     get_client.assert_called_once_with(dsn="clickhouse://localhost:8123/default")
-    assert mock_client.command.call_count == 6
+    assert mock_client.command.call_count == 7
     mock_client.close.assert_called_once()
 
 

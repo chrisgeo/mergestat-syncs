@@ -298,6 +298,8 @@ class GitLabRESTClient(RESTClient):
         state: str = "all",
         page: int = 1,
         per_page: int = 100,
+        order_by: Optional[str] = None,
+        sort: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         Get merge requests for a project.
@@ -314,6 +316,10 @@ class GitLabRESTClient(RESTClient):
             "page": page,
             "per_page": per_page,
         }
+        if order_by:
+            params["order_by"] = order_by
+        if sort:
+            params["sort"] = sort
 
         logger.debug(
             "Fetching merge requests for project %s, page %s",

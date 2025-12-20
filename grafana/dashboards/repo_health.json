@@ -18,9 +18,10 @@
         "type": "query",
         "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
         "refresh": 1,
-        "query": "SELECT repo AS __text, toString(id) AS __value FROM repos ORDER BY repo",
-        "multi": false,
-        "includeAll": false
+        "query": "SELECT repo AS __text, repo AS __value FROM repos ORDER BY repo",
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*"
       }
     ]
   },
@@ -35,7 +36,7 @@
         {
           "refId": "A",
           "rawQuery": true,
-          "rawSql": "SELECT day AS time, argMax(commits_count, computed_at) AS value FROM repo_metrics_daily WHERE repo_id = toUUID('${repo_id}') AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day ORDER BY day"
+          "rawSql": "SELECT m.day AS time, r.repo AS metric, argMax(m.commits_count, m.computed_at) AS value FROM repo_metrics_daily AS m INNER JOIN repos AS r ON r.id = m.repo_id WHERE match(r.repo, '${repo_id:regex}') AND m.day >= toDate(toDateTime(intDiv($__from, 1000))) AND m.day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY m.day, metric ORDER BY m.day"
         }
       ]
     },
@@ -49,7 +50,7 @@
         {
           "refId": "A",
           "rawQuery": true,
-          "rawSql": "SELECT day AS time, argMax(prs_merged, computed_at) AS value FROM repo_metrics_daily WHERE repo_id = toUUID('${repo_id}') AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day ORDER BY day"
+          "rawSql": "SELECT m.day AS time, r.repo AS metric, argMax(m.prs_merged, m.computed_at) AS value FROM repo_metrics_daily AS m INNER JOIN repos AS r ON r.id = m.repo_id WHERE match(r.repo, '${repo_id:regex}') AND m.day >= toDate(toDateTime(intDiv($__from, 1000))) AND m.day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY m.day, metric ORDER BY m.day"
         }
       ]
     },
@@ -63,14 +64,12 @@
         {
           "refId": "A",
           "rawQuery": true,
-          "legendFormat": "p50",
-          "rawSql": "SELECT day AS time, argMax(median_pr_cycle_hours, computed_at) AS value FROM repo_metrics_daily WHERE repo_id = toUUID('${repo_id}') AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day ORDER BY day"
+          "rawSql": "SELECT m.day AS time, concat(r.repo, ' p50') AS metric, argMax(m.median_pr_cycle_hours, m.computed_at) AS value FROM repo_metrics_daily AS m INNER JOIN repos AS r ON r.id = m.repo_id WHERE match(r.repo, '${repo_id:regex}') AND m.day >= toDate(toDateTime(intDiv($__from, 1000))) AND m.day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY m.day, metric ORDER BY m.day"
         },
         {
           "refId": "B",
           "rawQuery": true,
-          "legendFormat": "p90",
-          "rawSql": "SELECT day AS time, argMax(pr_cycle_p90_hours, computed_at) AS value FROM repo_metrics_daily WHERE repo_id = toUUID('${repo_id}') AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day ORDER BY day"
+          "rawSql": "SELECT m.day AS time, concat(r.repo, ' p90') AS metric, argMax(m.pr_cycle_p90_hours, m.computed_at) AS value FROM repo_metrics_daily AS m INNER JOIN repos AS r ON r.id = m.repo_id WHERE match(r.repo, '${repo_id:regex}') AND m.day >= toDate(toDateTime(intDiv($__from, 1000))) AND m.day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY m.day, metric ORDER BY m.day"
         }
       ]
     },
@@ -86,14 +85,12 @@
         {
           "refId": "A",
           "rawQuery": true,
-          "legendFormat": "Large commit ratio",
-          "rawSql": "SELECT day AS time, argMax(large_commit_ratio, computed_at) AS value FROM repo_metrics_daily WHERE repo_id = toUUID('${repo_id}') AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day ORDER BY day"
+          "rawSql": "SELECT m.day AS time, concat(r.repo, ' large commit ratio') AS metric, argMax(m.large_commit_ratio, m.computed_at) AS value FROM repo_metrics_daily AS m INNER JOIN repos AS r ON r.id = m.repo_id WHERE match(r.repo, '${repo_id:regex}') AND m.day >= toDate(toDateTime(intDiv($__from, 1000))) AND m.day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY m.day, metric ORDER BY m.day"
         },
         {
           "refId": "B",
           "rawQuery": true,
-          "legendFormat": "Large PR ratio",
-          "rawSql": "SELECT day AS time, argMax(large_pr_ratio, computed_at) AS value FROM repo_metrics_daily WHERE repo_id = toUUID('${repo_id}') AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day ORDER BY day"
+          "rawSql": "SELECT m.day AS time, concat(r.repo, ' large PR ratio') AS metric, argMax(m.large_pr_ratio, m.computed_at) AS value FROM repo_metrics_daily AS m INNER JOIN repos AS r ON r.id = m.repo_id WHERE match(r.repo, '${repo_id:regex}') AND m.day >= toDate(toDateTime(intDiv($__from, 1000))) AND m.day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY m.day, metric ORDER BY m.day"
         }
       ]
     }

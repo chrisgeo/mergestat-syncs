@@ -6,7 +6,7 @@ import asyncio
 import logging
 import os
 import subprocess
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional
 
@@ -57,6 +57,17 @@ def _parse_date(value: str) -> date:
         ) from exc
 
 
+def _since_from_date_backfill(day: date, backfill_days: int) -> datetime:
+    backfill = max(1, int(backfill_days))
+    start_day = day - timedelta(days=backfill - 1)
+    return datetime(
+        start_day.year,
+        start_day.month,
+        start_day.day,
+        tzinfo=timezone.utc,
+    )
+
+
 def _resolve_db_type(db_url: str, db_type: Optional[str]) -> str:
     if db_type:
         resolved = db_type.lower()
@@ -81,7 +92,13 @@ async def _run_with_store(db_url: str, db_type: str, handler) -> None:
 
 def _cmd_sync_local(ns: argparse.Namespace) -> int:
     db_type = _resolve_db_type(ns.db, ns.db_type)
-    since = _parse_since(ns.since)
+
+    if ns.date is not None:
+        since = _since_from_date_backfill(ns.date, ns.backfill)
+    else:
+        if int(ns.backfill) != 1:
+            raise SystemExit("--backfill requires --date")
+        since = _parse_since(ns.since)
 
     async def _handler(store):
         await process_local_repo(
@@ -102,6 +119,13 @@ def _cmd_sync_github(ns: argparse.Namespace) -> int:
 
     db_type = _resolve_db_type(ns.db, ns.db_type)
 
+    if ns.date is not None:
+        since = _since_from_date_backfill(ns.date, ns.backfill)
+    else:
+        if int(ns.backfill) != 1:
+            raise SystemExit("--backfill requires --date")
+        since = None
+
     async def _handler(store):
         if ns.search_pattern:
             org_name = ns.group
@@ -118,6 +142,7 @@ def _cmd_sync_github(ns: argparse.Namespace) -> int:
                 max_commits_per_repo=ns.max_commits_per_repo,
                 max_repos=ns.max_repos,
                 use_async=ns.use_async,
+                since=since,
             )
             return
 
@@ -132,6 +157,7 @@ def _cmd_sync_github(ns: argparse.Namespace) -> int:
             token,
             fetch_blame=ns.fetch_blame,
             max_commits=ns.max_commits_per_repo or 100,
+            since=since,
         )
 
     asyncio.run(_run_with_store(ns.db, db_type, _handler))
@@ -144,6 +170,13 @@ def _cmd_sync_gitlab(ns: argparse.Namespace) -> int:
         raise SystemExit("Missing GitLab token (pass --auth or set GITLAB_TOKEN).")
 
     db_type = _resolve_db_type(ns.db, ns.db_type)
+
+    if ns.date is not None:
+        since = _since_from_date_backfill(ns.date, ns.backfill)
+    else:
+        if int(ns.backfill) != 1:
+            raise SystemExit("--backfill requires --date")
+        since = None
 
     async def _handler(store):
         if ns.search_pattern:
@@ -159,6 +192,7 @@ def _cmd_sync_gitlab(ns: argparse.Namespace) -> int:
                 max_commits_per_project=ns.max_commits_per_repo,
                 max_projects=ns.max_repos,
                 use_async=ns.use_async,
+                since=since,
             )
             return
 
@@ -173,6 +207,7 @@ def _cmd_sync_gitlab(ns: argparse.Namespace) -> int:
             ns.gitlab_url,
             fetch_blame=ns.fetch_blame,
             max_commits=ns.max_commits_per_repo or 100,
+            since=since,
         )
 
     asyncio.run(_run_with_store(ns.db, db_type, _handler))
@@ -244,7 +279,19 @@ def build_parser() -> argparse.ArgumentParser:
     local.add_argument(
         "--repo-path", default=".", help="Path to the local git repository."
     )
-    local.add_argument("--since", help="Lower-bound ISO date/time (UTC).")
+    local_time = local.add_mutually_exclusive_group()
+    local_time.add_argument("--since", help="Lower-bound ISO date/time (UTC).")
+    local_time.add_argument(
+        "--date",
+        type=_parse_date,
+        help="Target day (UTC) as YYYY-MM-DD (use with --backfill).",
+    )
+    local.add_argument(
+        "--backfill",
+        type=int,
+        default=1,
+        help="Sync N days ending at --date (inclusive). Requires --date.",
+    )
     local.add_argument(
         "--fetch-blame", action="store_true", help="Fetch blame data (slow)."
     )
@@ -272,6 +319,17 @@ def build_parser() -> argparse.ArgumentParser:
     gh.add_argument("--use-async", action="store_true")
     gh.add_argument("--fetch-blame", action="store_true")
     gh.add_argument("--max-commits-per-repo", type=int)
+    gh.add_argument(
+        "--date",
+        type=_parse_date,
+        help="Target day (UTC) as YYYY-MM-DD (use with --backfill).",
+    )
+    gh.add_argument(
+        "--backfill",
+        type=int,
+        default=1,
+        help="Sync N days ending at --date (inclusive). Requires --date.",
+    )
     gh.set_defaults(func=_cmd_sync_github)
 
     gl = sync_sub.add_parser(
@@ -301,6 +359,17 @@ def build_parser() -> argparse.ArgumentParser:
     gl.add_argument("--use-async", action="store_true")
     gl.add_argument("--fetch-blame", action="store_true")
     gl.add_argument("--max-commits-per-repo", type=int)
+    gl.add_argument(
+        "--date",
+        type=_parse_date,
+        help="Target day (UTC) as YYYY-MM-DD (use with --backfill).",
+    )
+    gl.add_argument(
+        "--backfill",
+        type=int,
+        default=1,
+        help="Sync N days ending at --date (inclusive). Requires --date.",
+    )
     gl.set_defaults(func=_cmd_sync_gitlab)
 
     # ---- metrics ----

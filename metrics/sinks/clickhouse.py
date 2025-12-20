@@ -20,6 +20,7 @@ from metrics.schemas import (
 
 logger = logging.getLogger(__name__)
 
+
 def _dt_to_clickhouse_datetime(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value
@@ -44,10 +45,16 @@ class ClickHouseMetricsSink:
         try:
             self.client.close()
         except Exception as e:
-            logger.warning("Exception occurred when closing ClickHouse client: %s", e, exc_info=True)
+            logger.warning(
+                "Exception occurred when closing ClickHouse client: %s",
+                e,
+                exc_info=True,
+            )
 
     def _apply_sql_migrations(self) -> None:
-        migrations_dir = Path(__file__).resolve().parents[2] / "migrations" / "clickhouse"
+        migrations_dir = (
+            Path(__file__).resolve().parents[2] / "migrations" / "clickhouse"
+        )
         if not migrations_dir.exists():
             return
 
@@ -86,6 +93,8 @@ class ClickHouseMetricsSink:
                 "pr_pickup_time_p50_hours",
                 "large_pr_ratio",
                 "pr_rework_ratio",
+                "mttr_hours",
+                "change_failure_rate",
                 "computed_at",
             ],
             rows,
@@ -119,6 +128,8 @@ class ClickHouseMetricsSink:
                 "pr_pickup_time_p50_hours",
                 "reviews_given",
                 "changes_requested_given",
+                "reviews_received",
+                "review_reciprocity",
                 "team_id",
                 "team_name",
                 "computed_at",
@@ -163,7 +174,9 @@ class ClickHouseMetricsSink:
             rows,
         )
 
-    def write_work_item_metrics(self, rows: Sequence[WorkItemMetricsDailyRecord]) -> None:
+    def write_work_item_metrics(
+        self, rows: Sequence[WorkItemMetricsDailyRecord]
+    ) -> None:
         if not rows:
             return
         self._insert_rows(
@@ -193,7 +206,9 @@ class ClickHouseMetricsSink:
             rows,
         )
 
-    def write_work_item_user_metrics(self, rows: Sequence[WorkItemUserMetricsDailyRecord]) -> None:
+    def write_work_item_user_metrics(
+        self, rows: Sequence[WorkItemUserMetricsDailyRecord]
+    ) -> None:
         if not rows:
             return
         self._insert_rows(
@@ -215,7 +230,9 @@ class ClickHouseMetricsSink:
             rows,
         )
 
-    def write_work_item_cycle_times(self, rows: Sequence[WorkItemCycleTimeRecord]) -> None:
+    def write_work_item_cycle_times(
+        self, rows: Sequence[WorkItemCycleTimeRecord]
+    ) -> None:
         if not rows:
             return
         self._insert_rows(
@@ -240,7 +257,9 @@ class ClickHouseMetricsSink:
             rows,
         )
 
-    def write_work_item_state_durations(self, rows: Sequence[WorkItemStateDurationDailyRecord]) -> None:
+    def write_work_item_state_durations(
+        self, rows: Sequence[WorkItemStateDurationDailyRecord]
+    ) -> None:
         if not rows:
             return
         self._insert_rows(
@@ -259,7 +278,9 @@ class ClickHouseMetricsSink:
             rows,
         )
 
-    def _insert_rows(self, table: str, columns: List[str], rows: Sequence[object]) -> None:
+    def _insert_rows(
+        self, table: str, columns: List[str], rows: Sequence[object]
+    ) -> None:
         matrix = []
         for row in rows:
             data = asdict(row)
@@ -274,7 +295,11 @@ class ClickHouseMetricsSink:
 
     # Query helpers (useful for Grafana and validation)
     def latest_repo_metrics_query(
-        self, *, repo_id: Optional[str] = None, start_day: Optional[date] = None, end_day: Optional[date] = None
+        self,
+        *,
+        repo_id: Optional[str] = None,
+        start_day: Optional[date] = None,
+        end_day: Optional[date] = None,
     ) -> str:
         where = []
         if repo_id:

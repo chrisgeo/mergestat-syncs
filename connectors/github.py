@@ -32,6 +32,7 @@ from connectors.models import (
     FileBlame,
     Organization,
     PullRequest,
+    PullRequestReview,
     Repository,
     RepoStats,
 )
@@ -447,28 +448,65 @@ class GitHubConnector(GitConnector):
                         url=gh_pr.user.html_url,
                     )
 
-                pr = PullRequest(
-                    id=gh_pr.id,
-                    number=gh_pr.number,
-                    title=gh_pr.title,
-                    state=gh_pr.state,
-                    author=author,
-                    created_at=gh_pr.created_at,
-                    merged_at=gh_pr.merged_at,
-                    closed_at=gh_pr.closed_at,
-                    body=gh_pr.body,
-                    url=gh_pr.html_url,
-                    base_branch=gh_pr.base.ref,
-                    head_branch=gh_pr.head.ref,
+                prs.append(
+                    PullRequest(
+                        id=gh_pr.id,
+                        number=gh_pr.number,
+                        title=gh_pr.title,
+                        state=gh_pr.state,
+                        author=author,
+                        created_at=gh_pr.created_at,
+                        merged_at=gh_pr.merged_at,
+                        closed_at=gh_pr.closed_at,
+                        body=gh_pr.body,
+                        url=gh_pr.html_url,
+                        base_branch=gh_pr.base.ref,
+                        head_branch=gh_pr.head.ref,
+                    )
                 )
-                prs.append(pr)
-                logger.debug(f"Retrieved PR #{pr.number}: {pr.title}")
-
-            logger.info(f"Retrieved {len(prs)} pull requests for {owner}/{repo}")
             return prs
-
         except Exception as e:
             self._handle_github_exception(e)
+            return []
+
+    @retry_with_backoff(
+        max_retries=3,
+        initial_delay=1.0,
+        exceptions=(RateLimitException, APIException),
+    )
+    def get_pull_request_reviews(
+        self,
+        owner: str,
+        repo: str,
+        number: int,
+    ) -> List[PullRequestReview]:
+        """
+        Get reviews for a specific pull request.
+
+        :param owner: Repository owner.
+        :param repo: Repository name.
+        :param number: Pull request number.
+        :return: List of PullRequestReview objects.
+        """
+        try:
+            gh_repo = self.github.get_repo(f"{owner}/{repo}")
+            gh_pr = gh_repo.get_pull(number)
+            reviews = []
+            for r in gh_pr.get_reviews():
+                reviews.append(
+                    PullRequestReview(
+                        id=str(r.id),
+                        reviewer=r.user.login if r.user else "Unknown",
+                        state=r.state,
+                        submitted_at=r.submitted_at,
+                        body=r.body,
+                        url=gh_pr.html_url + f"#pullrequestreview-{r.id}",
+                    )
+                )
+            return reviews
+        except Exception as e:
+            self._handle_github_exception(e)
+            return []
 
     @retry_with_backoff(
         max_retries=3,

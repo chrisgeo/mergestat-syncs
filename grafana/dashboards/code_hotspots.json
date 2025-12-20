@@ -1,0 +1,90 @@
+{
+  "uid": "code-hotspots",
+  "title": "Code Hotspots",
+  "tags": ["mergestat", "developer-health"],
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5m",
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "repo_id",
+        "label": "Repo",
+        "type": "query",
+        "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+        "refresh": 1,
+        "query": "SELECT repo AS __text, repo AS __value FROM repos ORDER BY repo",
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*"
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "heatmap",
+      "title": "File Churn Distribution / Week",
+      "description": "Each point is a (repo, file, week) churn value derived from git commit stats.",
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "rawQuery": true,
+          "rawSql": "WITH commits_latest AS ( SELECT repo_id, hash, argMax(committer_when, _mergestat_synced_at) AS committer_when FROM git_commits GROUP BY repo_id, hash ), stats_latest AS ( SELECT repo_id, commit_hash, file_path, argMax(additions, _mergestat_synced_at) AS additions, argMax(deletions, _mergestat_synced_at) AS deletions FROM git_commit_stats GROUP BY repo_id, commit_hash, file_path ) SELECT toDateTime(toStartOfWeek(c.committer_when)) AS time, sum(s.additions + s.deletions) AS value FROM stats_latest AS s INNER JOIN commits_latest AS c ON c.repo_id = s.repo_id AND c.hash = s.commit_hash INNER JOIN repos AS r ON r.id = s.repo_id WHERE match(r.repo, '${repo_id:regex}') AND c.committer_when >= toDateTime(intDiv($__from, 1000)) AND c.committer_when < toDateTime(intDiv($__to, 1000)) GROUP BY time, s.file_path ORDER BY time ASC"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Total Churn / Day",
+      "description": "Sum(additions + deletions) over all changed files.",
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "rawQuery": true,
+          "rawSql": "WITH commits_latest AS ( SELECT repo_id, hash, argMax(committer_when, _mergestat_synced_at) AS committer_when FROM git_commits GROUP BY repo_id, hash ), stats_latest AS ( SELECT repo_id, commit_hash, file_path, argMax(additions, _mergestat_synced_at) AS additions, argMax(deletions, _mergestat_synced_at) AS deletions FROM git_commit_stats GROUP BY repo_id, commit_hash, file_path ) SELECT toDate(c.committer_when) AS time, r.repo AS metric, sum(s.additions + s.deletions) AS value FROM stats_latest AS s INNER JOIN commits_latest AS c ON c.repo_id = s.repo_id AND c.hash = s.commit_hash INNER JOIN repos AS r ON r.id = s.repo_id WHERE match(r.repo, '${repo_id:regex}') AND c.committer_when >= toDateTime(intDiv($__from, 1000)) AND c.committer_when < toDateTime(intDiv($__to, 1000)) GROUP BY time, metric ORDER BY time ASC"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "table",
+      "title": "Top Files By Churn",
+      "description": "Ranked by Sum(additions + deletions) in the selected time range.",
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 10 },
+      "targets": [
+        {
+          "refId": "A",
+          "rawQuery": true,
+          "rawSql": "WITH commits_latest AS ( SELECT repo_id, hash, argMax(committer_when, _mergestat_synced_at) AS committer_when, argMax(author_email, _mergestat_synced_at) AS author_email, argMax(committer_email, _mergestat_synced_at) AS committer_email, argMax(author_name, _mergestat_synced_at) AS author_name, argMax(committer_name, _mergestat_synced_at) AS committer_name FROM git_commits GROUP BY repo_id, hash ), stats_latest AS ( SELECT repo_id, commit_hash, file_path, argMax(additions, _mergestat_synced_at) AS additions, argMax(deletions, _mergestat_synced_at) AS deletions FROM git_commit_stats GROUP BY repo_id, commit_hash, file_path ) SELECT s.file_path AS file, sum(s.additions + s.deletions) AS churn, sum(s.additions) AS additions, sum(s.deletions) AS deletions, countDistinct(s.commit_hash) AS commits, uniqExact(coalesce(c.author_email, c.committer_email, c.author_name, c.committer_name, 'unknown')) AS contributors, (toFloat64(sum(s.additions + s.deletions)) / greatest(1, uniqExact(coalesce(c.author_email, c.committer_email, c.author_name, c.committer_name, 'unknown')))) AS churn_per_contributor FROM stats_latest AS s INNER JOIN commits_latest AS c ON c.repo_id = s.repo_id AND c.hash = s.commit_hash INNER JOIN repos AS r ON r.id = s.repo_id WHERE match(r.repo, '${repo_id:regex}') AND s.file_path != '__AGGREGATE__' AND c.committer_when >= toDateTime(intDiv($__from, 1000)) AND c.committer_when < toDateTime(intDiv($__to, 1000)) GROUP BY file ORDER BY churn DESC LIMIT 50"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "heatmap",
+      "title": "Churn Per Contributor / Week",
+      "description": "Each point is a (repo, file, week) churn-per-unique-contributor value derived from git commit stats.",
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 22 },
+      "targets": [
+        {
+          "refId": "A",
+          "rawQuery": true,
+          "rawSql": "WITH commits_latest AS ( SELECT repo_id, hash, argMax(committer_when, _mergestat_synced_at) AS committer_when, argMax(author_email, _mergestat_synced_at) AS author_email, argMax(committer_email, _mergestat_synced_at) AS committer_email, argMax(author_name, _mergestat_synced_at) AS author_name, argMax(committer_name, _mergestat_synced_at) AS committer_name FROM git_commits GROUP BY repo_id, hash ), stats_latest AS ( SELECT repo_id, commit_hash, file_path, argMax(additions, _mergestat_synced_at) AS additions, argMax(deletions, _mergestat_synced_at) AS deletions FROM git_commit_stats GROUP BY repo_id, commit_hash, file_path ) SELECT toDateTime(toStartOfWeek(c.committer_when)) AS time, (sum(s.additions + s.deletions) / greatest(1, uniqExact(coalesce(c.author_email, c.committer_email, c.author_name, c.committer_name, 'unknown')))) AS value FROM stats_latest AS s INNER JOIN commits_latest AS c ON c.repo_id = s.repo_id AND c.hash = s.commit_hash INNER JOIN repos AS r ON r.id = s.repo_id WHERE match(r.repo, '${repo_id:regex}') AND s.file_path != '__AGGREGATE__' AND c.committer_when >= toDateTime(intDiv($__from, 1000)) AND c.committer_when < toDateTime(intDiv($__to, 1000)) GROUP BY time, s.file_path ORDER BY time ASC"
+        }
+      ]
+    }
+  ]
+}

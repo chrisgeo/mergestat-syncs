@@ -349,7 +349,7 @@ async def test_process_github_repos_batch_stores_commits_and_stats(monkeypatch):
 
     result = BatchResult(repository=repo, stats=stats, success=True)
 
-    def fake_fetch_commits(gh_repo, max_commits, repo_id):
+    def fake_fetch_commits(gh_repo, max_commits, repo_id, since=None):
         commit = GitCommit(
             repo_id=repo_id,
             hash="abc123",
@@ -364,7 +364,7 @@ async def test_process_github_repos_batch_stores_commits_and_stats(monkeypatch):
         )
         return ["raw"], [commit]
 
-    def fake_fetch_commit_stats(raw_commits, repo_id, max_stats):
+    def fake_fetch_commit_stats(raw_commits, repo_id, max_stats, since=None):
         return [
             GitCommitStat(
                 repo_id=repo_id,
@@ -459,7 +459,7 @@ async def test_process_gitlab_projects_batch_stores_commits_and_stats(monkeypatc
 
     result = GitLabBatchResult(project=project, stats=None, success=True)
 
-    def fake_fetch_commits(gl_project, max_commits, repo_id):
+    def fake_fetch_commits(gl_project, max_commits, repo_id, since=None):
         commit = GitCommit(
             repo_id=repo_id,
             hash="gitlab123",

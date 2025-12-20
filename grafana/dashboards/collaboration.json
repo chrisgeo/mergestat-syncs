@@ -15,9 +15,10 @@
         "type": "query",
         "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
         "refresh": 1,
-        "query": "SELECT repo AS __text, toString(id) AS __value FROM repos ORDER BY repo",
-        "multi": false,
-        "includeAll": false
+        "query": "SELECT repo AS __text, repo AS __value FROM repos ORDER BY repo",
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*"
       },
       {
         "name": "team_id",
@@ -43,7 +44,7 @@
         {
           "refId": "A",
           "rawQuery": true,
-          "rawSql": "SELECT toStartOfWeek(day) AS week, author_email AS user, sum(reviews_given_latest) AS reviews_given FROM ( SELECT day, author_email, argMax(reviews_given, computed_at) AS reviews_given_latest FROM user_metrics_daily WHERE repo_id = toUUID('${repo_id}') AND ifNull(team_id, 'unassigned') IN (${team_id:sqlstring}) AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day, author_email ) GROUP BY week, user ORDER BY week DESC, reviews_given DESC"
+          "rawSql": "SELECT toStartOfWeek(day) AS time, author_email AS user, sum(reviews_given_latest) AS reviews_given FROM ( SELECT m.repo_id, m.day AS day, m.author_email AS author_email, argMax(m.reviews_given, m.computed_at) AS reviews_given_latest FROM user_metrics_daily AS m INNER JOIN repos AS r ON r.id = m.repo_id WHERE match(r.repo, '${repo_id:regex}') AND ifNull(m.team_id, 'unassigned') IN (${team_id:sqlstring}) AND m.day >= toDate(toDateTime(intDiv($__from, 1000))) AND m.day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY m.repo_id, m.day, m.author_email ) GROUP BY time, user ORDER BY time ASC, reviews_given DESC"
         }
       ]
     },
@@ -58,7 +59,7 @@
         {
           "refId": "A",
           "rawQuery": true,
-          "rawSql": "SELECT day AS time, argMax(pr_pickup_time_p50_hours, computed_at) AS value FROM repo_metrics_daily WHERE repo_id = toUUID('${repo_id}') AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day ORDER BY day"
+          "rawSql": "SELECT m.day AS time, r.repo AS metric, argMax(m.pr_pickup_time_p50_hours, m.computed_at) AS value FROM repo_metrics_daily AS m INNER JOIN repos AS r ON r.id = m.repo_id WHERE match(r.repo, '${repo_id:regex}') AND m.day >= toDate(toDateTime(intDiv($__from, 1000))) AND m.day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY m.day, metric ORDER BY m.day"
         }
       ]
     },
@@ -73,7 +74,7 @@
         {
           "refId": "A",
           "rawQuery": true,
-          "rawSql": "SELECT day AS time, argMax(pr_first_review_p50_hours, computed_at) AS value FROM repo_metrics_daily WHERE repo_id = toUUID('${repo_id}') AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day ORDER BY day"
+          "rawSql": "SELECT m.day AS time, r.repo AS metric, argMax(m.pr_first_review_p50_hours, m.computed_at) AS value FROM repo_metrics_daily AS m INNER JOIN repos AS r ON r.id = m.repo_id WHERE match(r.repo, '${repo_id:regex}') AND m.day >= toDate(toDateTime(intDiv($__from, 1000))) AND m.day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY m.day, metric ORDER BY m.day"
         }
       ]
     }
