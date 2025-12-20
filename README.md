@@ -1,7 +1,5 @@
 # dev-health-ops
 
-Formerly `mergestat-syncs`.
-
 Development team and developers' operational help should be available for all.
 
 This project's goal is to provide tools and quick-win implementations by integrating with a majority of popular tooling.
@@ -19,7 +17,7 @@ See [`PRIVATE_REPO_TESTING.md`](./PRIVATE_REPO_TESTING.md) for detailed instruct
 
 The GitHub connector supports batch processing of repositories with:
 
-- **Pattern matching** - Filter repositories using fnmatch-style patterns (e.g., `chrisgeo/m*`, `*/api-*`)
+- **Pattern matching** - Filter repositories using fnmatch-style patterns (e.g., `chrisgeo/*`, `*/api-*`)
 - **Configurable batch size** - Process repositories in batches to manage memory and API usage
 - **Rate limiting** - Delay between batches plus shared backoff across workers (avoids stampedes; honors server reset/`Retry-After` when available)
 - **Async processing** - Process multiple repositories concurrently for better performance
