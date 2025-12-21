@@ -42,28 +42,6 @@ def compute_ic_metrics_daily(
     """
     
     
-    # Helper to create/update
-    def get_or_create(identity: str, base: Optional[UserMetricsDailyRecord] = None) -> UserMetricsDailyRecord:
-        if base:
-            return base
-        # Create empty base
-        return UserMetricsDailyRecord(
-            repo_id=uuid.UUID(int=0), # Placeholder
-            day=date.min, # Placeholder
-            author_email=identity,
-            commits_count=0,
-            loc_added=0,
-            loc_deleted=0,
-            files_changed=0,
-            large_commits_count=0,
-            avg_commit_size_loc=0.0,
-            prs_authored=0,
-            prs_merged=0,
-            avg_pr_cycle_hours=0.0,
-            median_pr_cycle_hours=0.0,
-            computed_at=datetime.now(timezone.utc)
-        )
-
     # Process Git metrics
     git_map: Dict[str, UserMetricsDailyRecord] = {}
     for r in git_metrics:
