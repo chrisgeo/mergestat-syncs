@@ -4,7 +4,7 @@ from unittest.mock import Mock, AsyncMock, patch
 from datetime import datetime, timezone
 
 from processors.gitlab import process_gitlab_project, _fetch_gitlab_pipelines_sync, _fetch_gitlab_deployments_sync, _fetch_gitlab_incidents_sync
-from models.git import Repo, CiPipelineRun, Deployment, Incident
+from models.git import CiPipelineRun, Deployment, Incident
 
 @pytest.mark.asyncio
 async def test_process_gitlab_project_sync_flags():
