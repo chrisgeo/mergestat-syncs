@@ -3,8 +3,8 @@
 Purpose: compact, actionable rules for an AI coding agent (Copilot-like) working in this repository.
 
 - Start by reading `cli.py`, `processors/local.py`, and `connectors/__init__.py` to understand boundaries.
-- Prefer minimal, surgical changes. Use `apply_patch` for edits and keep surrounding style.
-- Use the plan tool (`update_plan`) to create and track multi-step tasks; mark steps as you go.
+- Prefer minimal, surgical changes. Use `replace` or `write_file` for edits and keep surrounding style.
+- Use `codebase_investigator` for planning complex changes or understanding the system.
 
 ## Architecture & flows
 
@@ -12,6 +12,7 @@ Purpose: compact, actionable rules for an AI coding agent (Copilot-like) working
 - Local sync orchestration lives in `processors/local.py` (`process_local_repo`).
 - Connectors live in `connectors/` and must handle pagination, rate-limits, and provide batch helpers.
 - Processors in `processors/` implement the pipeline: commits → PRs → commit-stats → files/blame.
+- Fixtures in `fixtures/` generate synthetic data for testing/demos.
 
 ## Developer workflows
 
@@ -19,6 +20,12 @@ Purpose: compact, actionable rules for an AI coding agent (Copilot-like) working
 
 ```bash
 python cli.py sync local --db "<DB_CONN>" --repo-path /path/to/repo
+```
+
+- Generate synthetic data:
+
+```bash
+python cli.py fixtures generate --db "<DB_CONN>" --days 30
 ```
 
 - Run tests: `pytest -q` or `pytest tests/test_github_connector.py -q`.
