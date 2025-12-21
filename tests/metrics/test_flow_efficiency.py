@@ -1,6 +1,5 @@
 from datetime import date, datetime, timedelta, timezone
 from typing import List
-import pytest
 
 from metrics.compute_work_items import (
     _calculate_flow_breakdown,
