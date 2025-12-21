@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from providers.identity import load_identity_resolver as _load_identity_resolver
 from providers.teams import load_team_resolver as _load_team_resolver

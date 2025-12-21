@@ -602,21 +602,20 @@ def run_daily_metrics_job(
                 s.write_deploy_metrics(deploy_metrics)
                 s.write_incident_metrics(incident_metrics)
                 
-                # Landscape rolling metrics (ClickHouse only for now)
-                if isinstance(s, ClickHouseMetricsSink):
-                    try:
-                        rolling_stats = s.get_rolling_30d_user_stats(
-                            as_of_day=d, repo_id=repo_id
-                        )
-                        landscape_recs = compute_ic_landscape_rolling(
-                            as_of_day=d,
-                            rolling_stats=rolling_stats,
-                            team_map=team_map,
-                        )
-                        s.write_ic_landscape_rolling(landscape_recs)
-                        logger.info("Computed and wrote %d landscape records", len(landscape_recs))
-                    except Exception as e:
-                        logger.warning("Failed to compute/write landscape metrics: %s", e)
+                # Landscape rolling metrics
+                try:
+                    rolling_stats = s.get_rolling_30d_user_stats(
+                        as_of_day=d, repo_id=repo_id
+                    )
+                    landscape_recs = compute_ic_landscape_rolling(
+                        as_of_day=d,
+                        rolling_stats=rolling_stats,
+                        team_map=team_map,
+                    )
+                    s.write_ic_landscape_rolling(landscape_recs)
+                    logger.info("Computed and wrote %d landscape records", len(landscape_recs))
+                except Exception as e:
+                    logger.warning("Failed to compute/write landscape metrics: %s", e)
 
     finally:
         for s in sinks:

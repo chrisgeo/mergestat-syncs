@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import uuid
 from datetime import date, datetime, timezone
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence
 
 from metrics.schemas import (
     UserMetricsDailyRecord,
@@ -41,8 +41,6 @@ def compute_ic_metrics_daily(
     Also populates the new IC fields (identity_id, loc_touched, delivery_units, etc).
     """
     
-    # Index by identity
-    merged: Dict[str, UserMetricsDailyRecord] = {}
     
     # Helper to create/update
     def get_or_create(identity: str, base: Optional[UserMetricsDailyRecord] = None) -> UserMetricsDailyRecord:

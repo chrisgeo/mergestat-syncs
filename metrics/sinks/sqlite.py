@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from datetime import datetime, timezone
-from typing import Sequence
+from datetime import date, datetime, timezone, timedelta
+from typing import Sequence, List, Dict, Any, Optional
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
@@ -21,6 +21,7 @@ from metrics.schemas import (
     CICDMetricsDailyRecord,
     DeployMetricsDailyRecord,
     IncidentMetricsDailyRecord,
+    ICLandscapeRollingRecord,
 )
 
 
@@ -283,6 +284,25 @@ class SQLiteMetricsSink:
               PRIMARY KEY (repo_id, day)
             )
             """,
+            """
+            CREATE TABLE IF NOT EXISTS ic_landscape_rolling_30d (
+              repo_id TEXT NOT NULL,
+              as_of_day TEXT NOT NULL,
+              identity_id TEXT NOT NULL,
+              team_id TEXT,
+              map_name TEXT NOT NULL,
+              x_raw REAL NOT NULL,
+              y_raw REAL NOT NULL,
+              x_norm REAL NOT NULL,
+              y_norm REAL NOT NULL,
+              churn_loc_30d INTEGER NOT NULL DEFAULT 0,
+              delivery_units_30d INTEGER NOT NULL DEFAULT 0,
+              cycle_p50_30d_hours REAL NOT NULL DEFAULT 0.0,
+              wip_max_30d INTEGER NOT NULL DEFAULT 0,
+              computed_at TEXT NOT NULL,
+              PRIMARY KEY (repo_id, map_name, as_of_day, identity_id)
+            )
+            """,
             "CREATE INDEX IF NOT EXISTS idx_repo_metrics_daily_day ON repo_metrics_daily(day)",
             "CREATE INDEX IF NOT EXISTS idx_user_metrics_daily_day ON user_metrics_daily(day)",
             "CREATE INDEX IF NOT EXISTS idx_commit_metrics_day ON commit_metrics(day)",
@@ -294,6 +314,7 @@ class SQLiteMetricsSink:
             "CREATE INDEX IF NOT EXISTS idx_cicd_metrics_daily_day ON cicd_metrics_daily(day)",
             "CREATE INDEX IF NOT EXISTS idx_deploy_metrics_daily_day ON deploy_metrics_daily(day)",
             "CREATE INDEX IF NOT EXISTS idx_incident_metrics_daily_day ON incident_metrics_daily(day)",
+            "CREATE INDEX IF NOT EXISTS idx_ic_landscape_rolling_30d_day ON ic_landscape_rolling_30d(as_of_day)",
         ]
         with self.engine.begin() as conn:
             for stmt in stmts:
@@ -301,6 +322,22 @@ class SQLiteMetricsSink:
             # Best-effort upgrades for older SQLite schemas (no destructive migrations):
             # - Add work_scope_id columns
             # - Add UNIQUE indexes so ON CONFLICT(...) upserts work
+            # - Add new columns for IC metrics
+            
+            # New User Metrics Columns
+            for col, type_ in [
+                ("identity_id", "TEXT"),
+                ("loc_touched", "INTEGER NOT NULL DEFAULT 0"),
+                ("prs_opened", "INTEGER NOT NULL DEFAULT 0"),
+                ("work_items_completed", "INTEGER NOT NULL DEFAULT 0"),
+                ("work_items_active", "INTEGER NOT NULL DEFAULT 0"),
+                ("delivery_units", "INTEGER NOT NULL DEFAULT 0"),
+                ("cycle_p50_hours", "REAL NOT NULL DEFAULT 0.0"),
+                ("cycle_p90_hours", "REAL NOT NULL DEFAULT 0.0"),
+            ]:
+                if not self._table_has_column(conn, "user_metrics_daily", col):
+                    conn.execute(text(f"ALTER TABLE user_metrics_daily ADD COLUMN {col} {type_}"))
+
             if not self._table_has_column(
                 conn, "work_item_metrics_daily", "work_scope_id"
             ):
@@ -562,7 +599,8 @@ class SQLiteMetricsSink:
               pr_cycle_p75_hours, pr_cycle_p90_hours, prs_with_first_review,
               pr_first_review_p50_hours, pr_first_review_p90_hours, pr_review_time_p50_hours, pr_pickup_time_p50_hours,
               reviews_given, changes_requested_given, reviews_received, review_reciprocity, team_id, team_name,
-              active_hours, weekend_days, computed_at
+              active_hours, weekend_days, identity_id, loc_touched, prs_opened, work_items_completed, work_items_active,
+              delivery_units, cycle_p50_hours, cycle_p90_hours, computed_at
             ) VALUES (
               :repo_id, :day, :author_email, :commits_count, :loc_added, :loc_deleted,
               :files_changed, :large_commits_count, :avg_commit_size_loc,
@@ -570,7 +608,8 @@ class SQLiteMetricsSink:
               :pr_cycle_p75_hours, :pr_cycle_p90_hours, :prs_with_first_review,
               :pr_first_review_p50_hours, :pr_first_review_p90_hours, :pr_review_time_p50_hours, :pr_pickup_time_p50_hours,
               :reviews_given, :changes_requested_given, :reviews_received, :review_reciprocity, :team_id, :team_name,
-              :active_hours, :weekend_days, :computed_at
+              :active_hours, :weekend_days, :identity_id, :loc_touched, :prs_opened, :work_items_completed, :work_items_active,
+              :delivery_units, :cycle_p50_hours, :cycle_p90_hours, :computed_at
             )
             ON CONFLICT(repo_id, author_email, day) DO UPDATE SET
               commits_count=excluded.commits_count,
@@ -598,6 +637,14 @@ class SQLiteMetricsSink:
               team_name=excluded.team_name,
               active_hours=excluded.active_hours,
               weekend_days=excluded.weekend_days,
+              identity_id=excluded.identity_id,
+              loc_touched=excluded.loc_touched,
+              prs_opened=excluded.prs_opened,
+              work_items_completed=excluded.work_items_completed,
+              work_items_active=excluded.work_items_active,
+              delivery_units=excluded.delivery_units,
+              cycle_p50_hours=excluded.cycle_p50_hours,
+              cycle_p90_hours=excluded.cycle_p90_hours,
               computed_at=excluded.computed_at
             """
         )
@@ -730,6 +777,14 @@ class SQLiteMetricsSink:
             "team_name": data.get("team_name"),
             "active_hours": float(data.get("active_hours", 0.0) or 0.0),
             "weekend_days": int(data.get("weekend_days", 0) or 0),
+            "identity_id": str(data.get("identity_id") or "") or str(data["author_email"]),
+            "loc_touched": int(data.get("loc_touched", 0) or 0),
+            "prs_opened": int(data.get("prs_opened", 0) or 0),
+            "work_items_completed": int(data.get("work_items_completed", 0) or 0),
+            "work_items_active": int(data.get("work_items_active", 0) or 0),
+            "delivery_units": int(data.get("delivery_units", 0) or 0),
+            "cycle_p50_hours": float(data.get("cycle_p50_hours", 0.0) or 0.0),
+            "cycle_p90_hours": float(data.get("cycle_p90_hours", 0.0) or 0.0),
             "computed_at": _dt_to_sqlite(data["computed_at"]),
         }
 
@@ -779,6 +834,139 @@ class SQLiteMetricsSink:
             "mttr_p90_hours": data.get("mttr_p90_hours"),
             "computed_at": _dt_to_sqlite(data["computed_at"]),
         }
+
+    def write_ic_landscape_rolling(
+        self, rows: Sequence[ICLandscapeRollingRecord]
+    ) -> None:
+        if not rows:
+            return
+        stmt = text(
+            """
+            INSERT INTO ic_landscape_rolling_30d (
+              repo_id, as_of_day, identity_id, team_id, map_name, x_raw, y_raw, x_norm, y_norm,
+              churn_loc_30d, delivery_units_30d, cycle_p50_30d_hours, wip_max_30d, computed_at
+            ) VALUES (
+              :repo_id, :as_of_day, :identity_id, :team_id, :map_name, :x_raw, :y_raw, :x_norm, :y_norm,
+              :churn_loc_30d, :delivery_units_30d, :cycle_p50_30d_hours, :wip_max_30d, :computed_at
+            )
+            ON CONFLICT(repo_id, map_name, as_of_day, identity_id) DO UPDATE SET
+              team_id=excluded.team_id,
+              x_raw=excluded.x_raw,
+              y_raw=excluded.y_raw,
+              x_norm=excluded.x_norm,
+              y_norm=excluded.y_norm,
+              churn_loc_30d=excluded.churn_loc_30d,
+              delivery_units_30d=excluded.delivery_units_30d,
+              cycle_p50_30d_hours=excluded.cycle_p50_30d_hours,
+              wip_max_30d=excluded.wip_max_30d,
+              computed_at=excluded.computed_at
+            """
+        )
+        payload = []
+        for row in rows:
+            data = asdict(row)
+            payload.append({
+                "repo_id": str(data["repo_id"]),
+                "as_of_day": data["as_of_day"].isoformat(),
+                "identity_id": str(data["identity_id"]),
+                "team_id": str(data["team_id"] or ""),
+                "map_name": str(data["map_name"]),
+                "x_raw": float(data["x_raw"]),
+                "y_raw": float(data["y_raw"]),
+                "x_norm": float(data["x_norm"]),
+                "y_norm": float(data["y_norm"]),
+                "churn_loc_30d": int(data["churn_loc_30d"]),
+                "delivery_units_30d": int(data["delivery_units_30d"]),
+                "cycle_p50_30d_hours": float(data["cycle_p50_30d_hours"]),
+                "wip_max_30d": int(data["wip_max_30d"]),
+                "computed_at": _dt_to_sqlite(data["computed_at"]),
+            })
+        with self.engine.begin() as conn:
+            conn.execute(stmt, payload)
+
+    def get_rolling_30d_user_stats(
+        self,
+        as_of_day: date,
+        repo_id: Optional[str] = None, # repo_id in sqlite sink is usually handled upstream but we support filtering
+    ) -> List[Dict[str, Any]]:
+        """
+        Compute rolling 30d stats by aggregating daily rows in Python.
+        """
+        start_day = as_of_day - timedelta(days=29)
+        start_str = start_day.isoformat()
+        end_str = as_of_day.isoformat()
+        
+        # Select raw rows
+        query = """
+        SELECT
+            COALESCE(identity_id, author_email) as identity_id,
+            team_id,
+            loc_touched,
+            delivery_units,
+            cycle_p50_hours,
+            work_items_active
+        FROM user_metrics_daily
+        WHERE day >= :start AND day <= :end
+        """
+        params: Dict[str, Any] = {"start": start_str, "end": end_str}
+        
+        if repo_id:
+            query += " AND repo_id = :repo_id"
+            params["repo_id"] = str(repo_id)
+
+        rows = []
+        with self.engine.connect() as conn:
+             rows = conn.execute(text(query), params).fetchall()
+
+        # Aggregate in Python
+        aggs: Dict[str, Dict[str, Any]] = {}
+        
+        for r in rows:
+            identity_id = r[0]
+            team_id = r[1]
+            loc_touched = r[2] or 0
+            delivery_units = r[3] or 0
+            cycle_p50 = r[4] or 0.0
+            wip = r[5] or 0
+            
+            if identity_id not in aggs:
+                aggs[identity_id] = {
+                    "identity_id": identity_id,
+                    "team_id": team_id, # Take first found team_id
+                    "churn_loc_30d": 0,
+                    "delivery_units_30d": 0,
+                    "wip_max_30d": 0,
+                    "cycle_p50_values": []
+                }
+            
+            entry = aggs[identity_id]
+            entry["churn_loc_30d"] += loc_touched
+            entry["delivery_units_30d"] += delivery_units
+            entry["wip_max_30d"] = max(entry["wip_max_30d"], wip)
+            if cycle_p50 > 0:
+                entry["cycle_p50_values"].append(cycle_p50)
+            
+            # Update team_id if missing (simple last-wins or non-null wins strategy)
+            if not entry["team_id"] and team_id:
+                entry["team_id"] = team_id
+
+        # Finalize
+        results = []
+        for identity, data in aggs.items():
+            cycle_vals = data.pop("cycle_p50_values")
+            median_cycle = 0.0
+            if cycle_vals:
+                cycle_vals.sort()
+                mid = len(cycle_vals) // 2
+                if len(cycle_vals) % 2 == 1:
+                    median_cycle = cycle_vals[mid]
+                else:
+                    median_cycle = (cycle_vals[mid-1] + cycle_vals[mid]) / 2.0
+            
+            data["cycle_p50_30d_hours"] = median_cycle
+            results.append(data)
+            
+        return results
 
     def write_team_metrics(self, rows: Sequence[TeamMetricsDailyRecord]) -> None:
         if not rows:
