@@ -521,13 +521,72 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
 
             if sink:
                 sink.ensure_tables()
-                wi_metrics = generator.generate_work_item_metrics(days=ns.days)
-                sink.write_work_item_metrics(wi_metrics)
-                cycle_times = generator.generate_work_item_cycle_times(
-                    count=ns.pr_count
+                from datetime import timedelta
+
+                from metrics.compute_work_item_state_durations import (
+                    compute_work_item_state_durations_daily,
                 )
-                sink.write_work_item_cycle_times(cycle_times)
-                logging.info(f"Generated {len(wi_metrics)} work item metrics rows")
+                from metrics.compute_work_items import compute_work_item_metrics_daily
+                from providers.teams import TeamResolver
+
+                work_items = generator.generate_work_items(days=ns.days)
+                transitions = generator.generate_work_item_transitions(work_items)
+
+                # Provide stable team IDs for dashboards without requiring config.
+                member_to_team = {}
+                for idx, (name, email) in enumerate(generator.authors):
+                    team_id = "alpha" if idx < 3 else "beta"
+                    team_name = "Alpha Team" if team_id == "alpha" else "Beta Team"
+                    member_to_team[str(email).strip().lower()] = (team_id, team_name)
+                    member_to_team[str(name).strip().lower()] = (team_id, team_name)
+                team_resolver = TeamResolver(member_to_team=member_to_team)
+
+                computed_at = datetime.now(timezone.utc)
+                end_day = computed_at.date()
+                start_day = end_day - timedelta(days=max(1, int(ns.days)) - 1)
+
+                total_wi = 0
+                total_wi_users = 0
+                total_cycles = 0
+                total_state = 0
+
+                for i in range(max(1, int(ns.days))):
+                    day = start_day + timedelta(days=i)
+
+                    wi_rows, wi_user_rows, cycle_rows = compute_work_item_metrics_daily(
+                        day=day,
+                        work_items=work_items,
+                        computed_at=computed_at,
+                        team_resolver=team_resolver,
+                    )
+                    if wi_rows:
+                        sink.write_work_item_metrics(wi_rows)
+                        total_wi += len(wi_rows)
+                    if wi_user_rows:
+                        sink.write_work_item_user_metrics(wi_user_rows)
+                        total_wi_users += len(wi_user_rows)
+                    if cycle_rows:
+                        sink.write_work_item_cycle_times(cycle_rows)
+                        total_cycles += len(cycle_rows)
+
+                    state_rows = compute_work_item_state_durations_daily(
+                        day=day,
+                        work_items=work_items,
+                        transitions=transitions,
+                        computed_at=computed_at,
+                        team_resolver=team_resolver,
+                    )
+                    if state_rows:
+                        sink.write_work_item_state_durations(state_rows)
+                        total_state += len(state_rows)
+
+                logging.info(
+                    "Generated work tracking fixtures rows: work_item_metrics_daily=%d work_item_user_metrics_daily=%d work_item_cycle_times=%d work_item_state_durations_daily=%d",
+                    total_wi,
+                    total_wi_users,
+                    total_cycles,
+                    total_state,
+                )
 
     asyncio.run(_run_with_store(ns.db, db_type, _handler))
     return 0
