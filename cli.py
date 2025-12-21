@@ -223,6 +223,7 @@ def _cmd_metrics_daily(ns: argparse.Namespace) -> int:
         day=ns.date,
         backfill_days=max(1, int(ns.backfill)),
         repo_id=ns.repo_id,
+        repo_name=getattr(ns, "repo_name", None),
         include_commit_metrics=not ns.skip_commit_metrics,
         sink=ns.sink,
         provider=ns.provider,
@@ -402,8 +403,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional repo_id UUID filter.",
     )
     daily.add_argument(
+        "--repo-name",
+        help="Optional repo name filter (e.g. 'owner/repo').",
+    )
+    daily.add_argument(
         "--provider",
-        choices=["all", "jira", "github", "gitlab", "none"],
+        choices=["all", "jira", "github", "gitlab", "synthetic", "none"],
         default="all",
         help="Which work item providers to include.",
     )
@@ -434,7 +439,98 @@ def build_parser() -> argparse.ArgumentParser:
     )
     graf_down.set_defaults(func=_cmd_grafana_down)
 
+    # ---- fixtures ----
+    fix = sub.add_parser("fixtures", help="Data simulation and fixtures.")
+    fix_sub = fix.add_subparsers(dest="fixtures_command", required=True)
+    fix_gen = fix_sub.add_parser("generate", help="Generate synthetic data.")
+    fix_gen.add_argument(
+        "--db",
+        default=os.getenv("DB_CONN_STRING") or os.getenv("DATABASE_URL"),
+        help="Target DB URI.",
+    )
+    fix_gen.add_argument(
+        "--db-type", help="Explicit DB type (postgres, clickhouse, etc)."
+    )
+    fix_gen.add_argument("--repo-name", default="acme/demo-app", help="Repo name.")
+    fix_gen.add_argument("--days", type=int, default=30, help="Number of days of data.")
+    fix_gen.add_argument(
+        "--commits-per-day", type=int, default=5, help="Avg commits per day."
+    )
+    fix_gen.add_argument("--pr-count", type=int, default=20, help="Total PRs.")
+    fix_gen.add_argument(
+        "--with-metrics", action="store_true", help="Also generate derived metrics."
+    )
+    fix_gen.set_defaults(func=_cmd_fixtures_generate)
+
     return parser
+
+
+def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
+    from fixtures.generator import SyntheticDataGenerator
+
+    generator = SyntheticDataGenerator(repo_name=ns.repo_name)
+    db_type = _resolve_db_type(ns.db, ns.db_type)
+
+    async def _handler(store):
+        # 1. Repo
+        repo = generator.generate_repo()
+        await store.insert_repo(repo)
+
+        # 2. Files
+        files = generator.generate_files()
+        await store.insert_git_file_data(files)
+
+        # 3. Commits & Stats
+        commits = generator.generate_commits(
+            days=ns.days, commits_per_day=ns.commits_per_day
+        )
+        await store.insert_git_commit_data(commits)
+        stats = generator.generate_commit_stats(commits)
+        await store.insert_git_commit_stats(stats)
+
+        # 4. PRs & Reviews
+        pr_data = generator.generate_prs(count=ns.pr_count)
+        prs = [p["pr"] for p in pr_data]
+        await store.insert_git_pull_requests(prs)
+
+        all_reviews = []
+        for p in pr_data:
+            all_reviews.extend(p["reviews"])
+        if all_reviews:
+            await store.insert_git_pull_request_reviews(all_reviews)
+
+        logging.info(f"Generated synthetic data for {ns.repo_name}")
+        logging.info(f"- Repo ID: {repo.id}")
+        logging.info(f"- Commits: {len(commits)}")
+        logging.info(f"- PRs: {len(prs)}")
+        logging.info(f"- Reviews: {len(all_reviews)}")
+
+        if ns.with_metrics:
+            from metrics.job_daily import (
+                ClickHouseMetricsSink,
+                SQLiteMetricsSink,
+            )
+
+            sink = None
+            if db_type == "clickhouse":
+                sink = ClickHouseMetricsSink(ns.db)
+            elif db_type == "sqlite":
+                from metrics.job_daily import _normalize_sqlite_url
+
+                sink = SQLiteMetricsSink(_normalize_sqlite_url(ns.db))
+
+            if sink:
+                sink.ensure_tables()
+                wi_metrics = generator.generate_work_item_metrics(days=ns.days)
+                sink.write_work_item_metrics(wi_metrics)
+                cycle_times = generator.generate_work_item_cycle_times(
+                    count=ns.pr_count
+                )
+                sink.write_work_item_cycle_times(cycle_times)
+                logging.info(f"Generated {len(wi_metrics)} work item metrics rows")
+
+    asyncio.run(_run_with_store(ns.db, db_type, _handler))
+    return 0
 
 
 def main(argv: Optional[List[str]] = None) -> int:

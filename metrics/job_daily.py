@@ -53,6 +53,7 @@ def run_daily_metrics_job(
     day: date,
     backfill_days: int,
     repo_id: Optional[uuid.UUID] = None,
+    repo_name: Optional[str] = None,
     include_commit_metrics: bool = True,
     sink: str = "auto",  # auto|clickhouse|mongo|sqlite|both
     provider: str = "all",  # all|jira|github|gitlab|none
@@ -125,12 +126,12 @@ def run_daily_metrics_job(
     provider_set = set()
     provider_strict = provider in {"jira", "github", "gitlab"}
     if provider in {"all", "*"}:
-        provider_set = {"jira", "github", "gitlab"}
+        provider_set = {"jira", "github", "gitlab", "synthetic"}
     elif provider in {"none", "off", "skip"}:
         provider_set = set()
     else:
         provider_set = {provider}
-    unknown_providers = provider_set - {"jira", "github", "gitlab"}
+    unknown_providers = provider_set - {"jira", "github", "gitlab", "synthetic"}
     if unknown_providers:
         raise ValueError(f"Unknown provider(s): {sorted(unknown_providers)}")
 
@@ -180,6 +181,7 @@ def run_daily_metrics_job(
                 backend=backend,
                 primary_sink=primary_sink,
                 repo_id=repo_id,
+                repo_name=repo_name,
             )
             logger.info(
                 "Discovered %d repos from backend for work item ingestion",
@@ -253,6 +255,19 @@ def run_daily_metrics_job(
                         raise
                     logger.warning("Skipping GitLab work items fetch: %s", exc)
 
+            if "synthetic" in provider_set:
+                try:
+                    from metrics.work_items import fetch_synthetic_work_items
+
+                    syn_items, syn_transitions = fetch_synthetic_work_items(
+                        repos=discovered_repos,
+                        days=backfill_days + 1,
+                    )
+                    work_items.extend(syn_items)
+                    work_item_transitions.extend(syn_transitions)
+                except Exception as exc:
+                    logger.warning("Skipping synthetic work items fetch: %s", exc)
+
             logger.info("Work items ready for compute: %d", len(work_items))
             logger.info(
                 "Work item transitions ready for compute: %d",
@@ -271,39 +286,45 @@ def run_daily_metrics_job(
                     primary_sink.client,
                     start=start,
                     end=end,
-                    repo_id=repo_id,  # type: ignore[attr-defined]
+                    repo_id=repo_id,
+                    repo_name=repo_name,
                 )
                 review_rows = _load_clickhouse_reviews(
                     primary_sink.client,
                     start=start,
                     end=end,
-                    repo_id=repo_id,  # type: ignore[attr-defined]
+                    repo_id=repo_id,
+                    repo_name=repo_name,
                 )
             elif backend == "sqlite":
                 commit_rows, pr_rows = _load_sqlite_rows(
                     primary_sink.engine,
                     start=start,
                     end=end,
-                    repo_id=repo_id,  # type: ignore[attr-defined]
+                    repo_id=repo_id,
+                    repo_name=repo_name,
                 )
                 review_rows = _load_sqlite_reviews(
                     primary_sink.engine,
                     start=start,
                     end=end,
-                    repo_id=repo_id,  # type: ignore[attr-defined]
+                    repo_id=repo_id,
+                    repo_name=repo_name,
                 )
             else:
                 commit_rows, pr_rows = _load_mongo_rows(
                     primary_sink.db,
                     start=start,
                     end=end,
-                    repo_id=repo_id,  # type: ignore[attr-defined]
+                    repo_id=repo_id,
+                    repo_name=repo_name,
                 )
                 review_rows = _load_mongo_reviews(
                     primary_sink.db,
                     start=start,
                     end=end,
-                    repo_id=repo_id,  # type: ignore[attr-defined]
+                    repo_id=repo_id,
+                    repo_name=repo_name,
                 )
             logger.info(
                 "Loaded source facts: commits=%d pr_rows=%d",
@@ -346,15 +367,27 @@ def run_daily_metrics_job(
             )
             if backend == "clickhouse":
                 h_commit_rows, _ = _load_clickhouse_rows(
-                    primary_sink.client, start=h_start, end=end, repo_id=repo_id
+                    primary_sink.client,
+                    start=h_start,
+                    end=end,
+                    repo_id=repo_id,
+                    repo_name=repo_name,
                 )
             elif backend == "sqlite":
                 h_commit_rows, _ = _load_sqlite_rows(
-                    primary_sink.engine, start=h_start, end=end, repo_id=repo_id
+                    primary_sink.engine,
+                    start=h_start,
+                    end=end,
+                    repo_id=repo_id,
+                    repo_name=repo_name,
                 )
             else:
                 h_commit_rows, _ = _load_mongo_rows(
-                    primary_sink.db, start=h_start, end=end, repo_id=repo_id
+                    primary_sink.db,
+                    start=h_start,
+                    end=end,
+                    repo_id=repo_id,
+                    repo_name=repo_name,
                 )
 
             # Discover repos for this day if not already done.
@@ -466,7 +499,11 @@ def _safe_json_loads(value: Any) -> Any:
 
 
 def _discover_repos(
-    *, backend: str, primary_sink: Any, repo_id: Optional[uuid.UUID]
+    *,
+    backend: str,
+    primary_sink: Any,
+    repo_id: Optional[uuid.UUID],
+    repo_name: Optional[str] = None,
 ) -> List[DiscoveredRepo]:
     """
     Discover repos from the synced backend so work item ingestion can reuse them as sources.
@@ -482,6 +519,9 @@ def _discover_repos(
         if repo_id is not None:
             params["repo_id"] = str(repo_id)
             where = "WHERE id = {repo_id:UUID}"
+        elif repo_name is not None:
+            params["repo_name"] = repo_name
+            where = "WHERE repo = {repo_name:String}"
         rows = _clickhouse_query_dicts(
             client,
             f"SELECT id, repo, settings, tags FROM repos {where}",
@@ -622,7 +662,12 @@ def _clickhouse_query_dicts(
 
 
 def _load_clickhouse_rows(
-    client: Any, *, start: datetime, end: datetime, repo_id: Optional[uuid.UUID]
+    client: Any,
+    *,
+    start: datetime,
+    end: datetime,
+    repo_id: Optional[uuid.UUID],
+    repo_name: Optional[str] = None,
 ) -> Tuple[List[CommitStatRow], List[PullRequestRow]]:
     """
     Load source rows for a single day from ClickHouse.
@@ -637,6 +682,11 @@ def _load_clickhouse_rows(
     if repo_id is not None:
         params["repo_id"] = str(repo_id)
         repo_filter = " AND c.repo_id = {repo_id:UUID}"
+    elif repo_name is not None:
+        params["repo_name"] = repo_name
+        repo_filter = (
+            " AND c.repo_id IN (SELECT id FROM repos WHERE repo = {repo_name:String})"
+        )
 
     commit_query = f"""
     SELECT
@@ -675,7 +725,7 @@ def _load_clickhouse_rows(
     WHERE
       (created_at >= {{start:DateTime}} AND created_at < {{end:DateTime}})
       OR (merged_at IS NOT NULL AND merged_at >= {{start:DateTime}} AND merged_at < {{end:DateTime}})
-      {("AND repo_id = {repo_id:UUID}" if repo_id is not None else "")}
+      {repo_filter.replace("c.repo_id", "repo_id") if repo_id or repo_name else ""}
     """
 
     commit_dicts = _clickhouse_query_dicts(client, commit_query, params)
@@ -742,7 +792,12 @@ def _chunked(values: Sequence[str], chunk_size: int) -> Iterable[List[str]]:
 
 
 def _load_mongo_rows(
-    db: Any, *, start: datetime, end: datetime, repo_id: Optional[uuid.UUID]
+    db: Any,
+    *,
+    start: datetime,
+    end: datetime,
+    repo_id: Optional[uuid.UUID],
+    repo_name: Optional[str] = None,
 ) -> Tuple[List[CommitStatRow], List[PullRequestRow]]:
     """
     Load source rows for a single day from MongoDB.
@@ -761,6 +816,13 @@ def _load_mongo_rows(
     }
     if repo_id is not None:
         commit_filter["repo_id"] = str(repo_id)
+    elif repo_name is not None:
+        # Resolve repo_id first
+        repo_doc = db["repos"].find_one({"repo": repo_name}, {"id": 1, "_id": 1})
+        if repo_doc:
+            commit_filter["repo_id"] = str(repo_doc.get("id") or repo_doc.get("_id"))
+        else:
+            return [], []
 
     commit_projection = {
         "repo_id": 1,
@@ -874,7 +936,12 @@ def _load_mongo_rows(
 
 
 def _load_sqlite_rows(
-    engine: Any, *, start: datetime, end: datetime, repo_id: Optional[uuid.UUID]
+    engine: Any,
+    *,
+    start: datetime,
+    end: datetime,
+    repo_id: Optional[uuid.UUID],
+    repo_name: Optional[str] = None,
 ) -> Tuple[List[CommitStatRow], List[PullRequestRow]]:
     """
     Load source rows for a single day from SQLite via SQLAlchemy ORM models.
@@ -916,6 +983,12 @@ def _load_sqlite_rows(
     )
     if repo_id is not None:
         commit_stmt = commit_stmt.where(GitCommit.repo_id == repo_id)
+    elif repo_name is not None:
+        from models.git import Repo
+
+        commit_stmt = commit_stmt.join(Repo, GitCommit.repo_id == Repo.id).where(
+            Repo.repo == repo_name
+        )
 
     pr_stmt = (
         select(
@@ -943,6 +1016,12 @@ def _load_sqlite_rows(
     )
     if repo_id is not None:
         pr_stmt = pr_stmt.where(GitPullRequest.repo_id == repo_id)
+    elif repo_name is not None:
+        from models.git import Repo
+
+        pr_stmt = pr_stmt.join(Repo, GitPullRequest.repo_id == Repo.id).where(
+            Repo.repo == repo_name
+        )
 
     commit_rows: List[CommitStatRow] = []
     pr_rows: List[PullRequestRow] = []
@@ -990,7 +1069,11 @@ def _load_sqlite_rows(
 
 
 def _load_clickhouse_reviews(
-    client, start: datetime, end: datetime, repo_id: Optional[uuid.UUID] = None
+    client,
+    start: datetime,
+    end: datetime,
+    repo_id: Optional[uuid.UUID] = None,
+    repo_name: Optional[str] = None,
 ) -> List[PullRequestReviewRow]:
     # Simple query for clickhouse-connect
     sql = """
@@ -1002,6 +1085,9 @@ def _load_clickhouse_reviews(
     if repo_id:
         sql += " AND repo_id = %(repo_id)s"
         params["repo_id"] = str(repo_id)
+    elif repo_name:
+        sql += " AND repo_id IN (SELECT id FROM repos WHERE repo = %(repo_name)s)"
+        params["repo_name"] = repo_name
 
     result = client.query(sql, parameters=params)
     rows: List[PullRequestReviewRow] = []
@@ -1021,11 +1107,21 @@ def _load_clickhouse_reviews(
 
 
 def _load_mongo_reviews(
-    db, start: datetime, end: datetime, repo_id: Optional[uuid.UUID] = None
+    db,
+    start: datetime,
+    end: datetime,
+    repo_id: Optional[uuid.UUID] = None,
+    repo_name: Optional[str] = None,
 ) -> List[PullRequestReviewRow]:
     query = {"submitted_at": {"$gte": start, "$lt": end}}
     if repo_id:
         query["repo_id"] = str(repo_id)
+    elif repo_name:
+        repo_doc = db["repos"].find_one({"repo": repo_name}, {"id": 1, "_id": 1})
+        if repo_doc:
+            query["repo_id"] = str(repo_doc.get("id") or repo_doc.get("_id"))
+        else:
+            return []
 
     rows: List[PullRequestReviewRow] = []
     for doc in db["git_pull_request_reviews"].find(query):
@@ -1044,7 +1140,11 @@ def _load_mongo_reviews(
 
 
 def _load_sqlite_reviews(
-    engine, start: datetime, end: datetime, repo_id: Optional[uuid.UUID] = None
+    engine,
+    start: datetime,
+    end: datetime,
+    repo_id: Optional[uuid.UUID] = None,
+    repo_name: Optional[str] = None,
 ) -> List[PullRequestReviewRow]:
     from models.git import GitPullRequestReview
     from sqlalchemy import select
@@ -1062,6 +1162,12 @@ def _load_sqlite_reviews(
         )
         if repo_id:
             stmt = stmt.where(GitPullRequestReview.repo_id == repo_id)
+        elif repo_name:
+            from models.git import Repo
+
+            stmt = stmt.join(Repo, GitPullRequestReview.repo_id == Repo.id).where(
+                Repo.repo == repo_name
+            )
 
         rows: List[PullRequestReviewRow] = []
         for r in conn.execute(stmt).all():

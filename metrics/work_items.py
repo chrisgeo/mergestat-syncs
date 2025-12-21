@@ -29,6 +29,41 @@ def _to_utc(dt: datetime) -> datetime:
     return dt.astimezone(timezone.utc)
 
 
+def fetch_synthetic_work_items(
+    *,
+    repos: Sequence[DiscoveredRepo],
+    days: int = 30,
+) -> Tuple[List[WorkItem], List[WorkItemStatusTransition]]:
+    """
+    Generate synthetic work items for testing/demo purposes.
+    """
+    from fixtures.generator import SyntheticDataGenerator
+
+    all_items: List[WorkItem] = []
+    all_transitions: List[WorkItemStatusTransition] = []
+
+    for repo in repos:
+        if repo.source != "synthetic":
+            continue
+        logger.info("Generating synthetic work items for repo: %s", repo.full_name)
+        # Use repo_id as random seed for stability
+        import random
+
+        seed = int(repo.repo_id.hex, 16) % (2**32)
+        random.seed(seed)
+
+        generator = SyntheticDataGenerator(
+            repo_id=repo.repo_id, repo_name=repo.full_name
+        )
+        items = generator.generate_work_items(days=days)
+        transitions = generator.generate_work_item_transitions(items)
+
+        all_items.extend(items)
+        all_transitions.extend(transitions)
+
+    return all_items, all_transitions
+
+
 def fetch_jira_work_items(
     *,
     since: datetime,
@@ -55,7 +90,12 @@ def fetch_jira_work_items(
         project_keys = [k.strip() for k in raw_keys.split(",") if k.strip()] or None
 
     jql_override = (os.getenv("JIRA_JQL") or "").strip()
-    fetch_all = (os.getenv("JIRA_FETCH_ALL") or "").strip().lower() in {"1", "true", "yes", "on"}
+    fetch_all = (os.getenv("JIRA_FETCH_ALL") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
     client = JiraClient.from_env()
     work_items: List[WorkItem] = []
@@ -72,15 +112,33 @@ def fetch_jira_work_items(
         logger.info("Jira: using JIRA_FETCH_ALL=1 (may be slow on large instances)")
         if project_keys:
             for key in project_keys:
-                jqls.append(build_jira_jql(project_key=key, updated_since=None, active_until=None))
+                jqls.append(
+                    build_jira_jql(
+                        project_key=key, updated_since=None, active_until=None
+                    )
+                )
         else:
-            jqls.append(build_jira_jql(project_key=None, updated_since=None, active_until=None))
+            jqls.append(
+                build_jira_jql(project_key=None, updated_since=None, active_until=None)
+            )
     else:
         if project_keys:
             for key in project_keys:
-                jqls.append(build_jira_jql(project_key=key, updated_since=updated_since, active_until=active_until))
+                jqls.append(
+                    build_jira_jql(
+                        project_key=key,
+                        updated_since=updated_since,
+                        active_until=active_until,
+                    )
+                )
         else:
-            jqls.append(build_jira_jql(project_key=None, updated_since=updated_since, active_until=active_until))
+            jqls.append(
+                build_jira_jql(
+                    project_key=None,
+                    updated_since=updated_since,
+                    active_until=active_until,
+                )
+            )
 
     for jql in jqls:
         logger.debug("Jira: JQL=%s", jql)
@@ -129,7 +187,11 @@ def fetch_github_work_items(
 
     since_utc = _to_utc(since)
     github_repos = [r for r in repos if r.source == "github"]
-    logger.info("GitHub: fetching work items from %d repos (since %s)", len(github_repos), since_utc.isoformat())
+    logger.info(
+        "GitHub: fetching work items from %d repos (since %s)",
+        len(github_repos),
+        since_utc.isoformat(),
+    )
     for repo in repos:
         if repo.source != "github":
             continue
@@ -138,11 +200,15 @@ def fetch_github_work_items(
             owner, name = repo.full_name.split("/", 1)
         except ValueError:
             continue
-        for issue in client.iter_issues(owner=owner, repo=name, state="all", since=since_utc):
+        for issue in client.iter_issues(
+            owner=owner, repo=name, state="all", since=since_utc
+        ):
             events = None
             if include_issue_events:
                 try:
-                    events = list(client.iter_issue_events(issue, limit=max_events_per_issue))
+                    events = list(
+                        client.iter_issue_events(issue, limit=max_events_per_issue)
+                    )
                 except Exception:
                     events = None
             wi, _transitions = github_issue_to_work_item(
@@ -156,7 +222,11 @@ def fetch_github_work_items(
             work_items[wi.work_item_id] = wi
             transitions.extend(list(_transitions or []))
 
-    logger.info("Fetched %d GitHub work items (since %s)", len(work_items), since_utc.isoformat())
+    logger.info(
+        "Fetched %d GitHub work items (since %s)",
+        len(work_items),
+        since_utc.isoformat(),
+    )
     return list(work_items.values()), transitions
 
 
@@ -185,7 +255,9 @@ def fetch_github_project_v2_items(
     for org_login, project_number in projects:
         project_scope_id = f"ghprojv2:{org_login}#{int(project_number)}"
         logger.info("GitHub: fetching Projects v2 items for %s", project_scope_id)
-        for node in client.iter_project_v2_items(org_login=org_login, project_number=int(project_number), first=50):
+        for node in client.iter_project_v2_items(
+            org_login=org_login, project_number=int(project_number), first=50
+        ):
             wi = github_project_v2_item_to_work_item(
                 item_node=node,
                 project_scope_id=project_scope_id,
@@ -238,7 +310,11 @@ def fetch_gitlab_work_items(
 
     since_utc = _to_utc(since)
     gitlab_repos = [r for r in repos if r.source == "gitlab"]
-    logger.info("GitLab: fetching work items from %d projects (since %s)", len(gitlab_repos), since_utc.isoformat())
+    logger.info(
+        "GitLab: fetching work items from %d projects (since %s)",
+        len(gitlab_repos),
+        since_utc.isoformat(),
+    )
     for repo in repos:
         if repo.source != "gitlab":
             continue
@@ -252,7 +328,9 @@ def fetch_gitlab_work_items(
             if include_label_events:
                 try:
                     # python-gitlab provides resource_label_events on issue objects.
-                    label_events = list(issue.resource_label_events.list(per_page=100, iterator=True))[:max_label_events]
+                    label_events = list(
+                        issue.resource_label_events.list(per_page=100, iterator=True)
+                    )[:max_label_events]
                 except Exception:
                     label_events = None
 
@@ -267,11 +345,17 @@ def fetch_gitlab_work_items(
             work_items[wi.work_item_id] = wi
             transitions.extend(list(_transitions or []))
 
-    logger.info("Fetched %d GitLab work items (since %s)", len(work_items), since_utc.isoformat())
+    logger.info(
+        "Fetched %d GitLab work items (since %s)",
+        len(work_items),
+        since_utc.isoformat(),
+    )
     return list(work_items.values()), transitions
 
 
-def discover_repos_from_records(records: Iterable[Tuple[str, Dict[str, object]]]) -> List[DiscoveredRepo]:
+def discover_repos_from_records(
+    records: Iterable[Tuple[str, Dict[str, object]]],
+) -> List[DiscoveredRepo]:
     """
     Convert (repo_full_name, settings) tuples into DiscoveredRepo rows.
     """
