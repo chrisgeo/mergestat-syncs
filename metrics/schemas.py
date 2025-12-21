@@ -51,6 +51,35 @@ class PullRequestCommentRow(TypedDict):
     created_at: datetime
 
 
+class PipelineRunRow(TypedDict):
+    repo_id: uuid.UUID
+    run_id: str
+    status: Optional[str]
+    queued_at: Optional[datetime]
+    started_at: datetime
+    finished_at: Optional[datetime]
+
+
+class DeploymentRow(TypedDict):
+    repo_id: uuid.UUID
+    deployment_id: str
+    status: Optional[str]
+    environment: Optional[str]
+    started_at: Optional[datetime]
+    finished_at: Optional[datetime]
+    deployed_at: Optional[datetime]
+    merged_at: NotRequired[Optional[datetime]]
+    pull_request_number: NotRequired[Optional[int]]
+
+
+class IncidentRow(TypedDict):
+    repo_id: uuid.UUID
+    incident_id: str
+    status: Optional[str]
+    started_at: datetime
+    resolved_at: Optional[datetime]
+
+
 @dataclass(frozen=True)
 class CommitMetricsRecord:
     repo_id: uuid.UUID
@@ -95,6 +124,10 @@ class UserMetricsDailyRecord:
     reviews_received: int = 0
     review_reciprocity: float = 0.0
 
+    # Burnout / Activity signals.
+    active_hours: float = 0.0
+    weekend_days: int = 0  # 1 if this day is a weekend and user was active, else 0
+
     # Team dimension (optional).
     team_id: Optional[str] = None
     team_name: Optional[str] = None
@@ -126,6 +159,13 @@ class RepoMetricsDailyRecord:
     # Quality signals.
     large_pr_ratio: float = 0.0
     pr_rework_ratio: float = 0.0
+    pr_size_p50_loc: Optional[float] = None
+    pr_size_p90_loc: Optional[float] = None
+    pr_comments_per_100_loc: Optional[float] = None
+    pr_reviews_per_100_loc: Optional[float] = None
+    rework_churn_ratio_30d: float = 0.0
+    single_owner_file_ratio_30d: float = 0.0
+    review_load_top_reviewer_ratio: float = 0.0
 
     # DORA proxies.
     mttr_hours: Optional[float] = None
@@ -173,6 +213,9 @@ class WorkItemCycleTimeRecord:
     completed_at: Optional[datetime]
     cycle_time_hours: Optional[float]
     lead_time_hours: Optional[float]
+    active_time_hours: Optional[float]
+    wait_time_hours: Optional[float]
+    flow_efficiency: Optional[float]
     computed_at: datetime
 
 
@@ -198,6 +241,11 @@ class WorkItemMetricsDailyRecord:
     bug_completed_ratio: float
     story_points_completed: float
     computed_at: datetime
+    # Phase 2 metrics
+    new_bugs_count: int = 0
+    new_items_count: int = 0
+    defect_intro_rate: float = 0.0
+    wip_congestion_ratio: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -227,6 +275,50 @@ class WorkItemStateDurationDailyRecord:
     duration_hours: float
     items_touched: int
     computed_at: datetime
+    avg_wip: float = 0.0
+
+
+@dataclass(frozen=True)
+class ReviewEdgeDailyRecord:
+    repo_id: uuid.UUID
+    day: date
+    reviewer: str
+    author: str
+    reviews_count: int
+    computed_at: datetime
+
+
+@dataclass(frozen=True)
+class CICDMetricsDailyRecord:
+    repo_id: uuid.UUID
+    day: date
+    pipelines_count: int
+    success_rate: float
+    avg_duration_minutes: Optional[float]
+    p90_duration_minutes: Optional[float]
+    avg_queue_minutes: Optional[float]
+    computed_at: datetime
+
+
+@dataclass(frozen=True)
+class DeployMetricsDailyRecord:
+    repo_id: uuid.UUID
+    day: date
+    deployments_count: int
+    failed_deployments_count: int
+    deploy_time_p50_hours: Optional[float]
+    lead_time_p50_hours: Optional[float]
+    computed_at: datetime
+
+
+@dataclass(frozen=True)
+class IncidentMetricsDailyRecord:
+    repo_id: uuid.UUID
+    day: date
+    incidents_count: int
+    mttr_p50_hours: Optional[float]
+    mttr_p90_hours: Optional[float]
+    computed_at: datetime
 
 
 @dataclass(frozen=True)
@@ -247,3 +339,4 @@ class DailyMetricsResult:
     work_item_state_durations: List[WorkItemStateDurationDailyRecord] = field(
         default_factory=list
     )
+    review_edges: List[ReviewEdgeDailyRecord] = field(default_factory=list)

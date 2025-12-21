@@ -8,13 +8,25 @@ from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 from metrics.compute import compute_daily_metrics
+from metrics.compute_cicd import compute_cicd_metrics_daily
+from metrics.compute_deployments import compute_deploy_metrics_daily
+from metrics.compute_incidents import compute_incident_metrics_daily
 from metrics.compute_wellbeing import compute_team_wellbeing_metrics_daily
 from metrics.compute_work_items import compute_work_item_metrics_daily
 from metrics.compute_work_item_state_durations import (
     compute_work_item_state_durations_daily,
 )
 from metrics.hotspots import compute_file_hotspots
-from metrics.schemas import CommitStatRow, PullRequestRow, PullRequestReviewRow
+from metrics.quality import compute_rework_churn_ratio, compute_single_owner_file_ratio
+from metrics.reviews import compute_review_edges_daily
+from metrics.schemas import (
+    CommitStatRow,
+    PullRequestRow,
+    PullRequestReviewRow,
+    PipelineRunRow,
+    DeploymentRow,
+    IncidentRow,
+)
 from metrics.work_items import (
     DiscoveredRepo,
     fetch_github_project_v2_items,
@@ -25,6 +37,7 @@ from metrics.work_items import (
 )
 from metrics.sinks.clickhouse import ClickHouseMetricsSink
 from metrics.sinks.mongo import MongoMetricsSink
+from metrics.sinks.postgres import PostgresMetricsSink
 from metrics.sinks.sqlite import SQLiteMetricsSink
 from providers.identity import load_identity_resolver
 from providers.status_mapping import load_status_mapping
@@ -59,7 +72,7 @@ def run_daily_metrics_job(
     provider: str = "all",  # all|jira|github|gitlab|none
 ) -> None:
     """
-    Compute and persist daily metrics into ClickHouse/MongoDB (and SQLite for dev).
+    Compute and persist daily metrics into ClickHouse/MongoDB/Postgres (and SQLite for dev).
 
     Source data:
     - git facts are read from the backend pointed to by `db_url`:
@@ -82,18 +95,20 @@ def run_daily_metrics_job(
         raise ValueError("Database URI is required (pass --db or set DB_CONN_STRING).")
 
     backend = detect_db_type(db_url)
-    if backend not in {"clickhouse", "mongo", "sqlite"}:
+    if backend not in {"clickhouse", "mongo", "sqlite", "postgres"}:
         raise ValueError(
             f"Unsupported db backend for daily metrics: {backend}. "
-            f"Use a ClickHouse, MongoDB, or SQLite connection URI."
+            f"Use a ClickHouse, MongoDB, SQLite, or Postgres connection URI."
         )
 
     sink = (sink or "auto").strip().lower()
     if sink == "auto":
         sink = backend
 
-    if sink not in {"clickhouse", "mongo", "sqlite", "both"}:
-        raise ValueError("sink must be one of: auto, clickhouse, mongo, sqlite, both")
+    if sink not in {"clickhouse", "mongo", "sqlite", "postgres", "both"}:
+        raise ValueError(
+            "sink must be one of: auto, clickhouse, mongo, sqlite, postgres, both"
+        )
     if sink != "both" and sink != backend:
         raise ValueError(
             f"sink='{sink}' requires db backend '{sink}', got '{backend}'. "
@@ -149,6 +164,8 @@ def run_daily_metrics_job(
         primary_sink = MongoMetricsSink(db_url, db_name=os.getenv("MONGO_DB_NAME"))
         if sink == "both":
             secondary_sink = ClickHouseMetricsSink(_clickhouse_dsn_from_env())
+    elif backend == "postgres":
+        primary_sink = PostgresMetricsSink(db_url)
     else:
         primary_sink = SQLiteMetricsSink(_normalize_sqlite_url(db_url))
 
@@ -164,6 +181,9 @@ def run_daily_metrics_job(
             elif isinstance(s, MongoMetricsSink):
                 logger.info("Ensuring Mongo indexes")
                 s.ensure_indexes()
+            elif isinstance(s, PostgresMetricsSink):
+                logger.info("Ensuring Postgres tables")
+                s.ensure_tables()
             elif isinstance(s, SQLiteMetricsSink):
                 logger.info("Ensuring SQLite tables")
                 s.ensure_tables()
@@ -187,6 +207,18 @@ def run_daily_metrics_job(
                 "Discovered %d repos from backend for work item ingestion",
                 len(discovered_repos),
             )
+
+            # Inject a default synthetic repo if 'synthetic' is requested but no synthetic repo exists
+            if "synthetic" in provider_set and not any(r.source == "synthetic" for r in discovered_repos):
+                logger.info("Injecting default 'synthetic/demo-repo' for synthetic data generation")
+                discovered_repos.append(
+                    DiscoveredRepo(
+                        repo_id=uuid.uuid4(),
+                        full_name="synthetic/demo-repo",
+                        source="synthetic",
+                        settings={},
+                    )
+                )
 
             if "jira" in provider_set:
                 try:
@@ -296,7 +328,28 @@ def run_daily_metrics_job(
                     repo_id=repo_id,
                     repo_name=repo_name,
                 )
-            elif backend == "sqlite":
+                pipeline_rows = _load_clickhouse_pipeline_runs(
+                    primary_sink.client,
+                    start=start,
+                    end=end,
+                    repo_id=repo_id,
+                    repo_name=repo_name,
+                )
+                deployment_rows = _load_clickhouse_deployments(
+                    primary_sink.client,
+                    start=start,
+                    end=end,
+                    repo_id=repo_id,
+                    repo_name=repo_name,
+                )
+                incident_rows = _load_clickhouse_incidents(
+                    primary_sink.client,
+                    start=start,
+                    end=end,
+                    repo_id=repo_id,
+                    repo_name=repo_name,
+                )
+            elif backend in {"sqlite", "postgres"}:
                 commit_rows, pr_rows = _load_sqlite_rows(
                     primary_sink.engine,
                     start=start,
@@ -305,6 +358,27 @@ def run_daily_metrics_job(
                     repo_name=repo_name,
                 )
                 review_rows = _load_sqlite_reviews(
+                    primary_sink.engine,
+                    start=start,
+                    end=end,
+                    repo_id=repo_id,
+                    repo_name=repo_name,
+                )
+                pipeline_rows = _load_sqlite_pipeline_runs(
+                    primary_sink.engine,
+                    start=start,
+                    end=end,
+                    repo_id=repo_id,
+                    repo_name=repo_name,
+                )
+                deployment_rows = _load_sqlite_deployments(
+                    primary_sink.engine,
+                    start=start,
+                    end=end,
+                    repo_id=repo_id,
+                    repo_name=repo_name,
+                )
+                incident_rows = _load_sqlite_incidents(
                     primary_sink.engine,
                     start=start,
                     end=end,
@@ -320,6 +394,27 @@ def run_daily_metrics_job(
                     repo_name=repo_name,
                 )
                 review_rows = _load_mongo_reviews(
+                    primary_sink.db,
+                    start=start,
+                    end=end,
+                    repo_id=repo_id,
+                    repo_name=repo_name,
+                )
+                pipeline_rows = _load_mongo_pipeline_runs(
+                    primary_sink.db,
+                    start=start,
+                    end=end,
+                    repo_id=repo_id,
+                    repo_name=repo_name,
+                )
+                deployment_rows = _load_mongo_deployments(
+                    primary_sink.db,
+                    start=start,
+                    end=end,
+                    repo_id=repo_id,
+                    repo_name=repo_name,
+                )
+                incident_rows = _load_mongo_incidents(
                     primary_sink.db,
                     start=start,
                     end=end,
@@ -349,17 +444,6 @@ def run_daily_metrics_job(
             for r_id, times in bug_times.items():
                 mttr_by_repo[r_id] = sum(times) / len(times)
 
-            result = compute_daily_metrics(
-                day=d,
-                commit_stat_rows=commit_rows,
-                pull_request_rows=pr_rows,
-                pull_request_review_rows=review_rows,
-                computed_at=computed_at,
-                include_commit_metrics=include_commit_metrics,
-                team_resolver=team_resolver,
-                mttr_by_repo=mttr_by_repo,
-            )
-
             # --- Hotspots (30-day window) ---
             window_days = 30
             h_start = datetime.combine(
@@ -373,7 +457,7 @@ def run_daily_metrics_job(
                     repo_id=repo_id,
                     repo_name=repo_name,
                 )
-            elif backend == "sqlite":
+            elif backend in {"sqlite", "postgres"}:
                 h_commit_rows, _ = _load_sqlite_rows(
                     primary_sink.engine,
                     start=h_start,
@@ -393,6 +477,8 @@ def run_daily_metrics_job(
             # Discover repos for this day if not already done.
             # (In reality, we should iterate over each repo separately or group them).
             active_repos: Set[uuid.UUID] = {r["repo_id"] for r in commit_rows}
+            rework_ratio_by_repo: Dict[uuid.UUID, float] = {}
+            single_owner_ratio_by_repo: Dict[uuid.UUID, float] = {}
             all_file_metrics = []
             for r_id in sorted(active_repos, key=str):
                 all_file_metrics.extend(
@@ -403,6 +489,27 @@ def run_daily_metrics_job(
                         computed_at=computed_at,
                     )
                 )
+                rework_ratio_by_repo[r_id] = compute_rework_churn_ratio(
+                    repo_id=str(r_id),
+                    window_stats=h_commit_rows,
+                )
+                single_owner_ratio_by_repo[r_id] = compute_single_owner_file_ratio(
+                    repo_id=str(r_id),
+                    window_stats=h_commit_rows,
+                )
+
+            result = compute_daily_metrics(
+                day=d,
+                commit_stat_rows=commit_rows,
+                pull_request_rows=pr_rows,
+                pull_request_review_rows=review_rows,
+                computed_at=computed_at,
+                include_commit_metrics=include_commit_metrics,
+                team_resolver=team_resolver,
+                mttr_by_repo=mttr_by_repo,
+                rework_churn_ratio_by_repo=rework_ratio_by_repo,
+                single_owner_file_ratio_by_repo=single_owner_ratio_by_repo,
+            )
 
             team_metrics = compute_team_wellbeing_metrics_daily(
                 day=d,
@@ -418,6 +525,7 @@ def run_daily_metrics_job(
                 compute_work_item_metrics_daily(
                     day=d,
                     work_items=work_items,
+                    transitions=work_item_transitions,
                     computed_at=computed_at,
                     team_resolver=team_resolver,
                 )
@@ -428,6 +536,27 @@ def run_daily_metrics_job(
                 transitions=work_item_transitions,
                 computed_at=computed_at,
                 team_resolver=team_resolver,
+            )
+            review_edges = compute_review_edges_daily(
+                day=d,
+                pull_request_rows=pr_rows,
+                pull_request_review_rows=review_rows,
+                computed_at=computed_at,
+            )
+            cicd_metrics = compute_cicd_metrics_daily(
+                day=d,
+                pipeline_runs=pipeline_rows,
+                computed_at=computed_at,
+            )
+            deploy_metrics = compute_deploy_metrics_daily(
+                day=d,
+                deployments=deployment_rows,
+                computed_at=computed_at,
+            )
+            incident_metrics = compute_incident_metrics_daily(
+                day=d,
+                incidents=incident_rows,
+                computed_at=computed_at,
             )
             logger.info(
                 "Computed derived metrics: repo=%d user=%d commit=%d team=%d wi=%d wi_user=%d wi_facts=%d",
@@ -452,6 +581,10 @@ def run_daily_metrics_job(
                 s.write_work_item_user_metrics(wi_user_metrics)
                 s.write_work_item_cycle_times(wi_cycle_times)
                 s.write_work_item_state_durations(wi_state_durations)
+                s.write_review_edges(review_edges)
+                s.write_cicd_metrics(cicd_metrics)
+                s.write_deploy_metrics(deploy_metrics)
+                s.write_incident_metrics(incident_metrics)
     finally:
         for s in sinks:
             try:
@@ -589,10 +722,18 @@ def _discover_repos(
 
     engine = primary_sink.engine  # type: ignore[attr-defined]
     with Session(engine) as session:
-        q = session.query(Repo)
-        if repo_id is not None:
-            q = q.filter(Repo.id == repo_id)
-        for r in q.all():
+        try:
+            q = session.query(Repo)
+            if repo_id is not None:
+                q = q.filter(Repo.id == repo_id)
+            rows = q.all()
+        except Exception as e:
+            # If table doesn't exist or other error, return empty list
+            # The synthetic injection logic will handle creating a fake repo if needed.
+            logger.warning("Failed to discover repos from SQLite (table might be missing): %s", e)
+            rows = []
+            
+        for r in rows:
             r_settings = getattr(r, "settings", None)
             settings = r_settings if isinstance(r_settings, dict) else {}
             r_tags = getattr(r, "tags", None)
@@ -1026,44 +1167,73 @@ def _load_sqlite_rows(
     commit_rows: List[CommitStatRow] = []
     pr_rows: List[PullRequestRow] = []
 
-    with Session(engine) as session:
-        for (
-            repo_uuid,
-            commit_hash,
-            author_email,
-            author_name,
-            committer_when,
-            file_path,
-            additions,
-            deletions,
-        ) in session.execute(commit_stmt).all():
-            commit_rows.append({
-                "repo_id": repo_uuid,
-                "commit_hash": str(commit_hash),
-                "author_email": author_email,
-                "author_name": author_name,
-                "committer_when": committer_when,
-                "file_path": str(file_path) if file_path else None,
-                "additions": int(additions or 0),
-                "deletions": int(deletions or 0),
-            })
+    try:
+        with Session(engine) as session:
+            try:
+                for (
+                    repo_uuid,
+                    commit_hash,
+                    author_email,
+                    author_name,
+                    committer_when,
+                    file_path,
+                    additions,
+                    deletions,
+                ) in session.execute(commit_stmt).all():
+                    if isinstance(committer_when, str):
+                        try:
+                            committer_when = datetime.fromisoformat(committer_when)
+                        except ValueError:
+                            continue
+                            
+                    commit_rows.append({
+                        "repo_id": repo_uuid,
+                        "commit_hash": str(commit_hash),
+                        "author_email": author_email,
+                        "author_name": author_name,
+                        "committer_when": committer_when,  # type: ignore
+                        "file_path": str(file_path) if file_path else None,
+                        "additions": int(additions or 0),
+                        "deletions": int(deletions or 0),
+                    })
+            except Exception as e:
+                logger.warning("Failed to load git commits from SQLite: %s", e)
 
-        for (
-            repo_uuid,
-            number,
-            author_email,
-            author_name,
-            created_at,
-            merged_at,
-        ) in session.execute(pr_stmt).all():
-            pr_rows.append({
-                "repo_id": repo_uuid,
-                "number": int(number or 0),
-                "author_email": author_email,
-                "author_name": author_name,
-                "created_at": created_at,
-                "merged_at": merged_at,
-            })
+            try:
+                for (
+                    repo_uuid,
+                    number,
+                    author_email,
+                    author_name,
+                    created_at,
+                    merged_at,
+                ) in session.execute(pr_stmt).all():
+                    if isinstance(created_at, str):
+                        try:
+                            created_at = datetime.fromisoformat(created_at)
+                        except ValueError:
+                            continue
+                    
+                    if isinstance(merged_at, str):
+                        try:
+                            merged_at = datetime.fromisoformat(merged_at)
+                        except ValueError:
+                            merged_at = None
+
+                    pr_rows.append({
+                        "repo_id": repo_uuid,
+                        "number": int(number or 0),
+                        "author_email": author_email,
+                        "author_name": author_name,
+                        "created_at": created_at, # type: ignore
+                        "merged_at": merged_at, # type: ignore
+                    })
+            except Exception as e:
+                logger.warning("Failed to load pull requests from SQLite: %s", e)
+                
+    except Exception as e:
+        logger.warning("Failed to access SQLite session: %s", e)
+        return [], []
 
     return commit_rows, pr_rows
 
@@ -1170,18 +1340,437 @@ def _load_sqlite_reviews(
             )
 
         rows: List[PullRequestReviewRow] = []
-        for r in conn.execute(stmt).all():
-            submitted_at = r[3]
-            if isinstance(submitted_at, str):
-                submitted_at = datetime.fromisoformat(
-                    submitted_at.replace("Z", "+00:00")
-                )
+        try:
+            for r in conn.execute(stmt).all():
+                submitted_at = r[3]
+                if isinstance(submitted_at, str):
+                    submitted_at = datetime.fromisoformat(
+                        submitted_at.replace("Z", "+00:00")
+                    )
 
-            rows.append({
-                "repo_id": r[0],
-                "number": int(r[1] or 0),
-                "reviewer": str(r[2]),
-                "submitted_at": submitted_at,
-                "state": str(r[4]),
-            })
+                rows.append({
+                    "repo_id": r[0],
+                    "number": int(r[1] or 0),
+                    "reviewer": str(r[2]),
+                    "submitted_at": submitted_at,
+                    "state": str(r[4]),
+                })
+        except Exception as e:
+            logger.warning("Failed to load pull request reviews from SQLite: %s", e)
+            return []
+            
         return rows
+
+
+def _load_clickhouse_pipeline_runs(
+    client: Any,
+    *,
+    start: datetime,
+    end: datetime,
+    repo_id: Optional[uuid.UUID],
+    repo_name: Optional[str] = None,
+) -> List[PipelineRunRow]:
+    params: Dict[str, Any] = {"start": _naive_utc(start), "end": _naive_utc(end)}
+    repo_filter = ""
+    if repo_id is not None:
+        params["repo_id"] = str(repo_id)
+        repo_filter = " AND repo_id = {repo_id:UUID}"
+    elif repo_name is not None:
+        params["repo_name"] = repo_name
+        repo_filter = " AND repo_id IN (SELECT id FROM repos WHERE repo = {repo_name:String})"
+
+    query = f"""
+    SELECT
+      repo_id,
+      run_id,
+      status,
+      queued_at,
+      started_at,
+      finished_at
+    FROM ci_pipeline_runs
+    WHERE started_at >= {{start:DateTime}} AND started_at < {{end:DateTime}}
+    {repo_filter}
+    """
+    try:
+        rows = _clickhouse_query_dicts(client, query, params)
+    except Exception as exc:
+        logger.warning("Skipping ClickHouse pipeline runs: %s", exc)
+        return []
+
+    results: List[PipelineRunRow] = []
+    for row in rows:
+        repo_uuid = _parse_uuid(row.get("repo_id"))
+        started_at = row.get("started_at")
+        if repo_uuid is None or not isinstance(started_at, datetime):
+            continue
+        results.append({
+            "repo_id": repo_uuid,
+            "run_id": str(row.get("run_id") or ""),
+            "status": row.get("status"),
+            "queued_at": row.get("queued_at")
+            if isinstance(row.get("queued_at"), datetime)
+            else None,
+            "started_at": started_at,
+            "finished_at": row.get("finished_at")
+            if isinstance(row.get("finished_at"), datetime)
+            else None,
+        })
+    return results
+
+
+def _load_clickhouse_deployments(
+    client: Any,
+    *,
+    start: datetime,
+    end: datetime,
+    repo_id: Optional[uuid.UUID],
+    repo_name: Optional[str] = None,
+) -> List[DeploymentRow]:
+    params: Dict[str, Any] = {"start": _naive_utc(start), "end": _naive_utc(end)}
+    repo_filter = ""
+    if repo_id is not None:
+        params["repo_id"] = str(repo_id)
+        repo_filter = " AND repo_id = {repo_id:UUID}"
+    elif repo_name is not None:
+        params["repo_name"] = repo_name
+        repo_filter = " AND repo_id IN (SELECT id FROM repos WHERE repo = {repo_name:String})"
+
+    query = f"""
+    SELECT
+      repo_id,
+      deployment_id,
+      status,
+      environment,
+      started_at,
+      finished_at,
+      deployed_at,
+      merged_at,
+      pull_request_number
+    FROM deployments
+    WHERE deployed_at >= {{start:DateTime}} AND deployed_at < {{end:DateTime}}
+    {repo_filter}
+    """
+    try:
+        rows = _clickhouse_query_dicts(client, query, params)
+    except Exception as exc:
+        logger.warning("Skipping ClickHouse deployments: %s", exc)
+        return []
+
+    results: List[DeploymentRow] = []
+    for row in rows:
+        repo_uuid = _parse_uuid(row.get("repo_id"))
+        if repo_uuid is None:
+            continue
+        results.append({
+            "repo_id": repo_uuid,
+            "deployment_id": str(row.get("deployment_id") or ""),
+            "status": row.get("status"),
+            "environment": row.get("environment"),
+            "started_at": row.get("started_at")
+            if isinstance(row.get("started_at"), datetime)
+            else None,
+            "finished_at": row.get("finished_at")
+            if isinstance(row.get("finished_at"), datetime)
+            else None,
+            "deployed_at": row.get("deployed_at")
+            if isinstance(row.get("deployed_at"), datetime)
+            else None,
+            "merged_at": row.get("merged_at")
+            if isinstance(row.get("merged_at"), datetime)
+            else None,
+            "pull_request_number": int(row.get("pull_request_number") or 0)
+            if row.get("pull_request_number") is not None
+            else None,
+        })
+    return results
+
+
+def _load_clickhouse_incidents(
+    client: Any,
+    *,
+    start: datetime,
+    end: datetime,
+    repo_id: Optional[uuid.UUID],
+    repo_name: Optional[str] = None,
+) -> List[IncidentRow]:
+    params: Dict[str, Any] = {"start": _naive_utc(start), "end": _naive_utc(end)}
+    repo_filter = ""
+    if repo_id is not None:
+        params["repo_id"] = str(repo_id)
+        repo_filter = " AND repo_id = {repo_id:UUID}"
+    elif repo_name is not None:
+        params["repo_name"] = repo_name
+        repo_filter = " AND repo_id IN (SELECT id FROM repos WHERE repo = {repo_name:String})"
+
+    query = f"""
+    SELECT
+      repo_id,
+      incident_id,
+      status,
+      started_at,
+      resolved_at
+    FROM incidents
+    WHERE resolved_at >= {{start:DateTime}} AND resolved_at < {{end:DateTime}}
+    {repo_filter}
+    """
+    try:
+        rows = _clickhouse_query_dicts(client, query, params)
+    except Exception as exc:
+        logger.warning("Skipping ClickHouse incidents: %s", exc)
+        return []
+
+    results: List[IncidentRow] = []
+    for row in rows:
+        repo_uuid = _parse_uuid(row.get("repo_id"))
+        started_at = row.get("started_at")
+        if repo_uuid is None or not isinstance(started_at, datetime):
+            continue
+        results.append({
+            "repo_id": repo_uuid,
+            "incident_id": str(row.get("incident_id") or ""),
+            "status": row.get("status"),
+            "started_at": started_at,
+            "resolved_at": row.get("resolved_at")
+            if isinstance(row.get("resolved_at"), datetime)
+            else None,
+        })
+    return results
+
+
+def _load_mongo_pipeline_runs(
+    db: Any,
+    *,
+    start: datetime,
+    end: datetime,
+    repo_id: Optional[uuid.UUID],
+    repo_name: Optional[str] = None,
+) -> List[PipelineRunRow]:
+    query: Dict[str, Any] = {"started_at": {"$gte": start, "$lt": end}}
+    if repo_id:
+        query["repo_id"] = str(repo_id)
+    elif repo_name:
+        repo_doc = db["repos"].find_one({"repo": repo_name}, {"id": 1, "_id": 1})
+        if repo_doc:
+            query["repo_id"] = str(repo_doc.get("id") or repo_doc.get("_id"))
+        else:
+            return []
+    rows: List[PipelineRunRow] = []
+    for doc in db["ci_pipeline_runs"].find(query):
+        started_at = doc.get("started_at")
+        if not isinstance(started_at, datetime):
+            continue
+        rows.append({
+            "repo_id": uuid.UUID(str(doc["repo_id"])),
+            "run_id": str(doc.get("run_id") or ""),
+            "status": doc.get("status"),
+            "queued_at": doc.get("queued_at")
+            if isinstance(doc.get("queued_at"), datetime)
+            else None,
+            "started_at": started_at,
+            "finished_at": doc.get("finished_at")
+            if isinstance(doc.get("finished_at"), datetime)
+            else None,
+        })
+    return rows
+
+
+def _load_mongo_deployments(
+    db: Any,
+    *,
+    start: datetime,
+    end: datetime,
+    repo_id: Optional[uuid.UUID],
+    repo_name: Optional[str] = None,
+) -> List[DeploymentRow]:
+    query: Dict[str, Any] = {"deployed_at": {"$gte": start, "$lt": end}}
+    if repo_id:
+        query["repo_id"] = str(repo_id)
+    elif repo_name:
+        repo_doc = db["repos"].find_one({"repo": repo_name}, {"id": 1, "_id": 1})
+        if repo_doc:
+            query["repo_id"] = str(repo_doc.get("id") or repo_doc.get("_id"))
+        else:
+            return []
+    rows: List[DeploymentRow] = []
+    for doc in db["deployments"].find(query):
+        rows.append({
+            "repo_id": uuid.UUID(str(doc["repo_id"])),
+            "deployment_id": str(doc.get("deployment_id") or ""),
+            "status": doc.get("status"),
+            "environment": doc.get("environment"),
+            "started_at": doc.get("started_at")
+            if isinstance(doc.get("started_at"), datetime)
+            else None,
+            "finished_at": doc.get("finished_at")
+            if isinstance(doc.get("finished_at"), datetime)
+            else None,
+            "deployed_at": doc.get("deployed_at")
+            if isinstance(doc.get("deployed_at"), datetime)
+            else None,
+            "merged_at": doc.get("merged_at")
+            if isinstance(doc.get("merged_at"), datetime)
+            else None,
+            "pull_request_number": int(doc.get("pull_request_number") or 0)
+            if doc.get("pull_request_number") is not None
+            else None,
+        })
+    return rows
+
+
+def _load_mongo_incidents(
+    db: Any,
+    *,
+    start: datetime,
+    end: datetime,
+    repo_id: Optional[uuid.UUID],
+    repo_name: Optional[str] = None,
+) -> List[IncidentRow]:
+    query: Dict[str, Any] = {"resolved_at": {"$gte": start, "$lt": end}}
+    if repo_id:
+        query["repo_id"] = str(repo_id)
+    elif repo_name:
+        repo_doc = db["repos"].find_one({"repo": repo_name}, {"id": 1, "_id": 1})
+        if repo_doc:
+            query["repo_id"] = str(repo_doc.get("id") or repo_doc.get("_id"))
+        else:
+            return []
+    rows: List[IncidentRow] = []
+    for doc in db["incidents"].find(query):
+        started_at = doc.get("started_at")
+        if not isinstance(started_at, datetime):
+            continue
+        rows.append({
+            "repo_id": uuid.UUID(str(doc["repo_id"])),
+            "incident_id": str(doc.get("incident_id") or ""),
+            "status": doc.get("status"),
+            "started_at": started_at,
+            "resolved_at": doc.get("resolved_at")
+            if isinstance(doc.get("resolved_at"), datetime)
+            else None,
+        })
+    return rows
+
+
+def _load_sqlite_pipeline_runs(
+    engine: Any,
+    *,
+    start: datetime,
+    end: datetime,
+    repo_id: Optional[uuid.UUID],
+    repo_name: Optional[str] = None,
+) -> List[PipelineRunRow]:
+    from sqlalchemy import text
+    query = """
+        SELECT repo_id, run_id, status, queued_at, started_at, finished_at
+        FROM ci_pipeline_runs
+        WHERE started_at >= :start AND started_at < :end
+    """
+    params: Dict[str, Any] = {"start": start, "end": end}
+    if repo_id:
+        query += " AND repo_id = :repo_id"
+        params["repo_id"] = str(repo_id)
+    elif repo_name:
+        query += " AND repo_id IN (SELECT id FROM repos WHERE repo = :repo_name)"
+        params["repo_name"] = repo_name
+    rows: List[PipelineRunRow] = []
+    try:
+        with engine.connect() as conn:
+            for r in conn.execute(text(query), params).all():
+                started_at = r[4]
+                if isinstance(started_at, str):
+                    started_at = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+                rows.append({
+                    "repo_id": uuid.UUID(str(r[0])),
+                    "run_id": str(r[1] or ""),
+                    "status": r[2],
+                    "queued_at": r[3] if isinstance(r[3], datetime) else None,
+                    "started_at": started_at,
+                    "finished_at": r[5] if isinstance(r[5], datetime) else None,
+                })
+    except Exception as exc:
+        logger.warning("Skipping SQLite pipeline runs: %s", exc)
+        return []
+    return rows
+
+
+def _load_sqlite_deployments(
+    engine: Any,
+    *,
+    start: datetime,
+    end: datetime,
+    repo_id: Optional[uuid.UUID],
+    repo_name: Optional[str] = None,
+) -> List[DeploymentRow]:
+    from sqlalchemy import text
+    query = """
+        SELECT repo_id, deployment_id, status, environment, started_at, finished_at, deployed_at, merged_at, pull_request_number
+        FROM deployments
+        WHERE deployed_at >= :start AND deployed_at < :end
+    """
+    params: Dict[str, Any] = {"start": start, "end": end}
+    if repo_id:
+        query += " AND repo_id = :repo_id"
+        params["repo_id"] = str(repo_id)
+    elif repo_name:
+        query += " AND repo_id IN (SELECT id FROM repos WHERE repo = :repo_name)"
+        params["repo_name"] = repo_name
+    rows: List[DeploymentRow] = []
+    try:
+        with engine.connect() as conn:
+            for r in conn.execute(text(query), params).all():
+                rows.append({
+                    "repo_id": uuid.UUID(str(r[0])),
+                    "deployment_id": str(r[1] or ""),
+                    "status": r[2],
+                    "environment": r[3],
+                    "started_at": r[4] if isinstance(r[4], datetime) else None,
+                    "finished_at": r[5] if isinstance(r[5], datetime) else None,
+                    "deployed_at": r[6] if isinstance(r[6], datetime) else None,
+                    "merged_at": r[7] if isinstance(r[7], datetime) else None,
+                    "pull_request_number": int(r[8] or 0) if r[8] is not None else None,
+                })
+    except Exception as exc:
+        logger.warning("Skipping SQLite deployments: %s", exc)
+        return []
+    return rows
+
+
+def _load_sqlite_incidents(
+    engine: Any,
+    *,
+    start: datetime,
+    end: datetime,
+    repo_id: Optional[uuid.UUID],
+    repo_name: Optional[str] = None,
+) -> List[IncidentRow]:
+    from sqlalchemy import text
+    query = """
+        SELECT repo_id, incident_id, status, started_at, resolved_at
+        FROM incidents
+        WHERE resolved_at >= :start AND resolved_at < :end
+    """
+    params: Dict[str, Any] = {"start": start, "end": end}
+    if repo_id:
+        query += " AND repo_id = :repo_id"
+        params["repo_id"] = str(repo_id)
+    elif repo_name:
+        query += " AND repo_id IN (SELECT id FROM repos WHERE repo = :repo_name)"
+        params["repo_name"] = repo_name
+    rows: List[IncidentRow] = []
+    try:
+        with engine.connect() as conn:
+            for r in conn.execute(text(query), params).all():
+                started_at = r[3]
+                if isinstance(started_at, str):
+                    started_at = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+                rows.append({
+                    "repo_id": uuid.UUID(str(r[0])),
+                    "incident_id": str(r[1] or ""),
+                    "status": r[2],
+                    "started_at": started_at,
+                    "resolved_at": r[4] if isinstance(r[4], datetime) else None,
+                })
+    except Exception as exc:
+        logger.warning("Skipping SQLite incidents: %s", exc)
+        return []
+    return rows

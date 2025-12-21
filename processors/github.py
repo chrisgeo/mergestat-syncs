@@ -10,6 +10,9 @@ from models.git import (
     GitFile,
     GitPullRequest,
     GitPullRequestReview,
+    CiPipelineRun,
+    Deployment,
+    Incident,
     Repo,
 )
 from utils import (
@@ -215,6 +218,98 @@ def _fetch_github_prs_sync(connector, owner, repo_name, repo_id, max_prs):
         )
         pr_objects.append(git_pr)
     return pr_objects
+
+
+def _fetch_github_workflow_runs_sync(gh_repo, repo_id, max_runs, since):
+    runs = []
+    if not hasattr(gh_repo, "get_workflow_runs"):
+        return runs
+    try:
+        raw_runs = list(gh_repo.get_workflow_runs()[:max_runs])
+    except Exception as exc:
+        logging.debug("Failed to fetch workflow runs: %s", exc)
+        return runs
+
+    for run in raw_runs:
+        started_at = getattr(run, "run_started_at", None) or getattr(
+            run, "created_at", None
+        )
+        if not isinstance(started_at, datetime):
+            continue
+        if since is not None and started_at.astimezone(timezone.utc) < since:
+            continue
+        finished_at = getattr(run, "updated_at", None)
+        runs.append(
+            CiPipelineRun(
+                repo_id=repo_id,
+                run_id=str(getattr(run, "id", "")),
+                status=getattr(run, "conclusion", None) or getattr(run, "status", None),
+                queued_at=None,
+                started_at=started_at,
+                finished_at=finished_at,
+            )
+        )
+    return runs
+
+
+def _fetch_github_deployments_sync(gh_repo, repo_id, max_deployments, since):
+    deployments = []
+    if not hasattr(gh_repo, "get_deployments"):
+        return deployments
+    try:
+        raw_deployments = list(gh_repo.get_deployments()[:max_deployments])
+    except Exception as exc:
+        logging.debug("Failed to fetch deployments: %s", exc)
+        return deployments
+
+    for dep in raw_deployments:
+        created_at = getattr(dep, "created_at", None)
+        if not isinstance(created_at, datetime):
+            continue
+        if since is not None and created_at.astimezone(timezone.utc) < since:
+            continue
+        deployments.append(
+            Deployment(
+                repo_id=repo_id,
+                deployment_id=str(getattr(dep, "id", "")),
+                status=getattr(dep, "state", None),
+                environment=getattr(dep, "environment", None),
+                started_at=created_at,
+                finished_at=None,
+                deployed_at=created_at,
+                merged_at=None,
+                pull_request_number=None,
+            )
+        )
+    return deployments
+
+
+def _fetch_github_incidents_sync(gh_repo, repo_id, max_issues, since):
+    incidents = []
+    if not hasattr(gh_repo, "get_issues"):
+        return incidents
+    try:
+        raw_issues = list(gh_repo.get_issues(state="all", labels=["incident"])[:max_issues])
+    except Exception as exc:
+        logging.debug("Failed to fetch incident issues: %s", exc)
+        return incidents
+
+    for issue in raw_issues:
+        created_at = getattr(issue, "created_at", None)
+        if not isinstance(created_at, datetime):
+            continue
+        if since is not None and created_at.astimezone(timezone.utc) < since:
+            continue
+        incidents.append(
+            Incident(
+                repo_id=repo_id,
+                incident_id=str(getattr(issue, "id", "")),
+                status=getattr(issue, "state", None),
+                started_at=created_at,
+                resolved_at=getattr(issue, "closed_at", None),
+            )
+        )
+    return incidents
 
 
 def _sync_github_prs_to_store(
@@ -673,6 +768,9 @@ async def process_github_repo(
     token: str,
     fetch_blame: bool = False,
     max_commits: int = 100,
+    sync_cicd: bool = True,
+    sync_deployments: bool = True,
+    sync_incidents: bool = True,
     since: Optional[datetime] = None,
 ) -> None:
     """
@@ -774,6 +872,48 @@ async def process_github_repo(
         )
         logging.info(f"Stored {pr_total} pull requests from GitHub")
 
+        if sync_cicd:
+            logging.info("Fetching CI/CD workflow runs from GitHub...")
+            pipeline_runs = await loop.run_in_executor(
+                None,
+                _fetch_github_workflow_runs_sync,
+                gh_repo,
+                db_repo.id,
+                BATCH_SIZE,
+                since,
+            )
+            if pipeline_runs:
+                await store.insert_ci_pipeline_runs(pipeline_runs)
+                logging.info("Stored %d workflow runs", len(pipeline_runs))
+
+        if sync_deployments:
+            logging.info("Fetching deployments from GitHub...")
+            deployments = await loop.run_in_executor(
+                None,
+                _fetch_github_deployments_sync,
+                gh_repo,
+                db_repo.id,
+                BATCH_SIZE,
+                since,
+            )
+            if deployments:
+                await store.insert_deployments(deployments)
+                logging.info("Stored %d deployments", len(deployments))
+
+        if sync_incidents:
+            logging.info("Fetching incident issues from GitHub...")
+            incidents = await loop.run_in_executor(
+                None,
+                _fetch_github_incidents_sync,
+                gh_repo,
+                db_repo.id,
+                BATCH_SIZE,
+                since,
+            )
+            if incidents:
+                await store.insert_incidents(incidents)
+                logging.info("Stored %d incidents", len(incidents))
+
         # 5. Fetch Blame (Optional & Stubbed)
         if fetch_blame:
             logging.info("Fetching blame data (file list) from GitHub...")
@@ -809,6 +949,9 @@ async def process_github_repos_batch(
     max_commits_per_repo: int = None,
     max_repos: int = None,
     use_async: bool = False,
+    sync_cicd: bool = True,
+    sync_deployments: bool = True,
+    sync_incidents: bool = True,
     since: Optional[datetime] = None,
 ) -> None:
     """
@@ -920,6 +1063,63 @@ async def process_github_repos_batch(
                 e,
             )
             raise
+
+        if sync_cicd:
+            try:
+                pipeline_runs = await loop.run_in_executor(
+                    None,
+                    _fetch_github_workflow_runs_sync,
+                    gh_repo,
+                    db_repo.id,
+                    BATCH_SIZE,
+                    since,
+                )
+                if pipeline_runs:
+                    await store.insert_ci_pipeline_runs(pipeline_runs)
+            except Exception as e:
+                logging.warning(
+                    "Failed to fetch CI/CD runs for GitHub repo %s: %s",
+                    repo_info.full_name,
+                    e,
+                )
+
+        if sync_deployments:
+            try:
+                deployments = await loop.run_in_executor(
+                    None,
+                    _fetch_github_deployments_sync,
+                    gh_repo,
+                    db_repo.id,
+                    BATCH_SIZE,
+                    since,
+                )
+                if deployments:
+                    await store.insert_deployments(deployments)
+            except Exception as e:
+                logging.warning(
+                    "Failed to fetch deployments for GitHub repo %s: %s",
+                    repo_info.full_name,
+                    e,
+                )
+
+        if sync_incidents:
+            try:
+                incidents = await loop.run_in_executor(
+                    None,
+                    _fetch_github_incidents_sync,
+                    gh_repo,
+                    db_repo.id,
+                    BATCH_SIZE,
+                    since,
+                )
+                if incidents:
+                    await store.insert_incidents(incidents)
+            except Exception as e:
+                logging.warning(
+                    "Failed to fetch incidents for GitHub repo %s: %s",
+                    repo_info.full_name,
+                    e,
+                )
 
         if result.stats:
             stat = GitCommitStat(

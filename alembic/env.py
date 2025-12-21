@@ -1,5 +1,4 @@
 import asyncio
-import importlib.util
 import os
 from logging.config import fileConfig
 
@@ -9,20 +8,13 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
 
-# Load models.py directly to avoid conflict with models/ package
+# Load Base from models package.
 try:
-    _spec = importlib.util.spec_from_file_location(
-        "models_module", os.path.join(os.path.dirname(__file__), "..", "models.py")
-    )
-    if _spec is None or _spec.loader is None:
-        raise ImportError("Could not load models.py - spec or loader is None")
-    _models_module = importlib.util.module_from_spec(_spec)
-    _spec.loader.exec_module(_models_module)
-    Base = _models_module.Base
-except (ImportError, AttributeError) as e:
+    from models.git import Base
+except ImportError as e:
     raise ImportError(
-        f"Failed to load Base model from models.py: {e}. "
-        "Ensure models.py exists and defines Base."
+        f"Failed to load Base model from models.git: {e}. "
+        "Ensure models/git.py defines Base."
     ) from e
 
 # this is the Alembic Config object, which provides

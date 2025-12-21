@@ -2,7 +2,9 @@ import asyncio
 import json
 import uuid
 from collections.abc import Iterable
+from dataclasses import asdict
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union
 
 import clickhouse_connect
@@ -23,6 +25,9 @@ from models.git import (
     GitFile,
     GitPullRequest,
     GitPullRequestReview,
+    CiPipelineRun,
+    Deployment,
+    Incident,
     Repo,
 )
 
@@ -537,6 +542,143 @@ class SQLAlchemyStore:
             ],
         )
 
+    async def insert_ci_pipeline_runs(
+        self, runs: List[CiPipelineRun]
+    ) -> None:
+        if not runs:
+            return
+        synced_at_default = datetime.now(timezone.utc)
+        rows: List[Dict[str, Any]] = []
+        for item in runs:
+            if isinstance(item, dict):
+                row = {
+                    "repo_id": item.get("repo_id"),
+                    "run_id": item.get("run_id"),
+                    "status": item.get("status"),
+                    "queued_at": item.get("queued_at"),
+                    "started_at": item.get("started_at"),
+                    "finished_at": item.get("finished_at"),
+                    "_mergestat_synced_at": item.get("_mergestat_synced_at")
+                    or synced_at_default,
+                }
+            else:
+                row = {
+                    "repo_id": getattr(item, "repo_id"),
+                    "run_id": getattr(item, "run_id"),
+                    "status": getattr(item, "status"),
+                    "queued_at": getattr(item, "queued_at", None),
+                    "started_at": getattr(item, "started_at"),
+                    "finished_at": getattr(item, "finished_at", None),
+                    "_mergestat_synced_at": getattr(item, "_mergestat_synced_at", None)
+                    or synced_at_default,
+                }
+            rows.append(row)
+
+        await self._upsert_many(
+            CiPipelineRun,
+            rows,
+            conflict_columns=["repo_id", "run_id"],
+            update_columns=[
+                "status",
+                "queued_at",
+                "started_at",
+                "finished_at",
+                "_mergestat_synced_at",
+            ],
+        )
+
+    async def insert_deployments(self, deployments: List[Deployment]) -> None:
+        if not deployments:
+            return
+        synced_at_default = datetime.now(timezone.utc)
+        rows: List[Dict[str, Any]] = []
+        for item in deployments:
+            if isinstance(item, dict):
+                row = {
+                    "repo_id": item.get("repo_id"),
+                    "deployment_id": item.get("deployment_id"),
+                    "status": item.get("status"),
+                    "environment": item.get("environment"),
+                    "started_at": item.get("started_at"),
+                    "finished_at": item.get("finished_at"),
+                    "deployed_at": item.get("deployed_at"),
+                    "merged_at": item.get("merged_at"),
+                    "pull_request_number": item.get("pull_request_number"),
+                    "_mergestat_synced_at": item.get("_mergestat_synced_at")
+                    or synced_at_default,
+                }
+            else:
+                row = {
+                    "repo_id": getattr(item, "repo_id"),
+                    "deployment_id": getattr(item, "deployment_id"),
+                    "status": getattr(item, "status"),
+                    "environment": getattr(item, "environment", None),
+                    "started_at": getattr(item, "started_at", None),
+                    "finished_at": getattr(item, "finished_at", None),
+                    "deployed_at": getattr(item, "deployed_at", None),
+                    "merged_at": getattr(item, "merged_at", None),
+                    "pull_request_number": getattr(item, "pull_request_number", None),
+                    "_mergestat_synced_at": getattr(item, "_mergestat_synced_at", None)
+                    or synced_at_default,
+                }
+            rows.append(row)
+
+        await self._upsert_many(
+            Deployment,
+            rows,
+            conflict_columns=["repo_id", "deployment_id"],
+            update_columns=[
+                "status",
+                "environment",
+                "started_at",
+                "finished_at",
+                "deployed_at",
+                "merged_at",
+                "pull_request_number",
+                "_mergestat_synced_at",
+            ],
+        )
+
+    async def insert_incidents(self, incidents: List[Incident]) -> None:
+        if not incidents:
+            return
+        synced_at_default = datetime.now(timezone.utc)
+        rows: List[Dict[str, Any]] = []
+        for item in incidents:
+            if isinstance(item, dict):
+                row = {
+                    "repo_id": item.get("repo_id"),
+                    "incident_id": item.get("incident_id"),
+                    "status": item.get("status"),
+                    "started_at": item.get("started_at"),
+                    "resolved_at": item.get("resolved_at"),
+                    "_mergestat_synced_at": item.get("_mergestat_synced_at")
+                    or synced_at_default,
+                }
+            else:
+                row = {
+                    "repo_id": getattr(item, "repo_id"),
+                    "incident_id": getattr(item, "incident_id"),
+                    "status": getattr(item, "status"),
+                    "started_at": getattr(item, "started_at"),
+                    "resolved_at": getattr(item, "resolved_at", None),
+                    "_mergestat_synced_at": getattr(item, "_mergestat_synced_at", None)
+                    or synced_at_default,
+                }
+            rows.append(row)
+
+        await self._upsert_many(
+            Incident,
+            rows,
+            conflict_columns=["repo_id", "incident_id"],
+            update_columns=[
+                "status",
+                "started_at",
+                "resolved_at",
+                "_mergestat_synced_at",
+            ],
+        )
+
 
 class MongoStore:
     """Async storage implementation backed by MongoDB (via Motor)."""
@@ -650,6 +792,133 @@ class MongoStore:
             ),
         )
 
+    async def insert_ci_pipeline_runs(self, runs: List[CiPipelineRun]) -> None:
+        if not runs:
+            return
+        synced_at_default = self._normalize_datetime(datetime.now(timezone.utc))
+        rows: List[Dict[str, Any]] = []
+        for item in runs:
+            if isinstance(item, dict):
+                rows.append({
+                    "repo_id": self._normalize_uuid(item.get("repo_id")),
+                    "run_id": item.get("run_id"),
+                    "status": item.get("status"),
+                    "queued_at": self._normalize_datetime(item.get("queued_at")),
+                    "started_at": self._normalize_datetime(item.get("started_at")),
+                    "finished_at": self._normalize_datetime(item.get("finished_at")),
+                    "_mergestat_synced_at": self._normalize_datetime(
+                        item.get("_mergestat_synced_at") or synced_at_default
+                    ),
+                })
+            else:
+                rows.append({
+                    "repo_id": self._normalize_uuid(getattr(item, "repo_id")),
+                    "run_id": getattr(item, "run_id"),
+                    "status": getattr(item, "status"),
+                    "queued_at": self._normalize_datetime(
+                        getattr(item, "queued_at", None)
+                    ),
+                    "started_at": self._normalize_datetime(
+                        getattr(item, "started_at")
+                    ),
+                    "finished_at": self._normalize_datetime(
+                        getattr(item, "finished_at", None)
+                    ),
+                    "_mergestat_synced_at": self._normalize_datetime(
+                        getattr(item, "_mergestat_synced_at", None) or synced_at_default
+                    ),
+                })
+
+        await self._insert_rows(
+            "ci_pipeline_runs",
+            [
+                "repo_id",
+                "run_id",
+                "status",
+                "queued_at",
+                "started_at",
+                "finished_at",
+                "_mergestat_synced_at",
+            ],
+            rows,
+        )
+
+    async def insert_deployments(self, deployments: List[Deployment]) -> None:
+        if not deployments:
+            return
+        synced_at_default = self._normalize_datetime(datetime.now(timezone.utc))
+        rows: List[Dict[str, Any]] = []
+        for item in deployments:
+            if isinstance(item, dict):
+                rows.append({
+                    "repo_id": self._normalize_uuid(item.get("repo_id")),
+                    "deployment_id": item.get("deployment_id"),
+                    "status": item.get("status"),
+                    "environment": item.get("environment"),
+                    "started_at": self._normalize_datetime(item.get("started_at")),
+                    "finished_at": self._normalize_datetime(item.get("finished_at")),
+                    "deployed_at": self._normalize_datetime(item.get("deployed_at")),
+                    "merged_at": self._normalize_datetime(item.get("merged_at")),
+                    "pull_request_number": item.get("pull_request_number"),
+                    "_mergestat_synced_at": self._normalize_datetime(
+                        item.get("_mergestat_synced_at") or synced_at_default
+                    ),
+                })
+            else:
+                rows.append({
+                    "repo_id": self._normalize_uuid(getattr(item, "repo_id")),
+                    "deployment_id": getattr(item, "deployment_id"),
+                    "status": getattr(item, "status"),
+                    "environment": getattr(item, "environment", None),
+                    "started_at": self._normalize_datetime(
+                        getattr(item, "started_at", None)
+                    ),
+                    "finished_at": self._normalize_datetime(
+                        getattr(item, "finished_at", None)
+                    ),
+                    "deployed_at": self._normalize_datetime(
+                        getattr(item, "deployed_at", None)
+                    ),
+                    "merged_at": self._normalize_datetime(
+                        getattr(item, "merged_at", None)
+                    ),
+                    "pull_request_number": getattr(item, "pull_request_number", None),
+                    "_mergestat_synced_at": self._normalize_datetime(
+                        getattr(item, "_mergestat_synced_at", None) or synced_at_default
+                    ),
+                })
+
+        await self._insert_rows(
+            "deployments",
+            [
+                "repo_id",
+                "deployment_id",
+                "status",
+                "environment",
+                "started_at",
+                "finished_at",
+                "deployed_at",
+                "merged_at",
+                "pull_request_number",
+                "_mergestat_synced_at",
+            ],
+            rows,
+        )
+
+    async def insert_deployments(self, deployments: List[Deployment]) -> None:
+        await self._upsert_many(
+            "deployments",
+            deployments,
+            lambda obj: f"{getattr(obj, 'repo_id')}:{getattr(obj, 'deployment_id')}",
+        )
+
+    async def insert_incidents(self, incidents: List[Incident]) -> None:
+        await self._upsert_many(
+            "incidents",
+            incidents,
+            lambda obj: f"{getattr(obj, 'repo_id')}:{getattr(obj, 'incident_id')}",
+        )
+
     async def _upsert_many(
         self,
         collection: str,
@@ -718,114 +987,20 @@ class ClickHouseStore:
 
     async def _ensure_tables(self) -> None:
         assert self.client is not None
-        stmts = [
-            """
-            CREATE TABLE IF NOT EXISTS repos (
-                id UUID,
-                repo String,
-                ref Nullable(String),
-                created_at DateTime64(3, 'UTC'),
-                settings Nullable(String),
-                tags Nullable(String),
-                _mergestat_synced_at DateTime64(3, 'UTC')
-            ) ENGINE = ReplacingMergeTree(_mergestat_synced_at)
-            ORDER BY (id)
-            """,
-            """
-            CREATE TABLE IF NOT EXISTS git_files (
-                repo_id UUID,
-                path String,
-                executable UInt8,
-                contents Nullable(String),
-                _mergestat_synced_at DateTime64(3, 'UTC')
-            ) ENGINE = ReplacingMergeTree(_mergestat_synced_at)
-            ORDER BY (repo_id, path)
-            """,
-            """
-            CREATE TABLE IF NOT EXISTS git_commits (
-                repo_id UUID,
-                hash String,
-                message Nullable(String),
-                author_name Nullable(String),
-                author_email Nullable(String),
-                author_when DateTime64(3, 'UTC'),
-                committer_name Nullable(String),
-                committer_email Nullable(String),
-                committer_when DateTime64(3, 'UTC'),
-                parents UInt32,
-                _mergestat_synced_at DateTime64(3, 'UTC')
-            ) ENGINE = ReplacingMergeTree(_mergestat_synced_at)
-            ORDER BY (repo_id, hash)
-            """,
-            """
-            CREATE TABLE IF NOT EXISTS git_commit_stats (
-                repo_id UUID,
-                commit_hash String,
-                file_path String,
-                additions Int32,
-                deletions Int32,
-                old_file_mode String,
-                new_file_mode String,
-                _mergestat_synced_at DateTime64(3, 'UTC')
-            ) ENGINE = ReplacingMergeTree(_mergestat_synced_at)
-            ORDER BY (repo_id, commit_hash, file_path)
-            """,
-            """
-            CREATE TABLE IF NOT EXISTS git_blame (
-                repo_id UUID,
-                path String,
-                line_no UInt32,
-                author_email Nullable(String),
-                author_name Nullable(String),
-                author_when Nullable(DateTime64(3, 'UTC')),
-                commit_hash Nullable(String),
-                line Nullable(String),
-                _mergestat_synced_at DateTime64(3, 'UTC')
-            ) ENGINE = ReplacingMergeTree(_mergestat_synced_at)
-            ORDER BY (repo_id, path, line_no)
-            """,
-            """
-            CREATE TABLE IF NOT EXISTS git_pull_requests (
-                repo_id UUID,
-                number UInt32,
-                title Nullable(String),
-                state Nullable(String),
-                author_name Nullable(String),
-                author_email Nullable(String),
-                created_at DateTime64(3, 'UTC'),
-                merged_at Nullable(DateTime64(3, 'UTC')),
-                closed_at Nullable(DateTime64(3, 'UTC')),
-                head_branch Nullable(String),
-                base_branch Nullable(String),
-                additions Nullable(UInt32),
-                deletions Nullable(UInt32),
-                changed_files Nullable(UInt32),
-                first_review_at Nullable(DateTime64(3, 'UTC')),
-                first_comment_at Nullable(DateTime64(3, 'UTC')),
-                changes_requested_count UInt32 DEFAULT 0,
-                reviews_count UInt32 DEFAULT 0,
-                comments_count UInt32 DEFAULT 0,
-                _mergestat_synced_at DateTime64(3, 'UTC')
-            ) ENGINE = ReplacingMergeTree(_mergestat_synced_at)
-            ORDER BY (repo_id, number)
-            """,
-            """
-            CREATE TABLE IF NOT EXISTS git_pull_request_reviews (
-                repo_id UUID,
-                number UInt32,
-                review_id String,
-                reviewer String,
-                state String,
-                submitted_at DateTime64(3, 'UTC'),
-                _mergestat_synced_at DateTime64(3, 'UTC')
-            ) ENGINE = ReplacingMergeTree(_mergestat_synced_at)
-            ORDER BY (repo_id, number, review_id)
-            """,
-        ]
+
+        # Locate migrations directory
+        migrations_dir = Path(__file__).resolve().parent / "migrations" / "clickhouse"
+        if not migrations_dir.exists():
+            return
 
         async with self._lock:
-            for stmt in stmts:
-                await asyncio.to_thread(self.client.command, stmt)
+            for path in sorted(migrations_dir.glob("*.sql")):
+                sql = await asyncio.to_thread(path.read_text, encoding="utf-8")
+                for stmt in sql.split(";"):
+                    stmt = stmt.strip()
+                    if not stmt:
+                        continue
+                    await asyncio.to_thread(self.client.command, stmt)
 
     async def _insert_rows(
         self, table: str, columns: List[str], rows: List[Dict[str, Any]]
@@ -1234,6 +1409,167 @@ class ClickHouseStore:
                 "reviewer",
                 "state",
                 "submitted_at",
+                "_mergestat_synced_at",
+            ],
+            rows,
+        )
+
+    async def insert_ci_pipeline_runs(self, runs: List[CiPipelineRun]) -> None:
+        if not runs:
+            return
+        synced_at_default = self._normalize_datetime(datetime.now(timezone.utc))
+        rows: List[Dict[str, Any]] = []
+        for item in runs:
+            if isinstance(item, dict):
+                rows.append({
+                    "repo_id": self._normalize_uuid(item.get("repo_id")),
+                    "run_id": str(item.get("run_id")),
+                    "status": item.get("status"),
+                    "queued_at": self._normalize_datetime(item.get("queued_at")),
+                    "started_at": self._normalize_datetime(item.get("started_at")),
+                    "finished_at": self._normalize_datetime(item.get("finished_at")),
+                    "_mergestat_synced_at": self._normalize_datetime(
+                        item.get("_mergestat_synced_at") or synced_at_default
+                    ),
+                })
+            else:
+                rows.append({
+                    "repo_id": self._normalize_uuid(getattr(item, "repo_id")),
+                    "run_id": str(getattr(item, "run_id")),
+                    "status": getattr(item, "status", None),
+                    "queued_at": self._normalize_datetime(
+                        getattr(item, "queued_at", None)
+                    ),
+                    "started_at": self._normalize_datetime(
+                        getattr(item, "started_at")
+                    ),
+                    "finished_at": self._normalize_datetime(
+                        getattr(item, "finished_at", None)
+                    ),
+                    "_mergestat_synced_at": self._normalize_datetime(
+                        getattr(item, "_mergestat_synced_at", None) or synced_at_default
+                    ),
+                })
+
+        await self._insert_rows(
+            "ci_pipeline_runs",
+            [
+                "repo_id",
+                "run_id",
+                "status",
+                "queued_at",
+                "started_at",
+                "finished_at",
+                "_mergestat_synced_at",
+            ],
+            rows,
+        )
+
+    async def insert_deployments(self, deployments: List[Deployment]) -> None:
+        if not deployments:
+            return
+        synced_at_default = self._normalize_datetime(datetime.now(timezone.utc))
+        rows: List[Dict[str, Any]] = []
+        for item in deployments:
+            if isinstance(item, dict):
+                rows.append({
+                    "repo_id": self._normalize_uuid(item.get("repo_id")),
+                    "deployment_id": str(item.get("deployment_id")),
+                    "status": item.get("status"),
+                    "environment": item.get("environment"),
+                    "started_at": self._normalize_datetime(item.get("started_at")),
+                    "finished_at": self._normalize_datetime(item.get("finished_at")),
+                    "deployed_at": self._normalize_datetime(item.get("deployed_at")),
+                    "merged_at": self._normalize_datetime(item.get("merged_at")),
+                    "pull_request_number": item.get("pull_request_number"),
+                    "_mergestat_synced_at": self._normalize_datetime(
+                        item.get("_mergestat_synced_at") or synced_at_default
+                    ),
+                })
+            else:
+                rows.append({
+                    "repo_id": self._normalize_uuid(getattr(item, "repo_id")),
+                    "deployment_id": str(getattr(item, "deployment_id")),
+                    "status": getattr(item, "status", None),
+                    "environment": getattr(item, "environment", None),
+                    "started_at": self._normalize_datetime(
+                        getattr(item, "started_at", None)
+                    ),
+                    "finished_at": self._normalize_datetime(
+                        getattr(item, "finished_at", None)
+                    ),
+                    "deployed_at": self._normalize_datetime(
+                        getattr(item, "deployed_at", None)
+                    ),
+                    "merged_at": self._normalize_datetime(
+                        getattr(item, "merged_at", None)
+                    ),
+                    "pull_request_number": getattr(
+                        item, "pull_request_number", None
+                    ),
+                    "_mergestat_synced_at": self._normalize_datetime(
+                        getattr(item, "_mergestat_synced_at", None) or synced_at_default
+                    ),
+                })
+
+        await self._insert_rows(
+            "deployments",
+            [
+                "repo_id",
+                "deployment_id",
+                "status",
+                "environment",
+                "started_at",
+                "finished_at",
+                "deployed_at",
+                "merged_at",
+                "pull_request_number",
+                "_mergestat_synced_at",
+            ],
+            rows,
+        )
+
+    async def insert_incidents(self, incidents: List[Incident]) -> None:
+        if not incidents:
+            return
+        synced_at_default = self._normalize_datetime(datetime.now(timezone.utc))
+        rows: List[Dict[str, Any]] = []
+        for item in incidents:
+            if isinstance(item, dict):
+                rows.append({
+                    "repo_id": self._normalize_uuid(item.get("repo_id")),
+                    "incident_id": str(item.get("incident_id")),
+                    "status": item.get("status"),
+                    "started_at": self._normalize_datetime(item.get("started_at")),
+                    "resolved_at": self._normalize_datetime(item.get("resolved_at")),
+                    "_mergestat_synced_at": self._normalize_datetime(
+                        item.get("_mergestat_synced_at") or synced_at_default
+                    ),
+                })
+            else:
+                rows.append({
+                    "repo_id": self._normalize_uuid(getattr(item, "repo_id")),
+                    "incident_id": str(getattr(item, "incident_id")),
+                    "status": getattr(item, "status", None),
+                    "started_at": self._normalize_datetime(
+                        getattr(item, "started_at")
+                    ),
+                    "resolved_at": self._normalize_datetime(
+                        getattr(item, "resolved_at", None)
+                    ),
+                    "_mergestat_synced_at": self._normalize_datetime(
+                        getattr(item, "_mergestat_synced_at", None) or synced_at_default
+                    ),
+                })
+
+        await self._insert_rows(
+            "incidents",
+            [
+                "repo_id",
+                "incident_id",
+                "status",
+                "started_at",
+                "resolved_at",
                 "_mergestat_synced_at",
             ],
             rows,

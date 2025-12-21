@@ -17,6 +17,10 @@ from metrics.schemas import (
     WorkItemMetricsDailyRecord,
     WorkItemStateDurationDailyRecord,
     WorkItemUserMetricsDailyRecord,
+    ReviewEdgeDailyRecord,
+    CICDMetricsDailyRecord,
+    DeployMetricsDailyRecord,
+    IncidentMetricsDailyRecord,
 )
 
 
@@ -64,6 +68,13 @@ class SQLiteMetricsSink:
               pr_pickup_time_p50_hours REAL,
               large_pr_ratio REAL NOT NULL DEFAULT 0.0,
               pr_rework_ratio REAL NOT NULL DEFAULT 0.0,
+              pr_size_p50_loc REAL,
+              pr_size_p90_loc REAL,
+              pr_comments_per_100_loc REAL,
+              pr_reviews_per_100_loc REAL,
+              rework_churn_ratio_30d REAL NOT NULL DEFAULT 0.0,
+              single_owner_file_ratio_30d REAL NOT NULL DEFAULT 0.0,
+              review_load_top_reviewer_ratio REAL NOT NULL DEFAULT 0.0,
               mttr_hours REAL,
               change_failure_rate REAL NOT NULL DEFAULT 0.0,
               computed_at TEXT NOT NULL,
@@ -98,6 +109,8 @@ class SQLiteMetricsSink:
               review_reciprocity REAL NOT NULL DEFAULT 0.0,
               team_id TEXT,
               team_name TEXT,
+              active_hours REAL NOT NULL DEFAULT 0.0,
+              weekend_days INTEGER NOT NULL DEFAULT 0,
               computed_at TEXT NOT NULL,
               PRIMARY KEY (repo_id, author_email, day)
             )
@@ -163,6 +176,10 @@ class SQLiteMetricsSink:
               wip_age_p90_hours REAL,
               bug_completed_ratio REAL NOT NULL,
               story_points_completed REAL NOT NULL,
+              new_bugs_count INTEGER NOT NULL DEFAULT 0,
+              new_items_count INTEGER NOT NULL DEFAULT 0,
+              defect_intro_rate REAL NOT NULL DEFAULT 0.0,
+              wip_congestion_ratio REAL NOT NULL DEFAULT 0.0,
               computed_at TEXT NOT NULL,
               PRIMARY KEY (provider, day, team_id, work_scope_id)
             )
@@ -214,8 +231,56 @@ class SQLiteMetricsSink:
               status TEXT NOT NULL,
               duration_hours REAL NOT NULL,
               items_touched INTEGER NOT NULL,
+              avg_wip REAL NOT NULL DEFAULT 0.0,
               computed_at TEXT NOT NULL,
               PRIMARY KEY (provider, work_scope_id, team_id, status, day)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS review_edges_daily (
+              repo_id TEXT NOT NULL,
+              day TEXT NOT NULL,
+              reviewer TEXT NOT NULL,
+              author TEXT NOT NULL,
+              reviews_count INTEGER NOT NULL,
+              computed_at TEXT NOT NULL,
+              PRIMARY KEY (repo_id, reviewer, author, day)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS cicd_metrics_daily (
+              repo_id TEXT NOT NULL,
+              day TEXT NOT NULL,
+              pipelines_count INTEGER NOT NULL,
+              success_rate REAL NOT NULL,
+              avg_duration_minutes REAL,
+              p90_duration_minutes REAL,
+              avg_queue_minutes REAL,
+              computed_at TEXT NOT NULL,
+              PRIMARY KEY (repo_id, day)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS deploy_metrics_daily (
+              repo_id TEXT NOT NULL,
+              day TEXT NOT NULL,
+              deployments_count INTEGER NOT NULL,
+              failed_deployments_count INTEGER NOT NULL,
+              deploy_time_p50_hours REAL,
+              lead_time_p50_hours REAL,
+              computed_at TEXT NOT NULL,
+              PRIMARY KEY (repo_id, day)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS incident_metrics_daily (
+              repo_id TEXT NOT NULL,
+              day TEXT NOT NULL,
+              incidents_count INTEGER NOT NULL,
+              mttr_p50_hours REAL,
+              mttr_p90_hours REAL,
+              computed_at TEXT NOT NULL,
+              PRIMARY KEY (repo_id, day)
             )
             """,
             "CREATE INDEX IF NOT EXISTS idx_repo_metrics_daily_day ON repo_metrics_daily(day)",
@@ -225,6 +290,10 @@ class SQLiteMetricsSink:
             "CREATE INDEX IF NOT EXISTS idx_work_item_metrics_daily_day ON work_item_metrics_daily(day)",
             "CREATE INDEX IF NOT EXISTS idx_file_metrics_daily_day ON file_metrics_daily(day)",
             "CREATE INDEX IF NOT EXISTS idx_work_item_state_durations_daily_day ON work_item_state_durations_daily(day)",
+            "CREATE INDEX IF NOT EXISTS idx_review_edges_daily_day ON review_edges_daily(day)",
+            "CREATE INDEX IF NOT EXISTS idx_cicd_metrics_daily_day ON cicd_metrics_daily(day)",
+            "CREATE INDEX IF NOT EXISTS idx_deploy_metrics_daily_day ON deploy_metrics_daily(day)",
+            "CREATE INDEX IF NOT EXISTS idx_incident_metrics_daily_day ON incident_metrics_daily(day)",
         ]
         with self.engine.begin() as conn:
             for stmt in stmts:
@@ -294,6 +363,65 @@ class SQLiteMetricsSink:
                         "ALTER TABLE work_item_cycle_times ADD COLUMN work_scope_id TEXT"
                     )
                 )
+            if not self._table_has_column(conn, "user_metrics_daily", "active_hours"):
+                conn.execute(
+                    text(
+                        "ALTER TABLE user_metrics_daily "
+                        "ADD COLUMN active_hours REAL NOT NULL DEFAULT 0.0"
+                    )
+                )
+            if not self._table_has_column(conn, "user_metrics_daily", "weekend_days"):
+                conn.execute(
+                    text(
+                        "ALTER TABLE user_metrics_daily "
+                        "ADD COLUMN weekend_days INTEGER NOT NULL DEFAULT 0"
+                    )
+                )
+            if not self._table_has_column(
+                conn, "work_item_metrics_daily", "new_bugs_count"
+            ):
+                conn.execute(
+                    text(
+                        "ALTER TABLE work_item_metrics_daily "
+                        "ADD COLUMN new_bugs_count INTEGER NOT NULL DEFAULT 0"
+                    )
+                )
+            if not self._table_has_column(
+                conn, "work_item_metrics_daily", "new_items_count"
+            ):
+                conn.execute(
+                    text(
+                        "ALTER TABLE work_item_metrics_daily "
+                        "ADD COLUMN new_items_count INTEGER NOT NULL DEFAULT 0"
+                    )
+                )
+            if not self._table_has_column(
+                conn, "work_item_metrics_daily", "defect_intro_rate"
+            ):
+                conn.execute(
+                    text(
+                        "ALTER TABLE work_item_metrics_daily "
+                        "ADD COLUMN defect_intro_rate REAL NOT NULL DEFAULT 0.0"
+                    )
+                )
+            if not self._table_has_column(
+                conn, "work_item_metrics_daily", "wip_congestion_ratio"
+            ):
+                conn.execute(
+                    text(
+                        "ALTER TABLE work_item_metrics_daily "
+                        "ADD COLUMN wip_congestion_ratio REAL NOT NULL DEFAULT 0.0"
+                    )
+                )
+            if not self._table_has_column(
+                conn, "work_item_state_durations_daily", "avg_wip"
+            ):
+                conn.execute(
+                    text(
+                        "ALTER TABLE work_item_state_durations_daily "
+                        "ADD COLUMN avg_wip REAL NOT NULL DEFAULT 0.0"
+                    )
+                )
 
             self._wi_metrics_has_work_scope = self._table_has_column(
                 conn, "work_item_metrics_daily", "work_scope_id"
@@ -319,6 +447,13 @@ class SQLiteMetricsSink:
                 ("pr_pickup_time_p50_hours", "REAL"),
                 ("large_pr_ratio", "REAL NOT NULL DEFAULT 0.0"),
                 ("pr_rework_ratio", "REAL NOT NULL DEFAULT 0.0"),
+                ("pr_size_p50_loc", "REAL"),
+                ("pr_size_p90_loc", "REAL"),
+                ("pr_comments_per_100_loc", "REAL"),
+                ("pr_reviews_per_100_loc", "REAL"),
+                ("rework_churn_ratio_30d", "REAL NOT NULL DEFAULT 0.0"),
+                ("single_owner_file_ratio_30d", "REAL NOT NULL DEFAULT 0.0"),
+                ("review_load_top_reviewer_ratio", "REAL NOT NULL DEFAULT 0.0"),
                 ("mttr_hours", "REAL"),
                 ("change_failure_rate", "REAL NOT NULL DEFAULT 0.0"),
             ]:
@@ -368,6 +503,8 @@ class SQLiteMetricsSink:
               pr_cycle_p75_hours, pr_cycle_p90_hours, prs_with_first_review,
               pr_first_review_p50_hours, pr_first_review_p90_hours, pr_review_time_p50_hours, pr_pickup_time_p50_hours,
               large_pr_ratio, pr_rework_ratio,
+              pr_size_p50_loc, pr_size_p90_loc, pr_comments_per_100_loc, pr_reviews_per_100_loc,
+              rework_churn_ratio_30d, single_owner_file_ratio_30d, review_load_top_reviewer_ratio,
               mttr_hours, change_failure_rate,
               computed_at
             ) VALUES (
@@ -376,6 +513,8 @@ class SQLiteMetricsSink:
               :pr_cycle_p75_hours, :pr_cycle_p90_hours, :prs_with_first_review,
               :pr_first_review_p50_hours, :pr_first_review_p90_hours, :pr_review_time_p50_hours, :pr_pickup_time_p50_hours,
               :large_pr_ratio, :pr_rework_ratio,
+              :pr_size_p50_loc, :pr_size_p90_loc, :pr_comments_per_100_loc, :pr_reviews_per_100_loc,
+              :rework_churn_ratio_30d, :single_owner_file_ratio_30d, :review_load_top_reviewer_ratio,
               :mttr_hours, :change_failure_rate,
               :computed_at
             )
@@ -395,6 +534,13 @@ class SQLiteMetricsSink:
               pr_pickup_time_p50_hours=excluded.pr_pickup_time_p50_hours,
               large_pr_ratio=excluded.large_pr_ratio,
               pr_rework_ratio=excluded.pr_rework_ratio,
+              pr_size_p50_loc=excluded.pr_size_p50_loc,
+              pr_size_p90_loc=excluded.pr_size_p90_loc,
+              pr_comments_per_100_loc=excluded.pr_comments_per_100_loc,
+              pr_reviews_per_100_loc=excluded.pr_reviews_per_100_loc,
+              rework_churn_ratio_30d=excluded.rework_churn_ratio_30d,
+              single_owner_file_ratio_30d=excluded.single_owner_file_ratio_30d,
+              review_load_top_reviewer_ratio=excluded.review_load_top_reviewer_ratio,
               mttr_hours=excluded.mttr_hours,
               change_failure_rate=excluded.change_failure_rate,
               computed_at=excluded.computed_at
@@ -416,7 +562,7 @@ class SQLiteMetricsSink:
               pr_cycle_p75_hours, pr_cycle_p90_hours, prs_with_first_review,
               pr_first_review_p50_hours, pr_first_review_p90_hours, pr_review_time_p50_hours, pr_pickup_time_p50_hours,
               reviews_given, changes_requested_given, reviews_received, review_reciprocity, team_id, team_name,
-              computed_at
+              active_hours, weekend_days, computed_at
             ) VALUES (
               :repo_id, :day, :author_email, :commits_count, :loc_added, :loc_deleted,
               :files_changed, :large_commits_count, :avg_commit_size_loc,
@@ -424,7 +570,7 @@ class SQLiteMetricsSink:
               :pr_cycle_p75_hours, :pr_cycle_p90_hours, :prs_with_first_review,
               :pr_first_review_p50_hours, :pr_first_review_p90_hours, :pr_review_time_p50_hours, :pr_pickup_time_p50_hours,
               :reviews_given, :changes_requested_given, :reviews_received, :review_reciprocity, :team_id, :team_name,
-              :computed_at
+              :active_hours, :weekend_days, :computed_at
             )
             ON CONFLICT(repo_id, author_email, day) DO UPDATE SET
               commits_count=excluded.commits_count,
@@ -450,6 +596,8 @@ class SQLiteMetricsSink:
               review_reciprocity=excluded.review_reciprocity,
               team_id=excluded.team_id,
               team_name=excluded.team_name,
+              active_hours=excluded.active_hours,
+              weekend_days=excluded.weekend_days,
               computed_at=excluded.computed_at
             """
         )
@@ -533,6 +681,19 @@ class SQLiteMetricsSink:
             "pr_pickup_time_p50_hours": data.get("pr_pickup_time_p50_hours"),
             "large_pr_ratio": float(data.get("large_pr_ratio", 0.0) or 0.0),
             "pr_rework_ratio": float(data.get("pr_rework_ratio", 0.0) or 0.0),
+            "pr_size_p50_loc": data.get("pr_size_p50_loc"),
+            "pr_size_p90_loc": data.get("pr_size_p90_loc"),
+            "pr_comments_per_100_loc": data.get("pr_comments_per_100_loc"),
+            "pr_reviews_per_100_loc": data.get("pr_reviews_per_100_loc"),
+            "rework_churn_ratio_30d": float(
+                data.get("rework_churn_ratio_30d", 0.0) or 0.0
+            ),
+            "single_owner_file_ratio_30d": float(
+                data.get("single_owner_file_ratio_30d", 0.0) or 0.0
+            ),
+            "review_load_top_reviewer_ratio": float(
+                data.get("review_load_top_reviewer_ratio", 0.0) or 0.0
+            ),
             "mttr_hours": data.get("mttr_hours"),
             "change_failure_rate": float(data.get("change_failure_rate", 0.0) or 0.0),
             "computed_at": _dt_to_sqlite(data["computed_at"]),
@@ -567,6 +728,55 @@ class SQLiteMetricsSink:
             "review_reciprocity": float(data.get("review_reciprocity", 0.0) or 0.0),
             "team_id": data.get("team_id"),
             "team_name": data.get("team_name"),
+            "active_hours": float(data.get("active_hours", 0.0) or 0.0),
+            "weekend_days": int(data.get("weekend_days", 0) or 0),
+            "computed_at": _dt_to_sqlite(data["computed_at"]),
+        }
+
+    def _review_edge_row(self, row: ReviewEdgeDailyRecord) -> dict:
+        data = asdict(row)
+        return {
+            "repo_id": str(data["repo_id"]),
+            "day": data["day"].isoformat(),
+            "reviewer": str(data["reviewer"]),
+            "author": str(data["author"]),
+            "reviews_count": int(data["reviews_count"]),
+            "computed_at": _dt_to_sqlite(data["computed_at"]),
+        }
+
+    def _cicd_row(self, row: CICDMetricsDailyRecord) -> dict:
+        data = asdict(row)
+        return {
+            "repo_id": str(data["repo_id"]),
+            "day": data["day"].isoformat(),
+            "pipelines_count": int(data["pipelines_count"]),
+            "success_rate": float(data["success_rate"]),
+            "avg_duration_minutes": data.get("avg_duration_minutes"),
+            "p90_duration_minutes": data.get("p90_duration_minutes"),
+            "avg_queue_minutes": data.get("avg_queue_minutes"),
+            "computed_at": _dt_to_sqlite(data["computed_at"]),
+        }
+
+    def _deploy_row(self, row: DeployMetricsDailyRecord) -> dict:
+        data = asdict(row)
+        return {
+            "repo_id": str(data["repo_id"]),
+            "day": data["day"].isoformat(),
+            "deployments_count": int(data["deployments_count"]),
+            "failed_deployments_count": int(data["failed_deployments_count"]),
+            "deploy_time_p50_hours": data.get("deploy_time_p50_hours"),
+            "lead_time_p50_hours": data.get("lead_time_p50_hours"),
+            "computed_at": _dt_to_sqlite(data["computed_at"]),
+        }
+
+    def _incident_row(self, row: IncidentMetricsDailyRecord) -> dict:
+        data = asdict(row)
+        return {
+            "repo_id": str(data["repo_id"]),
+            "day": data["day"].isoformat(),
+            "incidents_count": int(data["incidents_count"]),
+            "mttr_p50_hours": data.get("mttr_p50_hours"),
+            "mttr_p90_hours": data.get("mttr_p90_hours"),
             "computed_at": _dt_to_sqlite(data["computed_at"]),
         }
 
@@ -611,12 +821,14 @@ class SQLiteMetricsSink:
                   day, provider, work_scope_id, team_id, team_name, items_started, items_completed, wip_count_end_of_day,
                   items_started_unassigned, items_completed_unassigned, wip_unassigned_end_of_day,
                   cycle_time_p50_hours, cycle_time_p90_hours, lead_time_p50_hours, lead_time_p90_hours,
-                  wip_age_p50_hours, wip_age_p90_hours, bug_completed_ratio, story_points_completed, computed_at
+                  wip_age_p50_hours, wip_age_p90_hours, bug_completed_ratio, story_points_completed,
+                  new_bugs_count, new_items_count, defect_intro_rate, wip_congestion_ratio, computed_at
                 ) VALUES (
                   :day, :provider, :work_scope_id, :team_id, :team_name, :items_started, :items_completed, :wip_count_end_of_day,
                   :items_started_unassigned, :items_completed_unassigned, :wip_unassigned_end_of_day,
                   :cycle_time_p50_hours, :cycle_time_p90_hours, :lead_time_p50_hours, :lead_time_p90_hours,
-                  :wip_age_p50_hours, :wip_age_p90_hours, :bug_completed_ratio, :story_points_completed, :computed_at
+                  :wip_age_p50_hours, :wip_age_p90_hours, :bug_completed_ratio, :story_points_completed,
+                  :new_bugs_count, :new_items_count, :defect_intro_rate, :wip_congestion_ratio, :computed_at
                 )
                 ON CONFLICT(provider, day, team_id, work_scope_id) DO UPDATE SET
                   team_name=excluded.team_name,
@@ -634,6 +846,10 @@ class SQLiteMetricsSink:
                   wip_age_p90_hours=excluded.wip_age_p90_hours,
                   bug_completed_ratio=excluded.bug_completed_ratio,
                   story_points_completed=excluded.story_points_completed,
+                  new_bugs_count=excluded.new_bugs_count,
+                  new_items_count=excluded.new_items_count,
+                  defect_intro_rate=excluded.defect_intro_rate,
+                  wip_congestion_ratio=excluded.wip_congestion_ratio,
                   computed_at=excluded.computed_at
                 """
             )
@@ -645,12 +861,14 @@ class SQLiteMetricsSink:
                   day, provider, repo_id, team_id, team_name, items_started, items_completed, wip_count_end_of_day,
                   items_started_unassigned, items_completed_unassigned, wip_unassigned_end_of_day,
                   cycle_time_p50_hours, cycle_time_p90_hours, lead_time_p50_hours, lead_time_p90_hours,
-                  wip_age_p50_hours, wip_age_p90_hours, bug_completed_ratio, story_points_completed, computed_at
+                  wip_age_p50_hours, wip_age_p90_hours, bug_completed_ratio, story_points_completed,
+                  new_bugs_count, new_items_count, defect_intro_rate, wip_congestion_ratio, computed_at
                 ) VALUES (
                   :day, :provider, :repo_id, :team_id, :team_name, :items_started, :items_completed, :wip_count_end_of_day,
                   :items_started_unassigned, :items_completed_unassigned, :wip_unassigned_end_of_day,
                   :cycle_time_p50_hours, :cycle_time_p90_hours, :lead_time_p50_hours, :lead_time_p90_hours,
-                  :wip_age_p50_hours, :wip_age_p90_hours, :bug_completed_ratio, :story_points_completed, :computed_at
+                  :wip_age_p50_hours, :wip_age_p90_hours, :bug_completed_ratio, :story_points_completed,
+                  :new_bugs_count, :new_items_count, :defect_intro_rate, :wip_congestion_ratio, :computed_at
                 )
                 ON CONFLICT(provider, day, team_id, repo_id) DO UPDATE SET
                   team_name=excluded.team_name,
@@ -668,6 +886,10 @@ class SQLiteMetricsSink:
                   wip_age_p90_hours=excluded.wip_age_p90_hours,
                   bug_completed_ratio=excluded.bug_completed_ratio,
                   story_points_completed=excluded.story_points_completed,
+                  new_bugs_count=excluded.new_bugs_count,
+                  new_items_count=excluded.new_items_count,
+                  defect_intro_rate=excluded.defect_intro_rate,
+                  wip_congestion_ratio=excluded.wip_congestion_ratio,
                   computed_at=excluded.computed_at
                 """
             )
@@ -798,14 +1020,15 @@ class SQLiteMetricsSink:
         stmt = text(
             """
             INSERT INTO work_item_state_durations_daily (
-              day, provider, work_scope_id, team_id, team_name, status, duration_hours, items_touched, computed_at
+              day, provider, work_scope_id, team_id, team_name, status, duration_hours, items_touched, avg_wip, computed_at
             ) VALUES (
-              :day, :provider, :work_scope_id, :team_id, :team_name, :status, :duration_hours, :items_touched, :computed_at
+              :day, :provider, :work_scope_id, :team_id, :team_name, :status, :duration_hours, :items_touched, :avg_wip, :computed_at
             )
             ON CONFLICT(provider, work_scope_id, team_id, status, day) DO UPDATE SET
               team_name=excluded.team_name,
               duration_hours=excluded.duration_hours,
               items_touched=excluded.items_touched,
+              avg_wip=excluded.avg_wip,
               computed_at=excluded.computed_at
             """
         )
@@ -820,5 +1043,94 @@ class SQLiteMetricsSink:
                 "team_name": str(data.get("team_name") or ""),
                 "computed_at": _dt_to_sqlite(data["computed_at"]),
             })
+        with self.engine.begin() as conn:
+            conn.execute(stmt, payload)
+
+    def write_review_edges(self, rows: Sequence[ReviewEdgeDailyRecord]) -> None:
+        if not rows:
+            return
+        stmt = text(
+            """
+            INSERT INTO review_edges_daily (
+              repo_id, day, reviewer, author, reviews_count, computed_at
+            ) VALUES (
+              :repo_id, :day, :reviewer, :author, :reviews_count, :computed_at
+            )
+            ON CONFLICT(repo_id, reviewer, author, day) DO UPDATE SET
+              reviews_count=excluded.reviews_count,
+              computed_at=excluded.computed_at
+            """
+        )
+        payload = [self._review_edge_row(r) for r in rows]
+        with self.engine.begin() as conn:
+            conn.execute(stmt, payload)
+
+    def write_cicd_metrics(self, rows: Sequence[CICDMetricsDailyRecord]) -> None:
+        if not rows:
+            return
+        stmt = text(
+            """
+            INSERT INTO cicd_metrics_daily (
+              repo_id, day, pipelines_count, success_rate, avg_duration_minutes,
+              p90_duration_minutes, avg_queue_minutes, computed_at
+            ) VALUES (
+              :repo_id, :day, :pipelines_count, :success_rate, :avg_duration_minutes,
+              :p90_duration_minutes, :avg_queue_minutes, :computed_at
+            )
+            ON CONFLICT(repo_id, day) DO UPDATE SET
+              pipelines_count=excluded.pipelines_count,
+              success_rate=excluded.success_rate,
+              avg_duration_minutes=excluded.avg_duration_minutes,
+              p90_duration_minutes=excluded.p90_duration_minutes,
+              avg_queue_minutes=excluded.avg_queue_minutes,
+              computed_at=excluded.computed_at
+            """
+        )
+        payload = [self._cicd_row(r) for r in rows]
+        with self.engine.begin() as conn:
+            conn.execute(stmt, payload)
+
+    def write_deploy_metrics(self, rows: Sequence[DeployMetricsDailyRecord]) -> None:
+        if not rows:
+            return
+        stmt = text(
+            """
+            INSERT INTO deploy_metrics_daily (
+              repo_id, day, deployments_count, failed_deployments_count,
+              deploy_time_p50_hours, lead_time_p50_hours, computed_at
+            ) VALUES (
+              :repo_id, :day, :deployments_count, :failed_deployments_count,
+              :deploy_time_p50_hours, :lead_time_p50_hours, :computed_at
+            )
+            ON CONFLICT(repo_id, day) DO UPDATE SET
+              deployments_count=excluded.deployments_count,
+              failed_deployments_count=excluded.failed_deployments_count,
+              deploy_time_p50_hours=excluded.deploy_time_p50_hours,
+              lead_time_p50_hours=excluded.lead_time_p50_hours,
+              computed_at=excluded.computed_at
+            """
+        )
+        payload = [self._deploy_row(r) for r in rows]
+        with self.engine.begin() as conn:
+            conn.execute(stmt, payload)
+
+    def write_incident_metrics(self, rows: Sequence[IncidentMetricsDailyRecord]) -> None:
+        if not rows:
+            return
+        stmt = text(
+            """
+            INSERT INTO incident_metrics_daily (
+              repo_id, day, incidents_count, mttr_p50_hours, mttr_p90_hours, computed_at
+            ) VALUES (
+              :repo_id, :day, :incidents_count, :mttr_p50_hours, :mttr_p90_hours, :computed_at
+            )
+            ON CONFLICT(repo_id, day) DO UPDATE SET
+              incidents_count=excluded.incidents_count,
+              mttr_p50_hours=excluded.mttr_p50_hours,
+              mttr_p90_hours=excluded.mttr_p90_hours,
+              computed_at=excluded.computed_at
+            """
+        )
+        payload = [self._incident_row(r) for r in rows]
         with self.engine.begin() as conn:
             conn.execute(stmt, payload)

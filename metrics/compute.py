@@ -144,6 +144,7 @@ class _UserAgg:
     reviews_given: int = 0
     changes_requested_given: int = 0
     reviews_received: int = 0
+    activity_timestamps: List[datetime] = None  # type: ignore[assignment]
 
     def __post_init__(self) -> None:
         if self.files is None:
@@ -156,6 +157,8 @@ class _UserAgg:
             self.pr_review_times = []
         if self.pr_pickup_times is None:
             self.pr_pickup_times = []
+        if self.activity_timestamps is None:
+            self.activity_timestamps = []
 
 
 def compute_daily_metrics(
@@ -169,6 +172,8 @@ def compute_daily_metrics(
     large_pr_total_loc_threshold: int = 1000,
     team_resolver: Optional[TeamResolver] = None,
     mttr_by_repo: Optional[Dict[uuid.UUID, float]] = None,
+    rework_churn_ratio_by_repo: Optional[Dict[uuid.UUID, float]] = None,
+    single_owner_file_ratio_by_repo: Optional[Dict[uuid.UUID, float]] = None,
 ) -> DailyMetricsResult:
     """
     Compute daily commit/user/repo metrics for a single UTC day.
@@ -227,6 +232,7 @@ def compute_daily_metrics(
         ua.files.update(agg.files)
         if agg.total_loc > 300:
             ua.large_commits_count += 1
+        ua.activity_timestamps.append(agg.committer_when)
 
     # 3) Process PR rows for the day window.
     # 3) Process PR rows for the day window.
@@ -238,6 +244,11 @@ def compute_daily_metrics(
     repo_rework_prs: Dict[uuid.UUID, int] = {}
     repo_revert_prs: Dict[uuid.UUID, int] = {}
     repo_prs_with_first_review: Dict[uuid.UUID, int] = {}
+    repo_pr_sizes: Dict[uuid.UUID, List[int]] = {}
+    repo_pr_loc_totals: Dict[uuid.UUID, int] = {}
+    repo_pr_comment_totals: Dict[uuid.UUID, int] = {}
+    repo_pr_review_totals: Dict[uuid.UUID, int] = {}
+    repo_reviewers: Dict[uuid.UUID, Dict[str, int]] = {}
 
     pr_author_map: Dict[Tuple[uuid.UUID, int], str] = {}
     for pr in pull_request_rows:
@@ -254,10 +265,11 @@ def compute_daily_metrics(
             user_aggs[user_key] = ua
 
         created_at = _to_utc(pr["created_at"])
+        merged_at = pr.get("merged_at")
         if start <= created_at < end:
             ua.prs_authored += 1
+            ua.activity_timestamps.append(created_at)
 
-        merged_at = pr.get("merged_at")
         if merged_at is not None:
             merged_at_utc = _to_utc(merged_at)
             if start <= merged_at_utc < end:
@@ -275,6 +287,19 @@ def compute_daily_metrics(
                 if total_loc >= int(large_pr_total_loc_threshold):
                     repo_large_prs[pr["repo_id"]] = (
                         int(repo_large_prs.get(pr["repo_id"], 0)) + 1
+                    )
+                if total_loc > 0:
+                    repo_pr_sizes.setdefault(pr["repo_id"], []).append(int(total_loc))
+                    repo_pr_loc_totals[pr["repo_id"]] = (
+                        int(repo_pr_loc_totals.get(pr["repo_id"], 0)) + int(total_loc)
+                    )
+                    repo_pr_comment_totals[pr["repo_id"]] = (
+                        int(repo_pr_comment_totals.get(pr["repo_id"], 0))
+                        + int(pr.get("comments_count") or 0)
+                    )
+                    repo_pr_review_totals[pr["repo_id"]] = (
+                        int(repo_pr_review_totals.get(pr["repo_id"], 0))
+                        + int(pr.get("reviews_count") or 0)
                     )
 
                 changes_requested_count = int(pr.get("changes_requested_count") or 0)
@@ -350,6 +375,7 @@ def compute_daily_metrics(
                 user_aggs[(review["repo_id"], reviewer_identity)] = rua
 
             rua.reviews_given += 1
+            rua.activity_timestamps.append(submitted_at)
             if review["state"] == "CHANGES_REQUESTED":
                 rua.changes_requested_given += 1
 
@@ -359,6 +385,9 @@ def compute_daily_metrics(
                 aua = user_aggs.get((review["repo_id"], pr_author))
                 if aua:
                     aua.reviews_received += 1
+
+            reviewers = repo_reviewers.setdefault(review["repo_id"], {})
+            reviewers[reviewer_identity] = int(reviewers.get(reviewer_identity, 0)) + 1
 
     # 4) Finalize user metrics records.
     user_metrics: List[UserMetricsDailyRecord] = []
@@ -396,6 +425,25 @@ def compute_daily_metrics(
         pr_pickup_p50 = (
             _percentile(ua.pr_pickup_times, 50.0) if ua.pr_pickup_times else None
         )
+
+        # Calculate active hours from timestamps
+        active_hours = 0.0
+        if ua.activity_timestamps:
+            # We must sort and ensure they are all in the current day window?
+            # Ideally they are, as we filtered during collection.
+            # But let's be safe and verify connection to day (UTC).
+            # Start/end are already computed at top of function.
+            day_ts = [
+                t for t in ua.activity_timestamps if start <= t <= end
+            ]
+            if len(day_ts) > 1:
+                min_ts = min(day_ts)
+                max_ts = max(day_ts)
+                active_hours = (max_ts - min_ts).total_seconds() / 3600.0
+
+        weekend_days = 0
+        if active_hours > 0 and day.weekday() >= 5:
+            weekend_days = 1
 
         user_metrics.append(
             UserMetricsDailyRecord(
@@ -436,6 +484,8 @@ def compute_daily_metrics(
                 ),
                 team_id=team_id,
                 team_name=team_name,
+                active_hours=float(active_hours),
+                weekend_days=int(weekend_days),
                 computed_at=computed_at_utc,
             )
         )
@@ -466,6 +516,10 @@ def compute_daily_metrics(
         repo_first_reviews = repo_first_review_times.get(repo_id, [])
         repo_review_times_list = repo_review_times.get(repo_id, [])
         repo_pickups = repo_pickup_times.get(repo_id, [])
+        repo_sizes = repo_pr_sizes.get(repo_id, [])
+        repo_loc_total = int(repo_pr_loc_totals.get(repo_id, 0))
+        repo_comment_total = int(repo_pr_comment_totals.get(repo_id, 0))
+        repo_review_total = int(repo_pr_review_totals.get(repo_id, 0))
 
         large_pr_count = int(repo_large_prs.get(repo_id, 0) or 0)
         rework_pr_count = int(repo_rework_prs.get(repo_id, 0) or 0)
@@ -475,6 +529,22 @@ def compute_daily_metrics(
         prs_with_first_review = int(repo_prs_with_first_review.get(repo_id, 0) or 0)
         large_pr_ratio = (large_pr_count / prs_merged) if prs_merged else 0.0
         pr_rework_ratio = (rework_pr_count / prs_merged) if prs_merged else 0.0
+        pr_size_p50 = _percentile(repo_sizes, 50.0) if repo_sizes else None
+        pr_size_p90 = _percentile(repo_sizes, 90.0) if repo_sizes else None
+        pr_comments_per_100_loc = (
+            (repo_comment_total / repo_loc_total) * 100.0 if repo_loc_total else None
+        )
+        pr_reviews_per_100_loc = (
+            (repo_review_total / repo_loc_total) * 100.0 if repo_loc_total else None
+        )
+
+        reviewer_counts = repo_reviewers.get(repo_id, {})
+        total_reviews = sum(reviewer_counts.values())
+        top_reviewer_ratio = (
+            max(reviewer_counts.values()) / total_reviews
+            if total_reviews and reviewer_counts
+            else 0.0
+        )
 
         repo_metrics.append(
             RepoMetricsDailyRecord(
@@ -505,6 +575,25 @@ def compute_daily_metrics(
                 else None,
                 large_pr_ratio=float(large_pr_ratio),
                 pr_rework_ratio=float(pr_rework_ratio),
+                pr_size_p50_loc=float(pr_size_p50) if pr_size_p50 is not None else None,
+                pr_size_p90_loc=float(pr_size_p90) if pr_size_p90 is not None else None,
+                pr_comments_per_100_loc=float(pr_comments_per_100_loc)
+                if pr_comments_per_100_loc is not None
+                else None,
+                pr_reviews_per_100_loc=float(pr_reviews_per_100_loc)
+                if pr_reviews_per_100_loc is not None
+                else None,
+                rework_churn_ratio_30d=float(
+                    rework_churn_ratio_by_repo.get(repo_id, 0.0)
+                    if rework_churn_ratio_by_repo
+                    else 0.0
+                ),
+                single_owner_file_ratio_30d=float(
+                    single_owner_file_ratio_by_repo.get(repo_id, 0.0)
+                    if single_owner_file_ratio_by_repo
+                    else 0.0
+                ),
+                review_load_top_reviewer_ratio=float(top_reviewer_ratio),
                 mttr_hours=mttr_by_repo.get(repo_id) if mttr_by_repo else None,
                 change_failure_rate=float(change_failure_rate),
                 computed_at=computed_at_utc,

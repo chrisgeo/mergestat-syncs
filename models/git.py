@@ -228,6 +228,21 @@ class Repo(Base, GitRepo):
     git_commit_stats = relationship("GitCommitStat", back_populates="repo")
     git_blames = relationship("GitBlame", back_populates="repo")
     git_pull_requests = relationship("GitPullRequest", back_populates="repo")
+    ci_pipeline_runs = relationship(
+        "CiPipelineRun",
+        back_populates="repo",
+        cascade="all, delete-orphan",
+    )
+    deployments = relationship(
+        "Deployment",
+        back_populates="repo",
+        cascade="all, delete-orphan",
+    )
+    incidents = relationship(
+        "Incident",
+        back_populates="repo",
+        cascade="all, delete-orphan",
+    )
 
 
 class GitRef(Base):
@@ -597,3 +612,68 @@ class GitPullRequestReview(Base):
             ondelete="CASCADE",
         ),
     )
+
+
+class CiPipelineRun(Base):
+    __tablename__ = "ci_pipeline_runs"
+    repo_id = Column(
+        GUID,
+        ForeignKey("repos.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    run_id = Column(Text, primary_key=True)
+    status = Column(Text)
+    queued_at = Column(DateTime(timezone=True))
+    started_at = Column(DateTime(timezone=True), nullable=False)
+    finished_at = Column(DateTime(timezone=True))
+    _mergestat_synced_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    repo = relationship("Repo", back_populates="ci_pipeline_runs")
+
+
+class Deployment(Base):
+    __tablename__ = "deployments"
+    repo_id = Column(
+        GUID,
+        ForeignKey("repos.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    deployment_id = Column(Text, primary_key=True)
+    status = Column(Text)
+    environment = Column(Text)
+    started_at = Column(DateTime(timezone=True))
+    finished_at = Column(DateTime(timezone=True))
+    deployed_at = Column(DateTime(timezone=True))
+    merged_at = Column(DateTime(timezone=True))
+    pull_request_number = Column(Integer)
+    _mergestat_synced_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    repo = relationship("Repo", back_populates="deployments")
+
+
+class Incident(Base):
+    __tablename__ = "incidents"
+    repo_id = Column(
+        GUID,
+        ForeignKey("repos.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    incident_id = Column(Text, primary_key=True)
+    status = Column(Text)
+    started_at = Column(DateTime(timezone=True), nullable=False)
+    resolved_at = Column(DateTime(timezone=True))
+    _mergestat_synced_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    repo = relationship("Repo", back_populates="incidents")

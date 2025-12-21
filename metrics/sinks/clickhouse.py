@@ -17,6 +17,10 @@ from metrics.schemas import (
     WorkItemStateDurationDailyRecord,
     WorkItemUserMetricsDailyRecord,
     FileMetricsRecord,
+    ReviewEdgeDailyRecord,
+    CICDMetricsDailyRecord,
+    DeployMetricsDailyRecord,
+    IncidentMetricsDailyRecord,
 )
 
 logger = logging.getLogger(__name__)
@@ -94,6 +98,13 @@ class ClickHouseMetricsSink:
                 "pr_pickup_time_p50_hours",
                 "large_pr_ratio",
                 "pr_rework_ratio",
+                "pr_size_p50_loc",
+                "pr_size_p90_loc",
+                "pr_comments_per_100_loc",
+                "pr_reviews_per_100_loc",
+                "rework_churn_ratio_30d",
+                "single_owner_file_ratio_30d",
+                "review_load_top_reviewer_ratio",
                 "mttr_hours",
                 "change_failure_rate",
                 "computed_at",
@@ -133,6 +144,8 @@ class ClickHouseMetricsSink:
                 "review_reciprocity",
                 "team_id",
                 "team_name",
+                "active_hours",
+                "weekend_days",
                 "computed_at",
             ],
             rows,
@@ -220,6 +233,10 @@ class ClickHouseMetricsSink:
                 "wip_age_p90_hours",
                 "bug_completed_ratio",
                 "story_points_completed",
+                "new_bugs_count",
+                "new_items_count",
+                "defect_intro_rate",
+                "wip_congestion_ratio",
                 "computed_at",
             ],
             rows,
@@ -292,6 +309,74 @@ class ClickHouseMetricsSink:
                 "status",
                 "duration_hours",
                 "items_touched",
+                "avg_wip",
+                "computed_at",
+            ],
+            rows,
+        )
+
+    def write_review_edges(self, rows: Sequence[ReviewEdgeDailyRecord]) -> None:
+        if not rows:
+            return
+        self._insert_rows(
+            "review_edges_daily",
+            [
+                "repo_id",
+                "day",
+                "reviewer",
+                "author",
+                "reviews_count",
+                "computed_at",
+            ],
+            rows,
+        )
+
+    def write_cicd_metrics(self, rows: Sequence[CICDMetricsDailyRecord]) -> None:
+        if not rows:
+            return
+        self._insert_rows(
+            "cicd_metrics_daily",
+            [
+                "repo_id",
+                "day",
+                "pipelines_count",
+                "success_rate",
+                "avg_duration_minutes",
+                "p90_duration_minutes",
+                "avg_queue_minutes",
+                "computed_at",
+            ],
+            rows,
+        )
+
+    def write_deploy_metrics(self, rows: Sequence[DeployMetricsDailyRecord]) -> None:
+        if not rows:
+            return
+        self._insert_rows(
+            "deploy_metrics_daily",
+            [
+                "repo_id",
+                "day",
+                "deployments_count",
+                "failed_deployments_count",
+                "deploy_time_p50_hours",
+                "lead_time_p50_hours",
+                "computed_at",
+            ],
+            rows,
+        )
+
+    def write_incident_metrics(self, rows: Sequence[IncidentMetricsDailyRecord]) -> None:
+        if not rows:
+            return
+        self._insert_rows(
+            "incident_metrics_daily",
+            [
+                "repo_id",
+                "day",
+                "incidents_count",
+                "mttr_p50_hours",
+                "mttr_p90_hours",
                 "computed_at",
             ],
             rows,

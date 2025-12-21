@@ -1,19 +1,28 @@
 {
   "uid": "work-tracking",
   "title": "Work Tracking",
-  "tags": ["mergestat", "developer-health"],
+  "tags": [
+    "mergestat",
+    "developer-health"
+  ],
   "timezone": "utc",
   "schemaVersion": 39,
   "version": 1,
   "refresh": "5m",
-  "time": { "from": "now-30d", "to": "now" },
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
   "templating": {
     "list": [
       {
         "name": "provider",
         "label": "Provider",
         "type": "query",
-        "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "clickhouse"
+        },
         "refresh": 1,
         "query": "SELECT DISTINCT provider AS __text, provider AS __value FROM stats.work_item_metrics_daily ORDER BY provider",
         "multi": true,
@@ -24,7 +33,10 @@
         "name": "team_id",
         "label": "Team",
         "type": "query",
-        "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "clickhouse"
+        },
         "refresh": 1,
         "query": "SELECT DISTINCT ifNull(nullIf(team_id, ''), 'unassigned') AS __text, ifNull(nullIf(team_id, ''), 'unassigned') AS __value FROM stats.work_item_metrics_daily ORDER BY __value",
         "multi": true,
@@ -35,7 +47,10 @@
         "name": "work_scope_id",
         "label": "Work Scope",
         "type": "query",
-        "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "clickhouse"
+        },
         "refresh": 1,
         "query": "SELECT DISTINCT work_scope_id AS __text, work_scope_id AS __value FROM stats.work_item_metrics_daily WHERE work_scope_id != '' ORDER BY work_scope_id",
         "multi": true,
@@ -49,8 +64,16 @@
       "id": 1,
       "type": "timeseries",
       "title": "Completed Work Items / Day",
-      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
       "targets": [
         {
           "refId": "A",
@@ -63,8 +86,16 @@
       "id": 2,
       "type": "timeseries",
       "title": "WIP Count (End of Day)",
-      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
       "targets": [
         {
           "refId": "A",
@@ -78,8 +109,16 @@
       "type": "timeseries",
       "title": "Work Item Cycle Time p50 — hours",
       "description": "Computed from per-item cycle times (requires started_at and completed_at).",
-      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
       "targets": [
         {
           "refId": "A",
@@ -93,8 +132,16 @@
       "type": "timeseries",
       "title": "Work Item Cycle Time p90 — hours",
       "description": "Computed from per-item cycle times (requires started_at and completed_at).",
-      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
       "targets": [
         {
           "refId": "A",
@@ -108,11 +155,24 @@
       "type": "timeseries",
       "title": "Time In Status (hours/day)",
       "description": "Sum of time spent in each normalized status category on each day (requires status transition history; Jira uses changelog).",
-      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
-      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 16 },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
       "fieldConfig": {
         "defaults": {
-          "custom": { "stacking": { "mode": "normal", "group": "A" } }
+          "custom": {
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
         },
         "overrides": []
       },
@@ -129,8 +189,16 @@
       "type": "timeseries",
       "title": "Completed Unassigned Work Items / Day",
       "description": "Count of completed items that had no assignee at completion time.",
-      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 26 },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 26
+      },
       "targets": [
         {
           "refId": "A",

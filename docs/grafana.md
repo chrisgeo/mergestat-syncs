@@ -31,7 +31,9 @@ Dashboards are provisioned automatically into the “Developer Health” folder:
 - Repo Health: `grafana/dashboards/repo_health.json`
 - Code Hotspots: `grafana/dashboards/code_hotspots.json`
 - Work Tracking: `grafana/dashboards/work_tracking.json`
+- Advanced Work Tracking: `grafana/dashboards/advanced_work_tracking.json`
 - Collaboration: `grafana/dashboards/collaboration.json`
+- Quality & Risk: `grafana/dashboards/quality_risk.json`
 - Well-being (team-level): `grafana/dashboards/wellbeing.json`
 
 The Work Tracking dashboard supports filtering by `provider`, `team_id`, and `work_scope_id` (Jira project key / GitHub repo or project board / GitLab project path).
