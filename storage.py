@@ -951,13 +951,6 @@ class MongoStore:
             rows,
         )
 
-    async def insert_ci_pipeline_runs(self, runs: List[CiPipelineRun]) -> None:
-        await self._upsert_many(
-            "ci_pipeline_runs",
-            runs,
-            lambda obj: f"{getattr(obj, 'repo_id')}:{getattr(obj, 'run_id')}",
-        )
-
     async def insert_deployments(self, deployments: List[Deployment]) -> None:
         await self._upsert_many(
             "deployments",
