@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import uuid
 from datetime import date, datetime, timezone
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Sequence
 
 from metrics.schemas import (
     UserMetricsDailyRecord,
