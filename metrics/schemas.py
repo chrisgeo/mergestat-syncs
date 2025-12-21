@@ -132,6 +132,34 @@ class UserMetricsDailyRecord:
     team_id: Optional[str] = None
     team_name: Optional[str] = None
 
+    # New IC/Landscape fields
+    identity_id: Optional[str] = None
+    loc_touched: int = 0
+    prs_opened: int = 0
+    work_items_completed: int = 0
+    work_items_active: int = 0
+    delivery_units: int = 0
+    cycle_p50_hours: float = 0.0
+    cycle_p90_hours: float = 0.0
+
+
+@dataclass(frozen=True)
+class ICLandscapeRollingRecord:
+    repo_id: uuid.UUID
+    as_of_day: date
+    identity_id: str
+    team_id: Optional[str]
+    map_name: str
+    x_raw: float
+    y_raw: float
+    x_norm: float
+    y_norm: float
+    churn_loc_30d: int
+    delivery_units_30d: int
+    cycle_p50_30d_hours: float
+    wip_max_30d: int
+    computed_at: datetime
+
 
 @dataclass(frozen=True)
 class RepoMetricsDailyRecord:

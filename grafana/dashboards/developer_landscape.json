@@ -1,0 +1,108 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "title": "Churn (Loc Touched) vs Throughput (Delivery Units)",
+      "type": "xychart",
+      "datasource": "ClickHouse",
+      "gridPos": { "h": 12, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT \n  x_norm as x,\n  y_norm as y,\n  identity_id as name,\n  team_id\nFROM ic_landscape_rolling_30d\nWHERE \n  map_name = 'churn_throughput'\n  AND as_of_day = toDate(now()) -- specific date selection needed in real usage\n  AND ($team_id = 'All' OR team_id = '$team_id')\nORDER BY delivery_units_30d DESC",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "showPoints": "auto",
+            "pointSize": { "fixed": 5 },
+            "lineWidth": 0
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "seriesMapping": "manual",
+        "xField": "x",
+        "yField": "y"
+      }
+    },
+    {
+      "title": "Cycle Time vs Throughput",
+      "type": "xychart",
+      "datasource": "ClickHouse",
+      "gridPos": { "h": 12, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT \n  x_norm as x,\n  y_norm as y,\n  identity_id as name,\n  team_id\nFROM ic_landscape_rolling_30d\nWHERE \n  map_name = 'cycle_throughput'\n  AND as_of_day = toDate(now())\n  AND ($team_id = 'All' OR team_id = '$team_id')",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "seriesMapping": "manual",
+        "xField": "x",
+        "yField": "y"
+      }
+    },
+    {
+      "title": "WIP vs Throughput",
+      "type": "xychart",
+      "datasource": "ClickHouse",
+      "gridPos": { "h": 12, "w": 12, "x": 0, "y": 12 },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT \n  x_norm as x,\n  y_norm as y,\n  identity_id as name,\n  team_id\nFROM ic_landscape_rolling_30d\nWHERE \n  map_name = 'wip_throughput'\n  AND as_of_day = toDate(now())\n  AND ($team_id = 'All' OR team_id = '$team_id')",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "seriesMapping": "manual",
+        "xField": "x",
+        "yField": "y"
+      }
+    }
+  ],
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["landscape", "ic"],
+  "templating": {
+    "list": [
+      {
+        "current": { "text": "All", "value": "All" },
+        "datasource": "ClickHouse",
+        "definition": "SELECT DISTINCT team_id FROM ic_landscape_rolling_30d ORDER BY 1",
+        "hide": 0,
+        "includeAll": true,
+        "multi": false,
+        "name": "team_id",
+        "options": [],
+        "query": "SELECT DISTINCT team_id FROM ic_landscape_rolling_30d ORDER BY 1",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "title": "Developer Landscape",
+  "uid": "dev-landscape",
+  "version": 1,
+  "weekStart": ""
+}

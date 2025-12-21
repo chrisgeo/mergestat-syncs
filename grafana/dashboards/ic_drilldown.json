@@ -1,0 +1,77 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "panels": [
+    {
+      "title": "Delivery Units Daily",
+      "type": "barchart",
+      "datasource": "ClickHouse",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT day, delivery_units FROM user_metrics_daily WHERE identity_id = '$identity_id' AND $timeFilter ORDER BY day",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "LOC Touched",
+      "type": "timeseries",
+      "datasource": "ClickHouse",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT day, loc_touched FROM user_metrics_daily WHERE identity_id = '$identity_id' AND $timeFilter ORDER BY day",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Cycle Time P50 (Hours)",
+      "type": "timeseries",
+      "datasource": "ClickHouse",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT day, cycle_p50_hours FROM user_metrics_daily WHERE identity_id = '$identity_id' AND $timeFilter ORDER BY day",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "WIP Active",
+      "type": "timeseries",
+      "datasource": "ClickHouse",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT day, work_items_active FROM user_metrics_daily WHERE identity_id = '$identity_id' AND $timeFilter ORDER BY day",
+          "refId": "A"
+        }
+      ]
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": { "text": "All", "value": "All" },
+        "datasource": "ClickHouse",
+        "definition": "SELECT DISTINCT identity_id FROM user_metrics_daily ORDER BY 1",
+        "hide": 0,
+        "includeAll": false,
+        "name": "identity_id",
+        "query": "SELECT DISTINCT identity_id FROM user_metrics_daily ORDER BY 1",
+        "type": "query"
+      }
+    ]
+  },
+  "title": "IC Drilldown",
+  "uid": "ic-drilldown",
+  "version": 1
+}

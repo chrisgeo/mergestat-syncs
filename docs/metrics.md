@@ -224,3 +224,39 @@ It also supports SQLite, reading the same tables and writing metrics tables into
 - ClickHouse uses `clickhouse-connect` (already in `requirements.txt`).
 - MongoDB uses `pymongo` (available via the `motor` dependency in `requirements.txt`).
 - SQLite uses `sqlalchemy` (already in `requirements.txt`).
+
+## IC Metrics & Landscape (v3)
+
+We compute canonical Individual Contributor (IC) metrics and "Developer Landscape" maps to visualize patterns in churn, throughput, and work-in-progress.
+
+**Note:** These metrics are designed for identifying signals and patterns, not for ranking individuals.
+
+### Identity Resolution
+- Users are mapped to a canonical `identity_id` (preferring email) across providers.
+- Configuration: `config/teams.yaml` or `config/team_mapping.yaml`.
+
+### IC Metrics (`user_metrics_daily`)
+Extends the daily user metrics with work tracking and unified throughput signals:
+- `identity_id`: Canonical user identity.
+- `loc_touched`: Sum of additions + deletions.
+- `delivery_units`: `prs_merged` + `work_items_completed`.
+- `work_items_active`: Number of items in progress/review/blocked at end of day.
+- `cycle_p50_hours`: Median cycle time (PRs).
+
+### Landscape Maps (`ic_landscape_rolling_30d`)
+Rolling 30-day metrics normalized by team percentiles (0..1).
+Stored in ClickHouse table `ic_landscape_rolling_30d`.
+
+#### Map 1: Churn vs Throughput
+- **X**: `log(churn_loc_30d)` (rolling 30d sum of LOC touched)
+- **Y**: `delivery_units_30d` (rolling 30d sum of delivery units)
+
+#### Map 2: Cycle Time vs Throughput
+- **X**: `log(cycle_p50_30d_hours)` (median of daily median PR cycle times over 30d)
+- **Y**: `delivery_units_30d`
+
+#### Map 3: WIP vs Throughput
+- **X**: `wip_max_30d` (max active work items over 30d)
+- **Y**: `delivery_units_30d`
+
+Each coordinate (`x_raw`, `y_raw`) is normalized per team into (`x_norm`, `y_norm`) representing the percentile rank within the team.

@@ -13,6 +13,7 @@ This checklist tracks what is complete and what remains to finalize `dev-health-
 - [x] **Storage + Schema**: ClickHouse migrations and sink support for new metrics tables/columns.
 - [x] **CLI Controls**: Flags for `--sync-cicd`, `--sync-deployments`, `--sync-incidents`.
 - [x] **Synthetic fixtures**: CI/CD + deployments + incidents with metrics rollups for ClickHouse.
+- [x] **IC Metrics + Landscape**: Identity resolution, unified UserMetricsDailyRecord, and landscape rolling stats (Churn/Cycle/WIP vs Throughput).
 
 ## Remaining
 

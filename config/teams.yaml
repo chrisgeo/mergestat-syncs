@@ -1,0 +1,6 @@
+teams:
+  - team_id: "example-team"
+    team_name: "Example Team"
+    members:
+      - "user@example.com"
+      - "github:octocat"
