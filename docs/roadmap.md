@@ -29,6 +29,7 @@ This checklist tracks what is complete and what remains to finalize `dev-health-
 - [ ] **Bus factor (true)**: Replace single-owner proxy with contributor coverage model (e.g., 80% rule).
 - [ ] **Predictability index**: Estimated vs. actual story points/time.
 - [ ] **Capacity planning**: Forecast completion using historical throughput.
+- [ ] **Identity Linking**: Reliable mapping of Work Items (Jira/LinearB) to Git commits (e.g. via commit messages or smart matching).
 
 ### Testing + Docs
 - [ ] **Tests for new sinks columns** (ClickHouse + SQLite write paths for Phase 2 + wellbeing).

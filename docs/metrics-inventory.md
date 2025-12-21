@@ -35,7 +35,7 @@ This inventory tracks the implementation status of all metrics defined in the `d
 ## 3. IC Metrics & Landscape (New)
 | Metric | Status | Source/Implementation |
 | :--- | :---: | :--- |
-| IC Throughput | [x] | `delivery_units` (PRs merged + Items completed) in [metrics/compute_ic.py](file:///Users/chris/projects/dev-health-ops/metrics/compute_ic.py) |
+| IC Throughput | [x] | `delivery_units` (PRs merged + Items completed) in [metrics/compute_ic.py](file:///Users/chris/projects/dev-health-ops/metrics/compute_ic.py). Relies on `identity_mapping.yaml`. |
 | IC Churn | [x] | `loc_touched` (Additions + Deletions) in [metrics/compute_ic.py](file:///Users/chris/projects/dev-health-ops/metrics/compute_ic.py) |
 | IC Cycle Time | [x] | `cycle_p50_hours` (PR median cycle time) in [metrics/compute_ic.py](file:///Users/chris/projects/dev-health-ops/metrics/compute_ic.py) |
 | IC Active WIP | [x] | `work_items_active` (Items in progress/review/blocked) in [metrics/compute_ic.py](file:///Users/chris/projects/dev-health-ops/metrics/compute_ic.py) |
