@@ -5,13 +5,16 @@ import logging
 import os
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 from metrics.compute import compute_daily_metrics
 from metrics.compute_wellbeing import compute_team_wellbeing_metrics_daily
 from metrics.compute_work_items import compute_work_item_metrics_daily
-from metrics.compute_work_item_state_durations import compute_work_item_state_durations_daily
-from metrics.schemas import CommitStatRow, PullRequestRow
+from metrics.compute_work_item_state_durations import (
+    compute_work_item_state_durations_daily,
+)
+from metrics.hotspots import compute_file_hotspots
+from metrics.schemas import CommitStatRow, PullRequestRow, PullRequestReviewRow
 from metrics.work_items import (
     DiscoveredRepo,
     fetch_github_project_v2_items,
@@ -50,6 +53,7 @@ def run_daily_metrics_job(
     day: date,
     backfill_days: int,
     repo_id: Optional[uuid.UUID] = None,
+    repo_name: Optional[str] = None,
     include_commit_metrics: bool = True,
     sink: str = "auto",  # auto|clickhouse|mongo|sqlite|both
     provider: str = "all",  # all|jira|github|gitlab|none
@@ -96,7 +100,9 @@ def run_daily_metrics_job(
             "For cross-backend writes use sink='both'."
         )
     if sink == "both" and backend not in {"clickhouse", "mongo"}:
-        raise ValueError("sink='both' is only supported when source backend is clickhouse or mongo")
+        raise ValueError(
+            "sink='both' is only supported when source backend is clickhouse or mongo"
+        )
 
     days = _date_range(day, backfill_days)
     computed_at = datetime.now(timezone.utc)
@@ -120,12 +126,12 @@ def run_daily_metrics_job(
     provider_set = set()
     provider_strict = provider in {"jira", "github", "gitlab"}
     if provider in {"all", "*"}:
-        provider_set = {"jira", "github", "gitlab"}
+        provider_set = {"jira", "github", "gitlab", "synthetic"}
     elif provider in {"none", "off", "skip"}:
         provider_set = set()
     else:
         provider_set = {provider}
-    unknown_providers = provider_set - {"jira", "github", "gitlab"}
+    unknown_providers = provider_set - {"jira", "github", "gitlab", "synthetic"}
     if unknown_providers:
         raise ValueError(f"Unknown provider(s): {sorted(unknown_providers)}")
 
@@ -136,7 +142,9 @@ def run_daily_metrics_job(
     if backend == "clickhouse":
         primary_sink = ClickHouseMetricsSink(db_url)
         if sink == "both":
-            secondary_sink = MongoMetricsSink(_mongo_uri_from_env(), db_name=os.getenv("MONGO_DB_NAME"))
+            secondary_sink = MongoMetricsSink(
+                _mongo_uri_from_env(), db_name=os.getenv("MONGO_DB_NAME")
+            )
     elif backend == "mongo":
         primary_sink = MongoMetricsSink(db_url, db_name=os.getenv("MONGO_DB_NAME"))
         if sink == "both":
@@ -144,7 +152,9 @@ def run_daily_metrics_job(
     else:
         primary_sink = SQLiteMetricsSink(_normalize_sqlite_url(db_url))
 
-    sinks: List[Any] = [primary_sink] + ([secondary_sink] if secondary_sink is not None else [])
+    sinks: List[Any] = [primary_sink] + (
+        [secondary_sink] if secondary_sink is not None else []
+    )
 
     try:
         for s in sinks:
@@ -162,22 +172,32 @@ def run_daily_metrics_job(
         work_item_transitions: List[Any] = []
         if provider_set:
             since_dt = datetime.combine(min(days), time.min, tzinfo=timezone.utc)
-            logger.info("Fetching work items since %s (providers=%s)", since_dt.isoformat(), sorted(provider_set))
+            logger.info(
+                "Fetching work items since %s (providers=%s)",
+                since_dt.isoformat(),
+                sorted(provider_set),
+            )
             discovered_repos = _discover_repos(
                 backend=backend,
                 primary_sink=primary_sink,
                 repo_id=repo_id,
+                repo_name=repo_name,
             )
-            logger.info("Discovered %d repos from backend for work item ingestion", len(discovered_repos))
+            logger.info(
+                "Discovered %d repos from backend for work item ingestion",
+                len(discovered_repos),
+            )
 
             if "jira" in provider_set:
                 try:
                     jira_items, jira_transitions = fetch_jira_work_items(
-                            since=since_dt,
-                            until=datetime.combine(max(days), time.max, tzinfo=timezone.utc),
-                            status_mapping=status_mapping,
-                            identity=identity,
-                        )
+                        since=since_dt,
+                        until=datetime.combine(
+                            max(days), time.max, tzinfo=timezone.utc
+                        ),
+                        status_mapping=status_mapping,
+                        identity=identity,
+                    )
                     work_items.extend(jira_items)
                     work_item_transitions.extend(jira_transitions)
                 except Exception as exc:
@@ -204,10 +224,12 @@ def run_daily_metrics_job(
                 try:
                     projects = parse_github_projects_v2_env()
                     if projects:
-                        project_items, _project_transitions = fetch_github_project_v2_items(
-                            projects=projects,
-                            status_mapping=status_mapping,
-                            identity=identity,
+                        project_items, _project_transitions = (
+                            fetch_github_project_v2_items(
+                                projects=projects,
+                                status_mapping=status_mapping,
+                                identity=identity,
+                            )
                         )
                         # Project item status can override plain issue status.
                         by_id = {w.work_item_id: w for w in work_items}
@@ -220,12 +242,12 @@ def run_daily_metrics_job(
             if "gitlab" in provider_set:
                 try:
                     gitlab_items, gitlab_transitions = fetch_gitlab_work_items(
-                            repos=discovered_repos,
-                            since=since_dt,
-                            status_mapping=status_mapping,
-                            identity=identity,
-                            include_label_events=True,
-                        )
+                        repos=discovered_repos,
+                        since=since_dt,
+                        status_mapping=status_mapping,
+                        identity=identity,
+                        include_label_events=True,
+                    )
                     work_items.extend(gitlab_items)
                     work_item_transitions.extend(gitlab_transitions)
                 except Exception as exc:
@@ -233,8 +255,24 @@ def run_daily_metrics_job(
                         raise
                     logger.warning("Skipping GitLab work items fetch: %s", exc)
 
+            if "synthetic" in provider_set:
+                try:
+                    from metrics.work_items import fetch_synthetic_work_items
+
+                    syn_items, syn_transitions = fetch_synthetic_work_items(
+                        repos=discovered_repos,
+                        days=backfill_days + 1,
+                    )
+                    work_items.extend(syn_items)
+                    work_item_transitions.extend(syn_transitions)
+                except Exception as exc:
+                    logger.warning("Skipping synthetic work items fetch: %s", exc)
+
             logger.info("Work items ready for compute: %d", len(work_items))
-            logger.info("Work item transitions ready for compute: %d", len(work_item_transitions))
+            logger.info(
+                "Work item transitions ready for compute: %d",
+                len(work_item_transitions),
+            )
 
         business_tz = os.getenv("BUSINESS_TIMEZONE", "UTC")
         business_start = int(os.getenv("BUSINESS_HOURS_START", "9"))
@@ -242,29 +280,129 @@ def run_daily_metrics_job(
 
         for d in days:
             logger.info("Computing metrics for day=%s", d.isoformat())
+            start, end = _utc_day_window(d)
             if backend == "clickhouse":
                 commit_rows, pr_rows = _load_clickhouse_rows(
-                    primary_sink.client, day=d, repo_id=repo_id  # type: ignore[attr-defined]
+                    primary_sink.client,
+                    start=start,
+                    end=end,
+                    repo_id=repo_id,
+                    repo_name=repo_name,
+                )
+                review_rows = _load_clickhouse_reviews(
+                    primary_sink.client,
+                    start=start,
+                    end=end,
+                    repo_id=repo_id,
+                    repo_name=repo_name,
                 )
             elif backend == "sqlite":
                 commit_rows, pr_rows = _load_sqlite_rows(
-                    primary_sink.engine, day=d, repo_id=repo_id  # type: ignore[attr-defined]
+                    primary_sink.engine,
+                    start=start,
+                    end=end,
+                    repo_id=repo_id,
+                    repo_name=repo_name,
+                )
+                review_rows = _load_sqlite_reviews(
+                    primary_sink.engine,
+                    start=start,
+                    end=end,
+                    repo_id=repo_id,
+                    repo_name=repo_name,
                 )
             else:
                 commit_rows, pr_rows = _load_mongo_rows(
-                    primary_sink.db, day=d, repo_id=repo_id  # type: ignore[attr-defined]
+                    primary_sink.db,
+                    start=start,
+                    end=end,
+                    repo_id=repo_id,
+                    repo_name=repo_name,
                 )
-            logger.info("Loaded source facts: commits=%d pr_rows=%d", len(commit_rows), len(pr_rows))
+                review_rows = _load_mongo_reviews(
+                    primary_sink.db,
+                    start=start,
+                    end=end,
+                    repo_id=repo_id,
+                    repo_name=repo_name,
+                )
+            logger.info(
+                "Loaded source facts: commits=%d pr_rows=%d",
+                len(commit_rows),
+                len(pr_rows),
+            )
+
+            # --- MTTR (proxied by Bug Cycle Time) ---
+            mttr_by_repo: Dict[uuid.UUID, float] = {}
+            bug_times: Dict[uuid.UUID, List[float]] = {}
+            for item in work_items:
+                if item.type == "bug" and item.completed_at and item.started_at:
+                    start_dt = _to_utc(item.started_at)
+                    comp_dt = _to_utc(item.completed_at)
+                    if start_dt < end and comp_dt >= start:
+                        # Find the repo_id. WorkItem from models/work_items.py has repo_id.
+                        r_id = getattr(item, "repo_id", None)
+                        if r_id:
+                            hours = (comp_dt - start_dt).total_seconds() / 3600.0
+                            bug_times.setdefault(r_id, []).append(hours)
+
+            for r_id, times in bug_times.items():
+                mttr_by_repo[r_id] = sum(times) / len(times)
 
             result = compute_daily_metrics(
                 day=d,
                 commit_stat_rows=commit_rows,
                 pull_request_rows=pr_rows,
-                pull_request_review_rows=[],
+                pull_request_review_rows=review_rows,
                 computed_at=computed_at,
                 include_commit_metrics=include_commit_metrics,
                 team_resolver=team_resolver,
+                mttr_by_repo=mttr_by_repo,
             )
+
+            # --- Hotspots (30-day window) ---
+            window_days = 30
+            h_start = datetime.combine(
+                d - timedelta(days=window_days - 1), time.min, tzinfo=timezone.utc
+            )
+            if backend == "clickhouse":
+                h_commit_rows, _ = _load_clickhouse_rows(
+                    primary_sink.client,
+                    start=h_start,
+                    end=end,
+                    repo_id=repo_id,
+                    repo_name=repo_name,
+                )
+            elif backend == "sqlite":
+                h_commit_rows, _ = _load_sqlite_rows(
+                    primary_sink.engine,
+                    start=h_start,
+                    end=end,
+                    repo_id=repo_id,
+                    repo_name=repo_name,
+                )
+            else:
+                h_commit_rows, _ = _load_mongo_rows(
+                    primary_sink.db,
+                    start=h_start,
+                    end=end,
+                    repo_id=repo_id,
+                    repo_name=repo_name,
+                )
+
+            # Discover repos for this day if not already done.
+            # (In reality, we should iterate over each repo separately or group them).
+            active_repos: Set[uuid.UUID] = {r["repo_id"] for r in commit_rows}
+            all_file_metrics = []
+            for r_id in sorted(active_repos, key=str):
+                all_file_metrics.extend(
+                    compute_file_hotspots(
+                        repo_id=r_id,
+                        day=d,
+                        window_stats=h_commit_rows,
+                        computed_at=computed_at,
+                    )
+                )
 
             team_metrics = compute_team_wellbeing_metrics_daily(
                 day=d,
@@ -276,11 +414,13 @@ def run_daily_metrics_job(
                 business_hours_end=business_end,
             )
 
-            wi_metrics, wi_user_metrics, wi_cycle_times = compute_work_item_metrics_daily(
-                day=d,
-                work_items=work_items,
-                computed_at=computed_at,
-                team_resolver=team_resolver,
+            wi_metrics, wi_user_metrics, wi_cycle_times = (
+                compute_work_item_metrics_daily(
+                    day=d,
+                    work_items=work_items,
+                    computed_at=computed_at,
+                    team_resolver=team_resolver,
+                )
             )
             wi_state_durations = compute_work_item_state_durations_daily(
                 day=d,
@@ -306,6 +446,7 @@ def run_daily_metrics_job(
                 s.write_repo_metrics(result.repo_metrics)
                 s.write_user_metrics(result.user_metrics)
                 s.write_commit_metrics(result.commit_metrics)
+                s.write_file_metrics(all_file_metrics)
                 s.write_team_metrics(team_metrics)
                 s.write_work_item_metrics(wi_metrics)
                 s.write_work_item_user_metrics(wi_user_metrics)
@@ -322,7 +463,9 @@ def run_daily_metrics_job(
 def _mongo_uri_from_env() -> str:
     uri = os.getenv("MONGO_URI") or ""
     if not uri:
-        raise ValueError("MONGO_URI is required for sink='both' when source is ClickHouse")
+        raise ValueError(
+            "MONGO_URI is required for sink='both' when source is ClickHouse"
+        )
     return uri
 
 
@@ -355,7 +498,13 @@ def _safe_json_loads(value: Any) -> Any:
         return None
 
 
-def _discover_repos(*, backend: str, primary_sink: Any, repo_id: Optional[uuid.UUID]) -> List[DiscoveredRepo]:
+def _discover_repos(
+    *,
+    backend: str,
+    primary_sink: Any,
+    repo_id: Optional[uuid.UUID],
+    repo_name: Optional[str] = None,
+) -> List[DiscoveredRepo]:
     """
     Discover repos from the synced backend so work item ingestion can reuse them as sources.
 
@@ -370,6 +519,9 @@ def _discover_repos(*, backend: str, primary_sink: Any, repo_id: Optional[uuid.U
         if repo_id is not None:
             params["repo_id"] = str(repo_id)
             where = "WHERE id = {repo_id:UUID}"
+        elif repo_name is not None:
+            params["repo_name"] = repo_name
+            where = "WHERE repo = {repo_name:String}"
         rows = _clickhouse_query_dicts(
             client,
             f"SELECT id, repo, settings, tags FROM repos {where}",
@@ -410,7 +562,9 @@ def _discover_repos(*, backend: str, primary_sink: Any, repo_id: Optional[uuid.U
             full_name = doc.get("repo")
             if repo_uuid is None or not full_name:
                 continue
-            settings = doc.get("settings") if isinstance(doc.get("settings"), dict) else {}
+            settings = (
+                doc.get("settings") if isinstance(doc.get("settings"), dict) else {}
+            )
             tags = doc.get("tags") if isinstance(doc.get("tags"), list) else []
             source = str((settings or {}).get("source") or "").strip().lower()
             if not source:
@@ -426,7 +580,7 @@ def _discover_repos(*, backend: str, primary_sink: Any, repo_id: Optional[uuid.U
                     settings=settings,
                 )
             )
-        return repos
+        return sorted(repos, key=lambda r: r.full_name)
 
     # sqlite
     from sqlalchemy.orm import Session
@@ -439,8 +593,10 @@ def _discover_repos(*, backend: str, primary_sink: Any, repo_id: Optional[uuid.U
         if repo_id is not None:
             q = q.filter(Repo.id == repo_id)
         for r in q.all():
-            settings = getattr(r, "settings", None) if isinstance(getattr(r, "settings", None), dict) else {}
-            tags = getattr(r, "tags", None) if isinstance(getattr(r, "tags", None), list) else []
+            r_settings = getattr(r, "settings", None)
+            settings = r_settings if isinstance(r_settings, dict) else {}
+            r_tags = getattr(r, "tags", None)
+            tags = r_tags if isinstance(r_tags, list) else []
             source = str((settings or {}).get("source") or "").strip().lower()
             if not source:
                 for t in tags:
@@ -476,6 +632,13 @@ def _naive_utc(dt: datetime) -> datetime:
     return dt.astimezone(timezone.utc).replace(tzinfo=None)
 
 
+def _to_utc(dt: datetime) -> datetime:
+    """Ensure datetime has UTC tzinfo."""
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 def _parse_uuid(value: Any) -> Optional[uuid.UUID]:
     if value is None:
         return None
@@ -487,7 +650,9 @@ def _parse_uuid(value: Any) -> Optional[uuid.UUID]:
         return None
 
 
-def _clickhouse_query_dicts(client: Any, query: str, parameters: Dict[str, Any]) -> List[Dict[str, Any]]:
+def _clickhouse_query_dicts(
+    client: Any, query: str, parameters: Dict[str, Any]
+) -> List[Dict[str, Any]]:
     result = client.query(query, parameters=parameters)
     col_names = list(getattr(result, "column_names", []) or [])
     rows = list(getattr(result, "result_rows", []) or [])
@@ -497,7 +662,12 @@ def _clickhouse_query_dicts(client: Any, query: str, parameters: Dict[str, Any])
 
 
 def _load_clickhouse_rows(
-    client: Any, *, day: date, repo_id: Optional[uuid.UUID]
+    client: Any,
+    *,
+    start: datetime,
+    end: datetime,
+    repo_id: Optional[uuid.UUID],
+    repo_name: Optional[str] = None,
 ) -> Tuple[List[CommitStatRow], List[PullRequestRow]]:
     """
     Load source rows for a single day from ClickHouse.
@@ -507,12 +677,16 @@ def _load_clickhouse_rows(
     - filter commits by `committer_when` inside the day window
     - fetch PRs created/merged within the day window
     """
-    start, end = _utc_day_window(day)
     params: Dict[str, Any] = {"start": _naive_utc(start), "end": _naive_utc(end)}
     repo_filter = ""
     if repo_id is not None:
         params["repo_id"] = str(repo_id)
         repo_filter = " AND c.repo_id = {repo_id:UUID}"
+    elif repo_name is not None:
+        params["repo_name"] = repo_name
+        repo_filter = (
+            " AND c.repo_id IN (SELECT id FROM repos WHERE repo = {repo_name:String})"
+        )
 
     commit_query = f"""
     SELECT
@@ -538,12 +712,20 @@ def _load_clickhouse_rows(
       author_email,
       author_name,
       created_at,
-      merged_at
+      merged_at,
+      first_review_at,
+      first_comment_at,
+      changes_requested_count,
+      reviews_count,
+      comments_count,
+      additions,
+      deletions,
+      changed_files
     FROM git_pull_requests
     WHERE
       (created_at >= {{start:DateTime}} AND created_at < {{end:DateTime}})
       OR (merged_at IS NOT NULL AND merged_at >= {{start:DateTime}} AND merged_at < {{end:DateTime}})
-      {("AND repo_id = {repo_id:UUID}" if repo_id is not None else "")}
+      {repo_filter.replace("c.repo_id", "repo_id") if repo_id or repo_name else ""}
     """
 
     commit_dicts = _clickhouse_query_dicts(client, commit_query, params)
@@ -554,21 +736,23 @@ def _load_clickhouse_rows(
         repo_uuid = _parse_uuid(row.get("repo_id"))
         commit_hash = row.get("commit_hash")
         committer_when = row.get("committer_when")
-        if repo_uuid is None or not commit_hash or not isinstance(committer_when, datetime):
+        if (
+            repo_uuid is None
+            or not commit_hash
+            or not isinstance(committer_when, datetime)
+        ):
             continue
         file_path = row.get("file_path") or None
-        commit_rows.append(
-            {
-                "repo_id": repo_uuid,
-                "commit_hash": str(commit_hash),
-                "author_email": row.get("author_email"),
-                "author_name": row.get("author_name"),
-                "committer_when": committer_when,
-                "file_path": str(file_path) if file_path else None,
-                "additions": int(row.get("additions") or 0),
-                "deletions": int(row.get("deletions") or 0),
-            }
-        )
+        commit_rows.append({
+            "repo_id": repo_uuid,
+            "commit_hash": str(commit_hash),
+            "author_email": row.get("author_email"),
+            "author_name": row.get("author_name"),
+            "committer_when": committer_when,
+            "file_path": str(file_path) if file_path else None,
+            "additions": int(row.get("additions") or 0),
+            "deletions": int(row.get("deletions") or 0),
+        })
 
     pr_rows: List[PullRequestRow] = []
     for row in pr_dicts:
@@ -576,16 +760,28 @@ def _load_clickhouse_rows(
         created_at = row.get("created_at")
         if repo_uuid is None or not isinstance(created_at, datetime):
             continue
-        pr_rows.append(
-            {
-                "repo_id": repo_uuid,
-                "number": int(row.get("number") or 0),
-                "author_email": row.get("author_email"),
-                "author_name": row.get("author_name"),
-                "created_at": created_at,
-                "merged_at": row.get("merged_at") if isinstance(row.get("merged_at"), datetime) else None,
-            }
-        )
+        pr_rows.append({
+            "repo_id": repo_uuid,
+            "number": int(row.get("number") or 0),
+            "author_email": row.get("author_email"),
+            "author_name": row.get("author_name"),
+            "created_at": created_at,
+            "merged_at": row.get("merged_at")
+            if isinstance(row.get("merged_at"), datetime)
+            else None,
+            "first_review_at": row.get("first_review_at")
+            if isinstance(row.get("first_review_at"), datetime)
+            else None,
+            "first_comment_at": row.get("first_comment_at")
+            if isinstance(row.get("first_comment_at"), datetime)
+            else None,
+            "changes_requested_count": int(row.get("changes_requested_count", 0) or 0),
+            "reviews_count": int(row.get("reviews_count", 0) or 0),
+            "comments_count": int(row.get("comments_count", 0) or 0),
+            "additions": int(row.get("additions", 0) or 0),
+            "deletions": int(row.get("deletions", 0) or 0),
+            "changed_files": int(row.get("changed_files", 0) or 0),
+        })
 
     return commit_rows, pr_rows
 
@@ -596,7 +792,12 @@ def _chunked(values: Sequence[str], chunk_size: int) -> Iterable[List[str]]:
 
 
 def _load_mongo_rows(
-    db: Any, *, day: date, repo_id: Optional[uuid.UUID]
+    db: Any,
+    *,
+    start: datetime,
+    end: datetime,
+    repo_id: Optional[uuid.UUID],
+    repo_name: Optional[str] = None,
 ) -> Tuple[List[CommitStatRow], List[PullRequestRow]]:
     """
     Load source rows for a single day from MongoDB.
@@ -607,7 +808,6 @@ def _load_mongo_rows(
     3) query commit_stats for those commits and append real stat rows
     4) query PRs created/merged in the day window
     """
-    start, end = _utc_day_window(day)
     start_naive = _naive_utc(start)
     end_naive = _naive_utc(end)
 
@@ -616,6 +816,13 @@ def _load_mongo_rows(
     }
     if repo_id is not None:
         commit_filter["repo_id"] = str(repo_id)
+    elif repo_name is not None:
+        # Resolve repo_id first
+        repo_doc = db["repos"].find_one({"repo": repo_name}, {"id": 1, "_id": 1})
+        if repo_doc:
+            commit_filter["repo_id"] = str(repo_doc.get("id") or repo_doc.get("_id"))
+        else:
+            return [], []
 
     commit_projection = {
         "repo_id": 1,
@@ -648,18 +855,16 @@ def _load_mongo_rows(
         commit_hashes_by_repo.setdefault(repo_id_str, []).append(commit_hash_str)
 
         # Synthetic row ensures commits with no stats are still counted.
-        commit_rows.append(
-            {
-                "repo_id": repo_uuid,
-                "commit_hash": commit_hash_str,
-                "author_email": meta["author_email"],
-                "author_name": meta["author_name"],
-                "committer_when": meta["committer_when"],
-                "file_path": None,
-                "additions": 0,
-                "deletions": 0,
-            }
-        )
+        commit_rows.append({
+            "repo_id": repo_uuid,
+            "commit_hash": commit_hash_str,
+            "author_email": meta["author_email"],
+            "author_name": meta["author_name"],
+            "committer_when": meta["committer_when"],
+            "file_path": None,
+            "additions": 0,
+            "deletions": 0,
+        })
 
     stat_projection = {
         "repo_id": 1,
@@ -681,18 +886,16 @@ def _load_mongo_rows(
                     continue
 
                 file_path = stat.get("file_path") or None
-                commit_rows.append(
-                    {
-                        "repo_id": meta["repo_uuid"],
-                        "commit_hash": key[1],
-                        "author_email": meta["author_email"],
-                        "author_name": meta["author_name"],
-                        "committer_when": meta["committer_when"],
-                        "file_path": str(file_path) if file_path else None,
-                        "additions": int(stat.get("additions") or 0),
-                        "deletions": int(stat.get("deletions") or 0),
-                    }
-                )
+                commit_rows.append({
+                    "repo_id": meta["repo_uuid"],
+                    "commit_hash": key[1],
+                    "author_email": meta["author_email"],
+                    "author_name": meta["author_name"],
+                    "committer_when": meta["committer_when"],
+                    "file_path": str(file_path) if file_path else None,
+                    "additions": int(stat.get("additions") or 0),
+                    "deletions": int(stat.get("deletions") or 0),
+                })
 
     pr_filter: Dict[str, Any] = {
         "$or": [
@@ -720,22 +923,25 @@ def _load_mongo_rows(
         if repo_uuid is None or not isinstance(created_at, datetime):
             continue
         merged_at = doc.get("merged_at")
-        pr_rows.append(
-            {
-                "repo_id": repo_uuid,
-                "number": int(doc.get("number") or 0),
-                "author_email": doc.get("author_email"),
-                "author_name": doc.get("author_name"),
-                "created_at": created_at,
-                "merged_at": merged_at if isinstance(merged_at, datetime) else None,
-            }
-        )
+        pr_rows.append({
+            "repo_id": repo_uuid,
+            "number": int(doc.get("number") or 0),
+            "author_email": doc.get("author_email"),
+            "author_name": doc.get("author_name"),
+            "created_at": created_at,
+            "merged_at": merged_at if isinstance(merged_at, datetime) else None,
+        })
 
     return commit_rows, pr_rows
 
 
 def _load_sqlite_rows(
-    engine: Any, *, day: date, repo_id: Optional[uuid.UUID]
+    engine: Any,
+    *,
+    start: datetime,
+    end: datetime,
+    repo_id: Optional[uuid.UUID],
+    repo_name: Optional[str] = None,
 ) -> Tuple[List[CommitStatRow], List[PullRequestRow]]:
     """
     Load source rows for a single day from SQLite via SQLAlchemy ORM models.
@@ -748,7 +954,6 @@ def _load_sqlite_rows(
 
     from models.git import GitCommit, GitCommitStat, GitPullRequest
 
-    start, end = _utc_day_window(day)
     start_naive = _naive_utc(start)
     end_naive = _naive_utc(end)
 
@@ -771,10 +976,19 @@ def _load_sqlite_rows(
                 GitCommitStat.commit_hash == GitCommit.hash,
             ),
         )
-        .where(GitCommit.committer_when >= start_naive, GitCommit.committer_when < end_naive)
+        .where(
+            GitCommit.committer_when >= start_naive,
+            GitCommit.committer_when < end_naive,
+        )
     )
     if repo_id is not None:
         commit_stmt = commit_stmt.where(GitCommit.repo_id == repo_id)
+    elif repo_name is not None:
+        from models.git import Repo
+
+        commit_stmt = commit_stmt.join(Repo, GitCommit.repo_id == Repo.id).where(
+            Repo.repo == repo_name
+        )
 
     pr_stmt = (
         select(
@@ -802,6 +1016,12 @@ def _load_sqlite_rows(
     )
     if repo_id is not None:
         pr_stmt = pr_stmt.where(GitPullRequest.repo_id == repo_id)
+    elif repo_name is not None:
+        from models.git import Repo
+
+        pr_stmt = pr_stmt.join(Repo, GitPullRequest.repo_id == Repo.id).where(
+            Repo.repo == repo_name
+        )
 
     commit_rows: List[CommitStatRow] = []
     pr_rows: List[PullRequestRow] = []
@@ -817,18 +1037,16 @@ def _load_sqlite_rows(
             additions,
             deletions,
         ) in session.execute(commit_stmt).all():
-            commit_rows.append(
-                {
-                    "repo_id": repo_uuid,
-                    "commit_hash": str(commit_hash),
-                    "author_email": author_email,
-                    "author_name": author_name,
-                    "committer_when": committer_when,
-                    "file_path": str(file_path) if file_path else None,
-                    "additions": int(additions or 0),
-                    "deletions": int(deletions or 0),
-                }
-            )
+            commit_rows.append({
+                "repo_id": repo_uuid,
+                "commit_hash": str(commit_hash),
+                "author_email": author_email,
+                "author_name": author_name,
+                "committer_when": committer_when,
+                "file_path": str(file_path) if file_path else None,
+                "additions": int(additions or 0),
+                "deletions": int(deletions or 0),
+            })
 
         for (
             repo_uuid,
@@ -838,15 +1056,132 @@ def _load_sqlite_rows(
             created_at,
             merged_at,
         ) in session.execute(pr_stmt).all():
-            pr_rows.append(
-                {
-                    "repo_id": repo_uuid,
-                    "number": int(number or 0),
-                    "author_email": author_email,
-                    "author_name": author_name,
-                    "created_at": created_at,
-                    "merged_at": merged_at,
-                }
-            )
+            pr_rows.append({
+                "repo_id": repo_uuid,
+                "number": int(number or 0),
+                "author_email": author_email,
+                "author_name": author_name,
+                "created_at": created_at,
+                "merged_at": merged_at,
+            })
 
     return commit_rows, pr_rows
+
+
+def _load_clickhouse_reviews(
+    client,
+    start: datetime,
+    end: datetime,
+    repo_id: Optional[uuid.UUID] = None,
+    repo_name: Optional[str] = None,
+) -> List[PullRequestReviewRow]:
+    # Simple query for clickhouse-connect
+    sql = """
+        SELECT repo_id, number, reviewer, submitted_at, state
+        FROM git_pull_request_reviews
+        WHERE submitted_at >= %(start)s AND submitted_at < %(end)s
+    """
+    params = {"start": start, "end": end}
+    if repo_id:
+        sql += " AND repo_id = %(repo_id)s"
+        params["repo_id"] = str(repo_id)
+    elif repo_name:
+        sql += " AND repo_id IN (SELECT id FROM repos WHERE repo = %(repo_name)s)"
+        params["repo_name"] = repo_name
+
+    result = client.query(sql, parameters=params)
+    rows: List[PullRequestReviewRow] = []
+    for r in result.named_results():
+        submitted_at = r["submitted_at"]
+        if isinstance(submitted_at, str):
+            submitted_at = datetime.fromisoformat(submitted_at.replace("Z", "+00:00"))
+
+        rows.append({
+            "repo_id": uuid.UUID(str(r["repo_id"])),
+            "number": int(r["number"]),
+            "reviewer": str(r["reviewer"]),
+            "submitted_at": submitted_at,
+            "state": str(r["state"]),
+        })
+    return rows
+
+
+def _load_mongo_reviews(
+    db,
+    start: datetime,
+    end: datetime,
+    repo_id: Optional[uuid.UUID] = None,
+    repo_name: Optional[str] = None,
+) -> List[PullRequestReviewRow]:
+    query = {"submitted_at": {"$gte": start, "$lt": end}}
+    if repo_id:
+        query["repo_id"] = str(repo_id)
+    elif repo_name:
+        repo_doc = db["repos"].find_one({"repo": repo_name}, {"id": 1, "_id": 1})
+        if repo_doc:
+            query["repo_id"] = str(repo_doc.get("id") or repo_doc.get("_id"))
+        else:
+            return []
+
+    rows: List[PullRequestReviewRow] = []
+    for doc in db["git_pull_request_reviews"].find(query):
+        submitted_at = doc["submitted_at"]
+        if isinstance(submitted_at, str):
+            submitted_at = datetime.fromisoformat(submitted_at.replace("Z", "+00:00"))
+
+        rows.append({
+            "repo_id": uuid.UUID(str(doc["repo_id"])),
+            "number": int(doc["number"]),
+            "reviewer": str(doc["reviewer"]),
+            "submitted_at": submitted_at,
+            "state": str(doc["state"]),
+        })
+    return rows
+
+
+def _load_sqlite_reviews(
+    engine,
+    start: datetime,
+    end: datetime,
+    repo_id: Optional[uuid.UUID] = None,
+    repo_name: Optional[str] = None,
+) -> List[PullRequestReviewRow]:
+    from models.git import GitPullRequestReview
+    from sqlalchemy import select
+
+    with engine.connect() as conn:
+        stmt = select(
+            GitPullRequestReview.repo_id,
+            GitPullRequestReview.number,
+            GitPullRequestReview.reviewer,
+            GitPullRequestReview.submitted_at,
+            GitPullRequestReview.state,
+        ).where(
+            GitPullRequestReview.submitted_at >= start,
+            GitPullRequestReview.submitted_at < end,
+        )
+        if repo_id:
+            stmt = stmt.where(GitPullRequestReview.repo_id == repo_id)
+        elif repo_name:
+            from models.git import Repo
+
+            stmt = stmt.join(Repo, GitPullRequestReview.repo_id == Repo.id).where(
+                Repo.repo == repo_name
+            )
+
+        rows: List[PullRequestReviewRow] = []
+        for r in conn.execute(stmt).all():
+            submitted_at = r[3]
+            if isinstance(submitted_at, str):
+                submitted_at = datetime.fromisoformat(
+                    submitted_at.replace("Z", "+00:00")
+                )
+
+            rows.append({
+                "repo_id": r[0],
+                "number": int(r[1] or 0),
+                "reviewer": str(r[2]),
+                "submitted_at": submitted_at,
+                "state": str(r[4]),
+            })
+        return rows

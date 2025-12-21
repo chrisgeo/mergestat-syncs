@@ -92,6 +92,8 @@ class UserMetricsDailyRecord:
     pr_pickup_time_p50_hours: Optional[float] = None
     reviews_given: int = 0
     changes_requested_given: int = 0
+    reviews_received: int = 0
+    review_reciprocity: float = 0.0
 
     # Team dimension (optional).
     team_id: Optional[str] = None
@@ -124,6 +126,22 @@ class RepoMetricsDailyRecord:
     # Quality signals.
     large_pr_ratio: float = 0.0
     pr_rework_ratio: float = 0.0
+
+    # DORA proxies.
+    mttr_hours: Optional[float] = None
+    change_failure_rate: float = 0.0
+
+
+@dataclass(frozen=True)
+class FileMetricsRecord:
+    repo_id: uuid.UUID
+    day: date
+    path: str
+    churn: int
+    contributors: int
+    commits_count: int
+    hotspot_score: float
+    computed_at: datetime
 
 
 @dataclass(frozen=True)
@@ -220,7 +238,12 @@ class DailyMetricsResult:
 
     # Optional expanded outputs (may be empty depending on available inputs).
     team_metrics: List[TeamMetricsDailyRecord] = field(default_factory=list)
+    file_metrics: List[FileMetricsRecord] = field(default_factory=list)
     work_item_metrics: List[WorkItemMetricsDailyRecord] = field(default_factory=list)
-    work_item_user_metrics: List[WorkItemUserMetricsDailyRecord] = field(default_factory=list)
+    work_item_user_metrics: List[WorkItemUserMetricsDailyRecord] = field(
+        default_factory=list
+    )
     work_item_cycle_times: List[WorkItemCycleTimeRecord] = field(default_factory=list)
-    work_item_state_durations: List[WorkItemStateDurationDailyRecord] = field(default_factory=list)
+    work_item_state_durations: List[WorkItemStateDurationDailyRecord] = field(
+        default_factory=list
+    )

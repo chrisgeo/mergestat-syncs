@@ -104,3 +104,15 @@ class FileBlame:
 
     file_path: str
     ranges: List[BlameRange] = field(default_factory=list)
+
+
+@dataclass
+class PullRequestReview:
+    """Represents a review on a Pull Request or Merge Request."""
+
+    id: str
+    reviewer: str
+    state: str
+    submitted_at: Optional[datetime] = None
+    body: Optional[str] = None
+    url: Optional[str] = None

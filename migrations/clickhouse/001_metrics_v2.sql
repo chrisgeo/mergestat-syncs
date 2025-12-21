@@ -18,6 +18,8 @@ CREATE TABLE IF NOT EXISTS repo_metrics_daily (
   pr_pickup_time_p50_hours Nullable(Float64),
   large_pr_ratio Float64,
   pr_rework_ratio Float64,
+  mttr_hours Nullable(Float64),
+  change_failure_rate Float64,
   computed_at DateTime('UTC')
 ) ENGINE MergeTree
 PARTITION BY toYYYYMM(day)
@@ -46,6 +48,8 @@ CREATE TABLE IF NOT EXISTS user_metrics_daily (
   pr_pickup_time_p50_hours Nullable(Float64),
   reviews_given UInt32,
   changes_requested_given UInt32,
+  reviews_received UInt32,
+  review_reciprocity Float64,
   team_id Nullable(String),
   team_name Nullable(String),
   computed_at DateTime('UTC')
@@ -161,6 +165,19 @@ CREATE TABLE IF NOT EXISTS work_item_state_durations_daily (
 PARTITION BY toYYYYMM(day)
 ORDER BY (provider, work_scope_id, team_id, status, day);
 
+CREATE TABLE IF NOT EXISTS file_metrics_daily (
+  repo_id UUID,
+  day Date,
+  path String,
+  churn UInt32,
+  contributors UInt32,
+  commits_count UInt32,
+  hotspot_score Float64,
+  computed_at DateTime('UTC')
+) ENGINE MergeTree
+PARTITION BY toYYYYMM(day)
+ORDER BY (repo_id, day, path);
+
 -- Forward-compatible ALTERs for existing tables created by older versions.
 ALTER TABLE repo_metrics_daily ADD COLUMN IF NOT EXISTS pr_cycle_p75_hours Float64;
 ALTER TABLE repo_metrics_daily ADD COLUMN IF NOT EXISTS pr_cycle_p90_hours Float64;
@@ -171,6 +188,8 @@ ALTER TABLE repo_metrics_daily ADD COLUMN IF NOT EXISTS pr_review_time_p50_hours
 ALTER TABLE repo_metrics_daily ADD COLUMN IF NOT EXISTS pr_pickup_time_p50_hours Nullable(Float64);
 ALTER TABLE repo_metrics_daily ADD COLUMN IF NOT EXISTS large_pr_ratio Float64;
 ALTER TABLE repo_metrics_daily ADD COLUMN IF NOT EXISTS pr_rework_ratio Float64;
+ALTER TABLE repo_metrics_daily ADD COLUMN IF NOT EXISTS mttr_hours Nullable(Float64);
+ALTER TABLE repo_metrics_daily ADD COLUMN IF NOT EXISTS change_failure_rate Float64;
 
 ALTER TABLE user_metrics_daily ADD COLUMN IF NOT EXISTS pr_cycle_p75_hours Float64;
 ALTER TABLE user_metrics_daily ADD COLUMN IF NOT EXISTS pr_cycle_p90_hours Float64;
@@ -181,6 +200,8 @@ ALTER TABLE user_metrics_daily ADD COLUMN IF NOT EXISTS pr_review_time_p50_hours
 ALTER TABLE user_metrics_daily ADD COLUMN IF NOT EXISTS pr_pickup_time_p50_hours Nullable(Float64);
 ALTER TABLE user_metrics_daily ADD COLUMN IF NOT EXISTS reviews_given UInt32;
 ALTER TABLE user_metrics_daily ADD COLUMN IF NOT EXISTS changes_requested_given UInt32;
+ALTER TABLE user_metrics_daily ADD COLUMN IF NOT EXISTS reviews_received UInt32;
+ALTER TABLE user_metrics_daily ADD COLUMN IF NOT EXISTS review_reciprocity Float64;
 ALTER TABLE user_metrics_daily ADD COLUMN IF NOT EXISTS team_id Nullable(String);
 ALTER TABLE user_metrics_daily ADD COLUMN IF NOT EXISTS team_name Nullable(String);
 
@@ -191,3 +212,13 @@ ALTER TABLE work_item_metrics_daily ADD COLUMN IF NOT EXISTS wip_unassigned_end_
 ALTER TABLE work_item_user_metrics_daily ADD COLUMN IF NOT EXISTS work_scope_id LowCardinality(String);
 ALTER TABLE work_item_cycle_times ADD COLUMN IF NOT EXISTS work_scope_id LowCardinality(String);
 ALTER TABLE work_item_state_durations_daily ADD COLUMN IF NOT EXISTS work_scope_id LowCardinality(String);
+
+-- Update git_pull_requests with metrics columns
+ALTER TABLE git_pull_requests ADD COLUMN IF NOT EXISTS additions Nullable(UInt32);
+ALTER TABLE git_pull_requests ADD COLUMN IF NOT EXISTS deletions Nullable(UInt32);
+ALTER TABLE git_pull_requests ADD COLUMN IF NOT EXISTS changed_files Nullable(UInt32);
+ALTER TABLE git_pull_requests ADD COLUMN IF NOT EXISTS first_review_at Nullable(DateTime64(3, 'UTC'));
+ALTER TABLE git_pull_requests ADD COLUMN IF NOT EXISTS first_comment_at Nullable(DateTime64(3, 'UTC'));
+ALTER TABLE git_pull_requests ADD COLUMN IF NOT EXISTS changes_requested_count UInt32 DEFAULT 0;
+ALTER TABLE git_pull_requests ADD COLUMN IF NOT EXISTS reviews_count UInt32 DEFAULT 0;
+ALTER TABLE git_pull_requests ADD COLUMN IF NOT EXISTS comments_count UInt32 DEFAULT 0;

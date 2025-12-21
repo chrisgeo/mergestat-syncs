@@ -3,6 +3,8 @@
 import os
 from unittest.mock import patch
 
+import pytest
+
 from cli import build_parser
 from utils import SKIP_EXTENSIONS, is_skippable
 
@@ -211,6 +213,8 @@ class TestBatchProcessingCLIArguments:
         assert args.max_commits_per_repo is None
         assert args.max_repos is None
         assert args.use_async is False
+        assert args.date is None
+        assert args.backfill == 1
 
     def test_batch_processing_arguments_with_custom_values(self):
         """Test that batch processing arguments accept custom values."""
@@ -298,6 +302,8 @@ class TestBatchProcessingCLIArguments:
         assert args.max_commits_per_repo is None
         assert args.max_repos is None
         assert args.use_async is False
+        assert args.date is None
+        assert args.backfill == 1
 
     def test_gitlab_batch_processing_arguments_with_custom_values(self):
         """Test that GitLab batch processing arguments accept custom values."""
@@ -334,3 +340,38 @@ class TestBatchProcessingCLIArguments:
         assert args.max_commits_per_repo == 50
         assert args.max_repos == 25
         assert args.use_async is True
+
+
+class TestSyncTimeWindowCLIArguments:
+    def test_sync_local_accepts_date_backfill(self):
+        parser = build_parser()
+        args = parser.parse_args(
+            [
+                "sync",
+                "local",
+                "--db",
+                "sqlite+aiosqlite:///:memory:",
+                "--date",
+                "2025-01-02",
+                "--backfill",
+                "7",
+            ]
+        )
+        assert str(args.date) == "2025-01-02"
+        assert args.backfill == 7
+
+    def test_sync_local_rejects_since_and_date_together(self):
+        parser = build_parser()
+        with pytest.raises(SystemExit):
+            parser.parse_args(
+                [
+                    "sync",
+                    "local",
+                    "--db",
+                    "sqlite+aiosqlite:///:memory:",
+                    "--since",
+                    "2025-01-01T00:00:00+00:00",
+                    "--date",
+                    "2025-01-02",
+                ]
+            )

@@ -6,7 +6,7 @@ import asyncio
 import logging
 import os
 import subprocess
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional
 
@@ -57,6 +57,17 @@ def _parse_date(value: str) -> date:
         ) from exc
 
 
+def _since_from_date_backfill(day: date, backfill_days: int) -> datetime:
+    backfill = max(1, int(backfill_days))
+    start_day = day - timedelta(days=backfill - 1)
+    return datetime(
+        start_day.year,
+        start_day.month,
+        start_day.day,
+        tzinfo=timezone.utc,
+    )
+
+
 def _resolve_db_type(db_url: str, db_type: Optional[str]) -> str:
     if db_type:
         resolved = db_type.lower()
@@ -81,7 +92,13 @@ async def _run_with_store(db_url: str, db_type: str, handler) -> None:
 
 def _cmd_sync_local(ns: argparse.Namespace) -> int:
     db_type = _resolve_db_type(ns.db, ns.db_type)
-    since = _parse_since(ns.since)
+
+    if ns.date is not None:
+        since = _since_from_date_backfill(ns.date, ns.backfill)
+    else:
+        if int(ns.backfill) != 1:
+            raise SystemExit("--backfill requires --date")
+        since = _parse_since(ns.since)
 
     async def _handler(store):
         await process_local_repo(
@@ -102,6 +119,13 @@ def _cmd_sync_github(ns: argparse.Namespace) -> int:
 
     db_type = _resolve_db_type(ns.db, ns.db_type)
 
+    if ns.date is not None:
+        since = _since_from_date_backfill(ns.date, ns.backfill)
+    else:
+        if int(ns.backfill) != 1:
+            raise SystemExit("--backfill requires --date")
+        since = None
+
     async def _handler(store):
         if ns.search_pattern:
             org_name = ns.group
@@ -118,6 +142,7 @@ def _cmd_sync_github(ns: argparse.Namespace) -> int:
                 max_commits_per_repo=ns.max_commits_per_repo,
                 max_repos=ns.max_repos,
                 use_async=ns.use_async,
+                since=since,
             )
             return
 
@@ -132,6 +157,7 @@ def _cmd_sync_github(ns: argparse.Namespace) -> int:
             token,
             fetch_blame=ns.fetch_blame,
             max_commits=ns.max_commits_per_repo or 100,
+            since=since,
         )
 
     asyncio.run(_run_with_store(ns.db, db_type, _handler))
@@ -144,6 +170,13 @@ def _cmd_sync_gitlab(ns: argparse.Namespace) -> int:
         raise SystemExit("Missing GitLab token (pass --auth or set GITLAB_TOKEN).")
 
     db_type = _resolve_db_type(ns.db, ns.db_type)
+
+    if ns.date is not None:
+        since = _since_from_date_backfill(ns.date, ns.backfill)
+    else:
+        if int(ns.backfill) != 1:
+            raise SystemExit("--backfill requires --date")
+        since = None
 
     async def _handler(store):
         if ns.search_pattern:
@@ -159,6 +192,7 @@ def _cmd_sync_gitlab(ns: argparse.Namespace) -> int:
                 max_commits_per_project=ns.max_commits_per_repo,
                 max_projects=ns.max_repos,
                 use_async=ns.use_async,
+                since=since,
             )
             return
 
@@ -173,6 +207,7 @@ def _cmd_sync_gitlab(ns: argparse.Namespace) -> int:
             ns.gitlab_url,
             fetch_blame=ns.fetch_blame,
             max_commits=ns.max_commits_per_repo or 100,
+            since=since,
         )
 
     asyncio.run(_run_with_store(ns.db, db_type, _handler))
@@ -188,6 +223,7 @@ def _cmd_metrics_daily(ns: argparse.Namespace) -> int:
         day=ns.date,
         backfill_days=max(1, int(ns.backfill)),
         repo_id=ns.repo_id,
+        repo_name=getattr(ns, "repo_name", None),
         include_commit_metrics=not ns.skip_commit_metrics,
         sink=ns.sink,
         provider=ns.provider,
@@ -244,7 +280,19 @@ def build_parser() -> argparse.ArgumentParser:
     local.add_argument(
         "--repo-path", default=".", help="Path to the local git repository."
     )
-    local.add_argument("--since", help="Lower-bound ISO date/time (UTC).")
+    local_time = local.add_mutually_exclusive_group()
+    local_time.add_argument("--since", help="Lower-bound ISO date/time (UTC).")
+    local_time.add_argument(
+        "--date",
+        type=_parse_date,
+        help="Target day (UTC) as YYYY-MM-DD (use with --backfill).",
+    )
+    local.add_argument(
+        "--backfill",
+        type=int,
+        default=1,
+        help="Sync N days ending at --date (inclusive). Requires --date.",
+    )
     local.add_argument(
         "--fetch-blame", action="store_true", help="Fetch blame data (slow)."
     )
@@ -272,6 +320,17 @@ def build_parser() -> argparse.ArgumentParser:
     gh.add_argument("--use-async", action="store_true")
     gh.add_argument("--fetch-blame", action="store_true")
     gh.add_argument("--max-commits-per-repo", type=int)
+    gh.add_argument(
+        "--date",
+        type=_parse_date,
+        help="Target day (UTC) as YYYY-MM-DD (use with --backfill).",
+    )
+    gh.add_argument(
+        "--backfill",
+        type=int,
+        default=1,
+        help="Sync N days ending at --date (inclusive). Requires --date.",
+    )
     gh.set_defaults(func=_cmd_sync_github)
 
     gl = sync_sub.add_parser(
@@ -301,6 +360,17 @@ def build_parser() -> argparse.ArgumentParser:
     gl.add_argument("--use-async", action="store_true")
     gl.add_argument("--fetch-blame", action="store_true")
     gl.add_argument("--max-commits-per-repo", type=int)
+    gl.add_argument(
+        "--date",
+        type=_parse_date,
+        help="Target day (UTC) as YYYY-MM-DD (use with --backfill).",
+    )
+    gl.add_argument(
+        "--backfill",
+        type=int,
+        default=1,
+        help="Sync N days ending at --date (inclusive). Requires --date.",
+    )
     gl.set_defaults(func=_cmd_sync_gitlab)
 
     # ---- metrics ----
@@ -333,8 +403,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional repo_id UUID filter.",
     )
     daily.add_argument(
+        "--repo-name",
+        help="Optional repo name filter (e.g. 'owner/repo').",
+    )
+    daily.add_argument(
         "--provider",
-        choices=["all", "jira", "github", "gitlab", "none"],
+        choices=["all", "jira", "github", "gitlab", "synthetic", "none"],
         default="all",
         help="Which work item providers to include.",
     )
@@ -365,7 +439,157 @@ def build_parser() -> argparse.ArgumentParser:
     )
     graf_down.set_defaults(func=_cmd_grafana_down)
 
+    # ---- fixtures ----
+    fix = sub.add_parser("fixtures", help="Data simulation and fixtures.")
+    fix_sub = fix.add_subparsers(dest="fixtures_command", required=True)
+    fix_gen = fix_sub.add_parser("generate", help="Generate synthetic data.")
+    fix_gen.add_argument(
+        "--db",
+        default=os.getenv("DB_CONN_STRING") or os.getenv("DATABASE_URL"),
+        help="Target DB URI.",
+    )
+    fix_gen.add_argument(
+        "--db-type", help="Explicit DB type (postgres, clickhouse, etc)."
+    )
+    fix_gen.add_argument("--repo-name", default="acme/demo-app", help="Repo name.")
+    fix_gen.add_argument("--days", type=int, default=30, help="Number of days of data.")
+    fix_gen.add_argument(
+        "--commits-per-day", type=int, default=5, help="Avg commits per day."
+    )
+    fix_gen.add_argument("--pr-count", type=int, default=20, help="Total PRs.")
+    fix_gen.add_argument(
+        "--with-metrics", action="store_true", help="Also generate derived metrics."
+    )
+    fix_gen.set_defaults(func=_cmd_fixtures_generate)
+
     return parser
+
+
+def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
+    from fixtures.generator import SyntheticDataGenerator
+
+    generator = SyntheticDataGenerator(repo_name=ns.repo_name)
+    db_type = _resolve_db_type(ns.db, ns.db_type)
+
+    async def _handler(store):
+        # 1. Repo
+        repo = generator.generate_repo()
+        await store.insert_repo(repo)
+
+        # 2. Files
+        files = generator.generate_files()
+        await store.insert_git_file_data(files)
+
+        # 3. Commits & Stats
+        commits = generator.generate_commits(
+            days=ns.days, commits_per_day=ns.commits_per_day
+        )
+        await store.insert_git_commit_data(commits)
+        stats = generator.generate_commit_stats(commits)
+        await store.insert_git_commit_stats(stats)
+
+        # 4. PRs & Reviews
+        pr_data = generator.generate_prs(count=ns.pr_count)
+        prs = [p["pr"] for p in pr_data]
+        await store.insert_git_pull_requests(prs)
+
+        all_reviews = []
+        for p in pr_data:
+            all_reviews.extend(p["reviews"])
+        if all_reviews:
+            await store.insert_git_pull_request_reviews(all_reviews)
+
+        logging.info(f"Generated synthetic data for {ns.repo_name}")
+        logging.info(f"- Repo ID: {repo.id}")
+        logging.info(f"- Commits: {len(commits)}")
+        logging.info(f"- PRs: {len(prs)}")
+        logging.info(f"- Reviews: {len(all_reviews)}")
+
+        if ns.with_metrics:
+            from metrics.job_daily import (
+                ClickHouseMetricsSink,
+                SQLiteMetricsSink,
+            )
+
+            sink = None
+            if db_type == "clickhouse":
+                sink = ClickHouseMetricsSink(ns.db)
+            elif db_type == "sqlite":
+                from metrics.job_daily import _normalize_sqlite_url
+
+                sink = SQLiteMetricsSink(_normalize_sqlite_url(ns.db))
+
+            if sink:
+                sink.ensure_tables()
+                from datetime import timedelta
+
+                from metrics.compute_work_item_state_durations import (
+                    compute_work_item_state_durations_daily,
+                )
+                from metrics.compute_work_items import compute_work_item_metrics_daily
+                from providers.teams import TeamResolver
+
+                work_items = generator.generate_work_items(days=ns.days)
+                transitions = generator.generate_work_item_transitions(work_items)
+
+                # Provide stable team IDs for dashboards without requiring config.
+                member_to_team = {}
+                for idx, (name, email) in enumerate(generator.authors):
+                    team_id = "alpha" if idx < 3 else "beta"
+                    team_name = "Alpha Team" if team_id == "alpha" else "Beta Team"
+                    member_to_team[str(email).strip().lower()] = (team_id, team_name)
+                    member_to_team[str(name).strip().lower()] = (team_id, team_name)
+                team_resolver = TeamResolver(member_to_team=member_to_team)
+
+                computed_at = datetime.now(timezone.utc)
+                end_day = computed_at.date()
+                start_day = end_day - timedelta(days=max(1, int(ns.days)) - 1)
+
+                total_wi = 0
+                total_wi_users = 0
+                total_cycles = 0
+                total_state = 0
+
+                for i in range(max(1, int(ns.days))):
+                    day = start_day + timedelta(days=i)
+
+                    wi_rows, wi_user_rows, cycle_rows = compute_work_item_metrics_daily(
+                        day=day,
+                        work_items=work_items,
+                        computed_at=computed_at,
+                        team_resolver=team_resolver,
+                    )
+                    if wi_rows:
+                        sink.write_work_item_metrics(wi_rows)
+                        total_wi += len(wi_rows)
+                    if wi_user_rows:
+                        sink.write_work_item_user_metrics(wi_user_rows)
+                        total_wi_users += len(wi_user_rows)
+                    if cycle_rows:
+                        sink.write_work_item_cycle_times(cycle_rows)
+                        total_cycles += len(cycle_rows)
+
+                    state_rows = compute_work_item_state_durations_daily(
+                        day=day,
+                        work_items=work_items,
+                        transitions=transitions,
+                        computed_at=computed_at,
+                        team_resolver=team_resolver,
+                    )
+                    if state_rows:
+                        sink.write_work_item_state_durations(state_rows)
+                        total_state += len(state_rows)
+
+                logging.info(
+                    "Generated work tracking fixtures rows: work_item_metrics_daily=%d work_item_user_metrics_daily=%d work_item_cycle_times=%d work_item_state_durations_daily=%d",
+                    total_wi,
+                    total_wi_users,
+                    total_cycles,
+                    total_state,
+                )
+
+    asyncio.run(_run_with_store(ns.db, db_type, _handler))
+    return 0
 
 
 def main(argv: Optional[List[str]] = None) -> int:

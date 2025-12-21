@@ -30,12 +30,22 @@ def _fetch_gitlab_project_info_sync(connector, project_id):
     return gl_project
 
 
-def _fetch_gitlab_commits_sync(gl_project, max_commits, repo_id):
+def _fetch_gitlab_commits_sync(
+    gl_project,
+    max_commits,
+    repo_id,
+    since: Optional[datetime] = None,
+):
     """Sync helper to fetch GitLab commits."""
+    list_params = {"per_page": 100}
+    if since is not None:
+        since_iso = since.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+        list_params["since"] = since_iso
+
     if max_commits > 100:
-        commits = gl_project.commits.list(per_page=100, as_list=False)
+        commits = gl_project.commits.list(**list_params, as_list=False)
     else:
-        commits = gl_project.commits.list(per_page=100, get_all=False)
+        commits = gl_project.commits.list(**list_params, get_all=False)
 
     commit_objects = []
     count = 0
@@ -44,6 +54,19 @@ def _fetch_gitlab_commits_sync(gl_project, max_commits, repo_id):
     for commit in commits:
         if count >= max_commits:
             break
+
+        committed_when = None
+        if hasattr(commit, "committed_date") and commit.committed_date:
+            try:
+                committed_when = datetime.fromisoformat(
+                    commit.committed_date.replace("Z", "+00:00")
+                )
+            except Exception:
+                committed_when = None
+
+        if since is not None and isinstance(committed_when, datetime):
+            if committed_when.astimezone(timezone.utc) < since:
+                break
 
         git_commit = GitCommit(
             repo_id=repo_id,
@@ -150,6 +173,7 @@ def _sync_gitlab_mrs_to_store(
     batch_size: int,
     state: str = "all",
     gate: Optional[RateLimitGate] = None,
+    since: Optional[datetime] = None,
 ) -> int:
     """Fetch all MRs for a project and insert them in batches.
 
@@ -174,6 +198,8 @@ def _sync_gitlab_mrs_to_store(
                 state=state,
                 page=page,
                 per_page=connector.per_page,
+                order_by="updated_at",
+                sort="desc",
             )
             gate.reset()
         except Exception as e:
@@ -206,11 +232,20 @@ def _sync_gitlab_mrs_to_store(
                     return None
 
             created_at = _parse_dt(mr.get("created_at"))
+            updated_at = _parse_dt(mr.get("updated_at"))
             merged_at = _parse_dt(mr.get("merged_at"))
             closed_at = _parse_dt(mr.get("closed_at"))
             created_at = (
                 created_at or merged_at or closed_at or datetime.now(timezone.utc)
             )
+
+            if (
+                since is not None
+                and isinstance(updated_at, datetime)
+                and updated_at.astimezone(timezone.utc) < since
+            ):
+                mrs = []
+                break
 
             batch.append(
                 GitPullRequest(
@@ -243,6 +278,8 @@ def _sync_gitlab_mrs_to_store(
                 batch.clear()
 
         page += 1
+        if not mrs:
+            break
 
     if batch:
         asyncio.run_coroutine_threadsafe(
@@ -462,6 +499,7 @@ async def process_gitlab_project(
     gitlab_url: str,
     fetch_blame: bool = False,
     max_commits: int = 100,
+    since: Optional[datetime] = None,
 ) -> None:
     """
     Process a GitLab project using the GitLab connector.
@@ -513,7 +551,12 @@ async def process_gitlab_project(
         # 2. Fetch Commits
         logging.info(f"Fetching up to {max_commits} commits from GitLab...")
         commit_hashes, commit_objects = await loop.run_in_executor(
-            None, _fetch_gitlab_commits_sync, gl_project, max_commits, db_repo.id
+            None,
+            _fetch_gitlab_commits_sync,
+            gl_project,
+            max_commits,
+            db_repo.id,
+            since,
         )
 
         if commit_objects:
@@ -548,6 +591,8 @@ async def process_gitlab_project(
             loop,
             BATCH_SIZE,
             "all",
+            None,
+            since,
         )
         logging.info(f"Stored {mr_total} merge requests from GitLab")
 
@@ -592,6 +637,7 @@ async def process_gitlab_projects_batch(
     max_commits_per_project: int = None,
     max_projects: int = None,
     use_async: bool = False,
+    since: Optional[datetime] = None,
 ) -> None:
     """
     Process multiple GitLab projects using batch processing with pattern matching.
@@ -652,6 +698,7 @@ async def process_gitlab_projects_batch(
                 gl_project,
                 commit_limit,
                 db_repo.id,
+                since,
             )
             if commit_objects:
                 await store.insert_git_commit_data(commit_objects)
@@ -687,6 +734,7 @@ async def process_gitlab_projects_batch(
                     BATCH_SIZE,
                     "all",
                     mr_gate,
+                    since,
                 )
         except Exception as e:
             logging.warning(

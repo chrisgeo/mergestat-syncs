@@ -12,15 +12,13 @@
       {
         "name": "provider",
         "label": "Provider",
-        "type": "custom",
+        "type": "query",
+        "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+        "refresh": 1,
+        "query": "SELECT DISTINCT provider AS __text, provider AS __value FROM stats.work_item_metrics_daily ORDER BY provider",
         "multi": true,
         "includeAll": true,
-        "options": [
-          { "text": "jira", "value": "jira", "selected": true },
-          { "text": "github", "value": "github", "selected": true },
-          { "text": "gitlab", "value": "gitlab", "selected": true }
-        ],
-        "current": { "text": "All", "value": "$__all" }
+        "allValue": ".*"
       },
       {
         "name": "team_id",
@@ -28,9 +26,10 @@
         "type": "query",
         "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
         "refresh": 1,
-        "query": "SELECT DISTINCT team_id AS __text, team_id AS __value FROM team_metrics_daily ORDER BY team_id",
+        "query": "SELECT DISTINCT ifNull(nullIf(team_id, ''), 'unassigned') AS __text, ifNull(nullIf(team_id, ''), 'unassigned') AS __value FROM stats.work_item_metrics_daily ORDER BY __value",
         "multi": true,
-        "includeAll": true
+        "includeAll": true,
+        "allValue": ".*"
       },
       {
         "name": "work_scope_id",
@@ -38,9 +37,10 @@
         "type": "query",
         "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
         "refresh": 1,
-        "query": "SELECT DISTINCT work_scope_id AS __text, work_scope_id AS __value FROM work_item_metrics_daily WHERE work_scope_id != '' ORDER BY work_scope_id",
+        "query": "SELECT DISTINCT work_scope_id AS __text, work_scope_id AS __value FROM stats.work_item_metrics_daily WHERE work_scope_id != '' ORDER BY work_scope_id",
         "multi": true,
-        "includeAll": true
+        "includeAll": true,
+        "allValue": ".*"
       }
     ]
   },
@@ -55,7 +55,7 @@
         {
           "refId": "A",
           "rawQuery": true,
-          "rawSql": "SELECT day AS time, provider AS metric, sum(items_completed_latest) AS value FROM ( SELECT day, provider, ifNull(nullIf(team_id, ''), 'unassigned') AS team_id, work_scope_id, argMax(items_completed, computed_at) AS items_completed_latest FROM work_item_metrics_daily WHERE provider IN (${provider:sqlstring}) AND ifNull(nullIf(team_id, ''), 'unassigned') IN (${team_id:sqlstring}) AND work_scope_id IN (${work_scope_id:sqlstring}) AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day, provider, team_id, work_scope_id ) GROUP BY day, provider ORDER BY day"
+          "rawSql": "SELECT day AS time, provider AS metric, sum(items_completed_latest) AS value FROM ( SELECT day, provider, ifNull(nullIf(team_id, ''), 'unassigned') AS team_id, work_scope_id, argMax(items_completed, computed_at) AS items_completed_latest FROM stats.work_item_metrics_daily WHERE match(provider, '${provider:regex}') AND match(ifNull(nullIf(team_id, ''), 'unassigned'), '${team_id:regex}') AND match(work_scope_id, '${work_scope_id:regex}') AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day, provider, team_id, work_scope_id ) GROUP BY day, provider ORDER BY day"
         }
       ]
     },
@@ -69,7 +69,7 @@
         {
           "refId": "A",
           "rawQuery": true,
-          "rawSql": "SELECT day AS time, provider AS metric, sum(wip_latest) AS value FROM ( SELECT day, provider, ifNull(nullIf(team_id, ''), 'unassigned') AS team_id, work_scope_id, argMax(wip_count_end_of_day, computed_at) AS wip_latest FROM work_item_metrics_daily WHERE provider IN (${provider:sqlstring}) AND ifNull(nullIf(team_id, ''), 'unassigned') IN (${team_id:sqlstring}) AND work_scope_id IN (${work_scope_id:sqlstring}) AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day, provider, team_id, work_scope_id ) GROUP BY day, provider ORDER BY day"
+          "rawSql": "SELECT day AS time, provider AS metric, sum(wip_latest) AS value FROM ( SELECT day, provider, ifNull(nullIf(team_id, ''), 'unassigned') AS team_id, work_scope_id, argMax(wip_count_end_of_day, computed_at) AS wip_latest FROM stats.work_item_metrics_daily WHERE match(provider, '${provider:regex}') AND match(ifNull(nullIf(team_id, ''), 'unassigned'), '${team_id:regex}') AND match(work_scope_id, '${work_scope_id:regex}') AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day, provider, team_id, work_scope_id ) GROUP BY day, provider ORDER BY day"
         }
       ]
     },
@@ -84,7 +84,7 @@
         {
           "refId": "A",
           "rawQuery": true,
-          "rawSql": "SELECT day AS time, provider AS metric, quantileTDigest(0.50)(cycle_time_hours) AS value FROM work_item_cycle_times WHERE provider IN (${provider:sqlstring}) AND ifNull(nullIf(team_id, ''), 'unassigned') IN (${team_id:sqlstring}) AND work_scope_id IN (${work_scope_id:sqlstring}) AND cycle_time_hours IS NOT NULL AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day, provider ORDER BY day"
+          "rawSql": "SELECT day AS time, provider AS metric, quantileTDigest(0.50)(cycle_time_hours) AS value FROM stats.work_item_cycle_times WHERE match(provider, '${provider:regex}') AND match(ifNull(nullIf(team_id, ''), 'unassigned'), '${team_id:regex}') AND match(work_scope_id, '${work_scope_id:regex}') AND cycle_time_hours IS NOT NULL AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day, provider ORDER BY day"
         }
       ]
     },
@@ -99,7 +99,7 @@
         {
           "refId": "A",
           "rawQuery": true,
-          "rawSql": "SELECT day AS time, provider AS metric, quantileTDigest(0.90)(cycle_time_hours) AS value FROM work_item_cycle_times WHERE provider IN (${provider:sqlstring}) AND ifNull(nullIf(team_id, ''), 'unassigned') IN (${team_id:sqlstring}) AND work_scope_id IN (${work_scope_id:sqlstring}) AND cycle_time_hours IS NOT NULL AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day, provider ORDER BY day"
+          "rawSql": "SELECT day AS time, provider AS metric, quantileTDigest(0.90)(cycle_time_hours) AS value FROM stats.work_item_cycle_times WHERE match(provider, '${provider:regex}') AND match(ifNull(nullIf(team_id, ''), 'unassigned'), '${team_id:regex}') AND match(work_scope_id, '${work_scope_id:regex}') AND cycle_time_hours IS NOT NULL AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day, provider ORDER BY day"
         }
       ]
     },
@@ -120,7 +120,7 @@
         {
           "refId": "A",
           "rawQuery": true,
-          "rawSql": "SELECT day AS time, status AS metric, sum(duration_latest) AS value FROM ( SELECT day, status, provider, work_scope_id, ifNull(nullIf(team_id, ''), 'unassigned') AS team_id, argMax(duration_hours, computed_at) AS duration_latest FROM work_item_state_durations_daily WHERE provider IN (${provider:sqlstring}) AND ifNull(nullIf(team_id, ''), 'unassigned') IN (${team_id:sqlstring}) AND work_scope_id IN (${work_scope_id:sqlstring}) AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day, status, provider, work_scope_id, team_id ) GROUP BY day, status ORDER BY day"
+          "rawSql": "SELECT day AS time, status AS metric, sum(duration_latest) AS value FROM ( SELECT day, status, provider, work_scope_id, ifNull(nullIf(team_id, ''), 'unassigned') AS team_id, argMax(duration_hours, computed_at) AS duration_latest FROM stats.work_item_state_durations_daily WHERE match(provider, '${provider:regex}') AND match(ifNull(nullIf(team_id, ''), 'unassigned'), '${team_id:regex}') AND match(work_scope_id, '${work_scope_id:regex}') AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day, status, provider, work_scope_id, team_id ) GROUP BY day, status ORDER BY day"
         }
       ]
     },
@@ -135,7 +135,7 @@
         {
           "refId": "A",
           "rawQuery": true,
-          "rawSql": "SELECT day AS time, provider AS metric, sum(done_unassigned_latest) AS value FROM ( SELECT day, provider, work_scope_id, ifNull(nullIf(team_id, ''), 'unassigned') AS team_id, argMax(items_completed_unassigned, computed_at) AS done_unassigned_latest FROM work_item_metrics_daily WHERE provider IN (${provider:sqlstring}) AND ifNull(nullIf(team_id, ''), 'unassigned') IN (${team_id:sqlstring}) AND work_scope_id IN (${work_scope_id:sqlstring}) AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day, provider, work_scope_id, team_id ) GROUP BY day, provider ORDER BY day"
+          "rawSql": "SELECT day AS time, provider AS metric, sum(done_unassigned_latest) AS value FROM ( SELECT day, provider, work_scope_id, ifNull(nullIf(team_id, ''), 'unassigned') AS team_id, argMax(items_completed_unassigned, computed_at) AS done_unassigned_latest FROM stats.work_item_metrics_daily WHERE match(provider, '${provider:regex}') AND match(ifNull(nullIf(team_id, ''), 'unassigned'), '${team_id:regex}') AND match(work_scope_id, '${work_scope_id:regex}') AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day, provider, work_scope_id, team_id ) GROUP BY day, provider ORDER BY day"
         }
       ]
     }

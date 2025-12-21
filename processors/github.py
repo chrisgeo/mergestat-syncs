@@ -9,6 +9,7 @@ from models.git import (
     GitCommitStat,
     GitFile,
     GitPullRequest,
+    GitPullRequestReview,
     Repo,
 )
 from utils import (
@@ -43,12 +44,39 @@ def _fetch_github_repo_info_sync(connector, owner, repo_name):
     return gh_repo
 
 
-def _fetch_github_commits_sync(gh_repo, max_commits, repo_id):
+def _fetch_github_commits_sync(
+    gh_repo,
+    max_commits,
+    repo_id,
+    since: Optional[datetime] = None,
+):
     """Sync helper to fetch and parse GitHub commits."""
-    raw_commits = list(gh_repo.get_commits()[:max_commits])
+    if since is not None:
+        raw_commits = list(gh_repo.get_commits(since=since)[:max_commits])
+    else:
+        raw_commits = list(gh_repo.get_commits()[:max_commits])
 
     commit_objects = []
     for commit in raw_commits:
+        if since is not None:
+            commit_when = None
+            if getattr(commit, "commit", None) and getattr(
+                commit.commit, "committer", None
+            ):
+                commit_when = getattr(commit.commit.committer, "date", None)
+            if (
+                commit_when is None
+                and getattr(commit, "commit", None)
+                and getattr(commit.commit, "author", None)
+            ):
+                commit_when = getattr(commit.commit.author, "date", None)
+
+            if (
+                isinstance(commit_when, datetime)
+                and commit_when.astimezone(timezone.utc) < since
+            ):
+                continue
+
         # Prefer GitHub user `login` when available; do not store emails.
         author_login = getattr(commit, "author", None)
         committer_login = getattr(commit, "committer", None)
@@ -106,10 +134,34 @@ def _fetch_github_commits_sync(gh_repo, max_commits, repo_id):
     return raw_commits, commit_objects
 
 
-def _fetch_github_commit_stats_sync(raw_commits, repo_id, max_stats):
+def _fetch_github_commit_stats_sync(
+    raw_commits,
+    repo_id,
+    max_stats,
+    since: Optional[datetime] = None,
+):
     """Sync helper to fetch detailed commit stats (files)."""
     stats_objects = []
     for commit in raw_commits[:max_stats]:
+        if since is not None:
+            commit_when = None
+            if getattr(commit, "commit", None) and getattr(
+                commit.commit, "committer", None
+            ):
+                commit_when = getattr(commit.commit.committer, "date", None)
+            if (
+                commit_when is None
+                and getattr(commit, "commit", None)
+                and getattr(commit.commit, "author", None)
+            ):
+                commit_when = getattr(commit.commit.author, "date", None)
+
+            if (
+                isinstance(commit_when, datetime)
+                and commit_when.astimezone(timezone.utc) < since
+            ):
+                continue
+
         try:
             files = commit.files
             if files is None:
@@ -175,6 +227,7 @@ def _sync_github_prs_to_store(
     batch_size: int,
     state: str = "all",
     gate: Optional[RateLimitGate] = None,
+    since: Optional[datetime] = None,
 ) -> int:
     """Fetch all PRs for a repo and insert them in batches.
 
@@ -193,7 +246,13 @@ def _sync_github_prs_to_store(
         gate = RateLimitGate(RateLimitConfig(initial_backoff_seconds=1.0))
 
     # per_page is set at Github client level during connector initialization
-    pr_iter = iter(gh_repo.get_pulls(state=state))
+    # (some test doubles or older PyGithub versions may not accept sort/direction).
+    sorted_by_updated = True
+    try:
+        pr_iter = iter(gh_repo.get_pulls(state=state, sort="updated", direction="desc"))
+    except TypeError:
+        sorted_by_updated = False
+        pr_iter = iter(gh_repo.get_pulls(state=state))
     while True:
         try:
             gate.wait_sync()
@@ -247,6 +306,14 @@ def _sync_github_prs_to_store(
                 continue
 
             raise
+        if since is not None and sorted_by_updated:
+            updated_at = getattr(gh_pr, "updated_at", None)
+            if (
+                isinstance(updated_at, datetime)
+                and updated_at.astimezone(timezone.utc) < since
+            ):
+                break
+
         author_name = "Unknown"
         author_email = None
         if getattr(gh_pr, "user", None):
@@ -259,6 +326,67 @@ def _sync_github_prs_to_store(
             or datetime.now(timezone.utc)
         )
 
+        merged_at = getattr(gh_pr, "merged_at", None)
+        closed_at = getattr(gh_pr, "closed_at", None)
+
+        # Lazy load full PR for stats (additions/deletions)
+        additions = getattr(gh_pr, "additions", 0)
+        deletions = getattr(gh_pr, "deletions", 0)
+        changed_files = getattr(gh_pr, "changed_files", 0)
+
+        # Fetch and store reviews for this PR
+        first_review_at = None
+        reviews_count = 0
+        changes_requested_count = 0
+        try:
+            reviews = connector.get_pull_request_reviews(owner, repo_name, gh_pr.number)
+            reviews_count = len(reviews)
+            if reviews:
+                review_objects = []
+                for r in reviews:
+                    review_at = r.submitted_at or created_at
+                    if first_review_at is None or review_at < first_review_at:
+                        first_review_at = review_at
+                    if r.state == "CHANGES_REQUESTED":
+                        changes_requested_count += 1
+
+                    review_objects.append(
+                        GitPullRequestReview(
+                            repo_id=repo_id,
+                            number=gh_pr.number,
+                            review_id=r.id,
+                            reviewer=r.reviewer,
+                            state=r.state,
+                            submitted_at=review_at,
+                        )
+                    )
+                asyncio.run_coroutine_threadsafe(
+                    store.insert_git_pull_request_reviews(review_objects),
+                    loop,
+                ).result()
+        except Exception as e:
+            logging.debug(f"Failed to fetch reviews for PR #{gh_pr.number}: {e}")
+
+        # Fetch first comment for "Pickup Time"
+        first_comment_at = None
+        comments_count = 0
+        try:
+            # Issue comments include top-level PR comments
+            issue_comments = gh_pr.get_issue_comments()
+            # This is a paginated list, we only need the first one's date but we want total count
+            # To avoid fetching all comments if there are many, we can just get the first page for first_comment_at
+            # and maybe the count is available on the issue object.
+            # However, for simplicity and since we are already Doing one call per PR, let's just get the first one.
+            comments_count = gh_pr.comments  # issue comments count
+            if comments_count > 0:
+                for c in issue_comments:
+                    if first_comment_at is None or c.created_at < first_comment_at:
+                        first_comment_at = c.created_at
+                    # if we only want the first one, we can break if they are sorted,
+                    # but they might not be.
+        except Exception as e:
+            logging.debug(f"Failed to fetch comments for PR #{gh_pr.number}: {e}")
+
         batch.append(
             GitPullRequest(
                 repo_id=repo_id,
@@ -268,10 +396,18 @@ def _sync_github_prs_to_store(
                 author_name=author_name,
                 author_email=author_email,
                 created_at=created_at,
-                merged_at=getattr(gh_pr, "merged_at", None),
-                closed_at=getattr(gh_pr, "closed_at", None),
+                merged_at=merged_at,
+                closed_at=closed_at,
                 head_branch=getattr(getattr(gh_pr, "head", None), "ref", None),
                 base_branch=getattr(getattr(gh_pr, "base", None), "ref", None),
+                additions=additions,
+                deletions=deletions,
+                changed_files=changed_files,
+                first_review_at=first_review_at,
+                first_comment_at=first_comment_at,
+                changes_requested_count=changes_requested_count,
+                reviews_count=reviews_count,
+                comments_count=comments_count,
             )
         )
         total += 1
@@ -537,6 +673,7 @@ async def process_github_repo(
     token: str,
     fetch_blame: bool = False,
     max_commits: int = 100,
+    since: Optional[datetime] = None,
 ) -> None:
     """
     Process a GitHub repository using the GitHub connector.
@@ -593,7 +730,7 @@ async def process_github_repo(
         # 2. Fetch Commits
         logging.info(f"Fetching up to {max_commits} commits from GitHub...")
         raw_commits, commit_objects = await loop.run_in_executor(
-            None, _fetch_github_commits_sync, gh_repo, max_commits, db_repo.id
+            None, _fetch_github_commits_sync, gh_repo, max_commits, db_repo.id, since
         )
 
         if commit_objects:
@@ -609,6 +746,7 @@ async def process_github_repo(
             raw_commits,
             db_repo.id,
             stats_limit,
+            since,
         )
 
         if stats_objects:
@@ -631,6 +769,8 @@ async def process_github_repo(
             loop,
             BATCH_SIZE,
             "all",
+            None,
+            since,
         )
         logging.info(f"Stored {pr_total} pull requests from GitHub")
 
@@ -669,6 +809,7 @@ async def process_github_repos_batch(
     max_commits_per_repo: int = None,
     max_repos: int = None,
     use_async: bool = False,
+    since: Optional[datetime] = None,
 ) -> None:
     """
     Process multiple GitHub repositories using batch processing with
@@ -732,6 +873,7 @@ async def process_github_repos_batch(
                 gh_repo,
                 commit_limit,
                 db_repo.id,
+                since,
             )
             if commit_objects:
                 await store.insert_git_commit_data(commit_objects)
@@ -742,6 +884,7 @@ async def process_github_repos_batch(
                 raw_commits,
                 db_repo.id,
                 min(commit_limit, 50),
+                since,
             )
             if stats_objects:
                 await store.insert_git_commit_stats(stats_objects)
@@ -768,6 +911,7 @@ async def process_github_repos_batch(
                     BATCH_SIZE,
                     "all",
                     pr_gate,
+                    since,
                 )
         except Exception as e:
             logging.error(

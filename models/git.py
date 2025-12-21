@@ -11,6 +11,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Integer,
     Text,
     TypeDecorator,
@@ -18,6 +19,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import declarative_base, relationship
+from typing import Optional, List, Tuple
 
 Base = declarative_base()
 
@@ -146,7 +148,7 @@ def get_repo_uuid(repo_path: str) -> uuid.UUID:
 class Repo(Base, GitRepo):
     __tablename__ = "repos"
 
-    def __init__(self, repo_path: str = None, **kwargs):
+    def __init__(self, repo_path: Optional[str] = None, **kwargs):
         """
         Initialize the Repo class with the given repository path.
 
@@ -175,6 +177,10 @@ class Repo(Base, GitRepo):
                         )
                         kwargs["id"] = uuid.uuid4()
 
+        # Move 'tags' to 'repo_tags' to avoid conflict with GitRepo.tags property
+        if "tags" in kwargs:
+            kwargs["repo_tags"] = kwargs.pop("tags")
+
         super().__init__(**kwargs)  # Initialize SQLAlchemy ORM
         if repo_path:
             GitRepo.__init__(self, repo_path)  # Initialize GitPython Repo
@@ -196,8 +202,13 @@ class Repo(Base, GitRepo):
     settings = Column(
         JSON, nullable=False, default=dict, comment="JSON settings for the repo"
     )
-    tags = Column(
-        JSON, nullable=False, default=list, comment="array of tags for the repo"
+    repo_tags = Column(
+        "tags",
+        JSON,
+        key="repo_tags",
+        nullable=False,
+        default=list,
+        comment="array of tags for the repo",
     )
     # repo_import_id = Column(
     #     GUID,
@@ -363,7 +374,12 @@ class GitBlameMixin:
     """
 
     @staticmethod
-    def fetch_blame(repo_path, filepath, repo_uuid, repo=None):
+    def fetch_blame(
+        repo_path: str,
+        filepath: str,
+        repo_uuid: uuid.UUID,
+        repo: Optional[GitRepo] = None,
+    ) -> List[Tuple]:
         """
         Fetch blame data for a given file using gitpython.
 
@@ -379,20 +395,34 @@ class GitBlameMixin:
         rel_path = os.path.relpath(filepath, repo_path)
         try:
             blame_info = repo.blame("HEAD", rel_path)
-            line_no = 1
-            for commit, lines in blame_info:
-                for line in lines:
-                    blame_data.append((
-                        repo_uuid,
-                        commit.author.email,
-                        commit.author.name,
-                        commit.committed_datetime,
-                        commit.hexsha,
-                        line_no,
-                        line.rstrip("\n"),
-                        rel_path,
-                    ))
-                    line_no += 1
+            if blame_info:
+                line_no = 1
+                for item in blame_info:
+                    if not isinstance(item, (list, tuple)) or len(item) < 2:
+                        continue
+                    commit = item[0]
+                    lines = item[1]
+                    if commit is None or lines is None:
+                        continue
+                    for line in lines:
+                        author_email = getattr(commit.author, "email", "unknown")
+                        author_name = getattr(commit.author, "name", "unknown")
+                        committed_datetime = getattr(
+                            commit, "committed_datetime", datetime.now(timezone.utc)
+                        )
+                        hexsha = getattr(commit, "hexsha", "unknown")
+
+                        blame_data.append((
+                            repo_uuid,
+                            author_email,
+                            author_name,
+                            committed_datetime,
+                            hexsha,
+                            line_no,
+                            line.rstrip("\n") if line else "",
+                            rel_path,
+                        ))
+                        line_no += 1
         except Exception as e:
             logging.warning(f"Error processing {rel_path}: {e}")
         return blame_data
@@ -487,6 +517,20 @@ class GitPullRequest(Base):
     )
     head_branch = Column(Text, comment="name of the head branch")
     base_branch = Column(Text, comment="name of the base branch")
+    additions = Column(Integer, comment="total line additions in the PR")
+    deletions = Column(Integer, comment="total line deletions in the PR")
+    changed_files = Column(Integer, comment="total number of files changed in the PR")
+    first_review_at = Column(
+        DateTime(timezone=True), comment="timestamp of the first review"
+    )
+    first_comment_at = Column(
+        DateTime(timezone=True), comment="timestamp of the first comment"
+    )
+    changes_requested_count = Column(
+        Integer, default=0, comment="number of times changes were requested"
+    )
+    reviews_count = Column(Integer, default=0, comment="total number of reviews")
+    comments_count = Column(Integer, default=0, comment="total number of comments")
     _mergestat_synced_at = Column(
         DateTime(timezone=True),
         nullable=False,
@@ -496,3 +540,60 @@ class GitPullRequest(Base):
 
     # Relationships
     repo = relationship("Repo", back_populates="git_pull_requests")
+    reviews = relationship(
+        "GitPullRequestReview",
+        primaryjoin="and_(GitPullRequest.repo_id==GitPullRequestReview.repo_id, GitPullRequest.number==GitPullRequestReview.number)",
+        foreign_keys="[GitPullRequestReview.repo_id, GitPullRequestReview.number]",
+        back_populates="pr",
+        cascade="all, delete-orphan",
+    )
+
+
+class GitPullRequestReview(Base):
+    __tablename__ = "git_pull_request_reviews"
+    repo_id = Column(
+        GUID,
+        ForeignKey("repos.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    number = Column(
+        Integer,
+        primary_key=True,
+    )
+    review_id = Column(
+        Text,
+        primary_key=True,
+        comment="unique identifier for the review (e.g. GitHub review ID)",
+    )
+    reviewer = Column(Text, nullable=False, comment="identity of the reviewer")
+    state = Column(
+        Text,
+        nullable=False,
+        comment="state of the review (APPROVED, CHANGES_REQUESTED, etc.)",
+    )
+    submitted_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        comment="timestamp when review was submitted",
+    )
+    _mergestat_synced_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    # Relationships
+    pr = relationship(
+        "GitPullRequest",
+        primaryjoin="and_(GitPullRequestReview.repo_id==GitPullRequest.repo_id, GitPullRequestReview.number==GitPullRequest.number)",
+        foreign_keys="[GitPullRequestReview.repo_id, GitPullRequestReview.number]",
+        back_populates="reviews",
+    )
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["repo_id", "number"],
+            ["git_pull_requests.repo_id", "git_pull_requests.number"],
+            ondelete="CASCADE",
+        ),
+    )

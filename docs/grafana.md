@@ -29,6 +29,7 @@ It reads connection settings from environment variables inside the Grafana conta
 
 Dashboards are provisioned automatically into the “Developer Health” folder:
 - Repo Health: `grafana/dashboards/repo_health.json`
+- Code Hotspots: `grafana/dashboards/code_hotspots.json`
 - Work Tracking: `grafana/dashboards/work_tracking.json`
 - Collaboration: `grafana/dashboards/collaboration.json`
 - Well-being (team-level): `grafana/dashboards/wellbeing.json`
@@ -67,3 +68,7 @@ python cli.py metrics daily --date 2025-02-01 --backfill 30 --db "clickhouse://l
 ```
 
 Work tracking providers require credentials; see `docs/task_trackers.md`.
+
+## Troubleshooting
+
+- The provisioned dashboards use repo *names* (e.g. `org/repo`) in the Repo picker and support multi-select + “All”. Repo filtering is applied by resolving selected repo names to `repos.id` in ClickHouse.
