@@ -3,7 +3,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, List, Optional
 
-from models.git import GitCommit, GitCommitStat, Repo, GitPullRequest, GitBlame, GitFile
+from models.git import GitCommit, GitCommitStat, Repo, GitPullRequest, GitBlame, GitFile, CiPipelineRun, Deployment, Incident
 from utils import AGGREGATE_STATS_MARKER, is_skippable, CONNECTORS_AVAILABLE, BATCH_SIZE
 
 if CONNECTORS_AVAILABLE:
@@ -239,6 +239,8 @@ def _sync_gitlab_mrs_to_store(
                 created_at or merged_at or closed_at or datetime.now(timezone.utc)
             )
 
+            comments_count = int(mr.get("user_notes_count") or 0)
+
             if (
                 since is not None
                 and isinstance(updated_at, datetime)
@@ -260,6 +262,9 @@ def _sync_gitlab_mrs_to_store(
                     closed_at=closed_at,
                     head_branch=mr.get("source_branch"),
                     base_branch=mr.get("target_branch"),
+                    changes_requested_count=0,
+                    reviews_count=0,
+                    comments_count=comments_count,
                 )
             )
             total += 1
@@ -293,6 +298,175 @@ def _sync_gitlab_mrs_to_store(
         project_id,
     )
     return total
+
+
+def _fetch_gitlab_pipelines_sync(gl_project, repo_id, max_pipelines, since):
+    """Sync helper to fetch GitLab CI/CD pipelines."""
+    pipelines = []
+    try:
+        list_params = {"per_page": 100, "order_by": "updated_at", "sort": "desc"}
+        if max_pipelines > 100:
+            raw_pipelines = gl_project.pipelines.list(**list_params, as_list=False)
+        else:
+            raw_pipelines = gl_project.pipelines.list(**list_params, get_all=False)
+    except Exception as exc:
+        logging.debug("Failed to fetch pipelines: %s", exc)
+        return pipelines
+
+    count = 0
+    for pipeline in raw_pipelines:
+        if count >= max_pipelines:
+            break
+
+        created_at = None
+        if hasattr(pipeline, "created_at") and pipeline.created_at:
+            try:
+                created_at = datetime.fromisoformat(
+                    pipeline.created_at.replace("Z", "+00:00")
+                )
+            except Exception:
+                continue
+
+        if created_at is None:
+            continue
+
+        if since is not None and created_at.astimezone(timezone.utc) < since:
+            break
+
+        started_at = created_at
+        if hasattr(pipeline, "started_at") and pipeline.started_at:
+            try:
+                started_at = datetime.fromisoformat(
+                    pipeline.started_at.replace("Z", "+00:00")
+                )
+            except Exception:
+                pass
+
+        finished_at = None
+        if hasattr(pipeline, "finished_at") and pipeline.finished_at:
+            try:
+                finished_at = datetime.fromisoformat(
+                    pipeline.finished_at.replace("Z", "+00:00")
+                )
+            except Exception:
+                pass
+
+        pipelines.append(
+            CiPipelineRun(
+                repo_id=repo_id,
+                run_id=str(getattr(pipeline, "id", "")),
+                status=getattr(pipeline, "status", None),
+                queued_at=None,  # GitLab API doesn't provide queue time
+                started_at=started_at,
+                finished_at=finished_at,
+            )
+        )
+        count += 1
+
+    return pipelines
+
+
+def _fetch_gitlab_deployments_sync(connector, project_id, repo_id, max_deployments, since):
+    """Sync helper to fetch GitLab deployments."""
+    deployments = []
+    try:
+        # Use REST API to fetch deployments
+        raw_deployments = connector.rest_client.get_deployments(
+            project_id=project_id,
+            per_page=min(max_deployments, 100),
+            order_by="created_at",
+            sort="desc",
+        )
+    except Exception as exc:
+        logging.debug("Failed to fetch deployments: %s", exc)
+        return deployments
+
+    for dep in raw_deployments[:max_deployments]:
+        created_at_str = dep.get("created_at")
+        if not created_at_str:
+            continue
+
+        try:
+            created_at = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
+        except Exception:
+            continue
+
+        if since is not None and created_at.astimezone(timezone.utc) < since:
+            break
+
+        # Parse other timestamps if available
+        finished_at = None
+        finished_at_str = dep.get("finished_at")
+        if finished_at_str:
+            try:
+                finished_at = datetime.fromisoformat(finished_at_str.replace("Z", "+00:00"))
+            except Exception:
+                pass
+
+        deployments.append(
+            Deployment(
+                repo_id=repo_id,
+                deployment_id=str(dep.get("id", "")),
+                status=dep.get("status", None),
+                environment=dep.get("environment", {}).get("name") if isinstance(dep.get("environment"), dict) else None,
+                started_at=created_at,
+                finished_at=finished_at,
+                deployed_at=created_at,
+                merged_at=None,
+                pull_request_number=None,
+            )
+        )
+
+    return deployments
+
+
+def _fetch_gitlab_incidents_sync(connector, project_id, repo_id, max_issues, since):
+    """Sync helper to fetch GitLab incidents (issues labeled 'incident')."""
+    incidents = []
+    try:
+        raw_issues = connector.rest_client.get_issues(
+            project_id=project_id,
+            labels="incident",
+            per_page=min(max_issues, 100),
+            order_by="updated_at",
+            sort="desc",
+        )
+    except Exception as exc:
+        logging.debug("Failed to fetch incident issues: %s", exc)
+        return incidents
+
+    for issue in raw_issues[:max_issues]:
+        created_at_str = issue.get("created_at")
+        if not created_at_str:
+            continue
+
+        try:
+            created_at = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
+        except Exception:
+            continue
+
+        if since is not None and created_at.astimezone(timezone.utc) < since:
+            break
+
+        resolved_at = None
+        closed_at_str = issue.get("closed_at")
+        if closed_at_str:
+            try:
+                resolved_at = datetime.fromisoformat(closed_at_str.replace("Z", "+00:00"))
+            except Exception:
+                pass
+
+        incidents.append(
+            Incident(
+                repo_id=repo_id,
+                incident_id=str(issue.get("id", "")),
+                status=issue.get("state", None),
+                started_at=created_at,
+                resolved_at=resolved_at,
+            )
+        )
+
+    return incidents
 
 
 def _fetch_gitlab_blame_sync(gl_project, connector, project_id, repo_id, limit=50):
@@ -499,6 +673,9 @@ async def process_gitlab_project(
     gitlab_url: str,
     fetch_blame: bool = False,
     max_commits: int = 100,
+    sync_cicd: bool = True,
+    sync_deployments: bool = True,
+    sync_incidents: bool = True,
     since: Optional[datetime] = None,
 ) -> None:
     """
@@ -596,6 +773,50 @@ async def process_gitlab_project(
         )
         logging.info(f"Stored {mr_total} merge requests from GitLab")
 
+        if sync_cicd:
+            logging.info("Fetching CI/CD pipelines from GitLab...")
+            pipeline_runs = await loop.run_in_executor(
+                None,
+                _fetch_gitlab_pipelines_sync,
+                gl_project,
+                db_repo.id,
+                BATCH_SIZE,
+                since,
+            )
+            if pipeline_runs:
+                await store.insert_ci_pipeline_runs(pipeline_runs)
+                logging.info(f"Stored {len(pipeline_runs)} pipeline runs from GitLab")
+
+        if sync_deployments:
+            logging.info("Fetching deployments from GitLab...")
+            deployments = await loop.run_in_executor(
+                None,
+                _fetch_gitlab_deployments_sync,
+                connector,
+                project_id,
+                db_repo.id,
+                BATCH_SIZE,
+                since,
+            )
+            if deployments:
+                await store.insert_deployments(deployments)
+                logging.info(f"Stored {len(deployments)} deployments from GitLab")
+
+        if sync_incidents:
+            logging.info("Fetching incidents from GitLab...")
+            incidents = await loop.run_in_executor(
+                None,
+                _fetch_gitlab_incidents_sync,
+                connector,
+                project_id,
+                db_repo.id,
+                BATCH_SIZE,
+                since,
+            )
+            if incidents:
+                await store.insert_incidents(incidents)
+                logging.info(f"Stored {len(incidents)} incidents from GitLab")
+
         # 5. Fetch Blame (Optional)
         if fetch_blame:
             logging.info("Fetching blame data from GitLab (this may take a while)...")
@@ -637,6 +858,9 @@ async def process_gitlab_projects_batch(
     max_commits_per_project: int = None,
     max_projects: int = None,
     use_async: bool = False,
+    sync_cicd: bool = True,
+    sync_deployments: bool = True,
+    sync_incidents: bool = True,
     since: Optional[datetime] = None,
 ) -> None:
     """
@@ -742,6 +966,73 @@ async def process_gitlab_projects_batch(
                 project_info.full_name,
                 e,
             )
+
+        if sync_cicd:
+            try:
+                # Ensure gl_project is available
+                if 'gl_project' in locals():
+                    cicd_project = gl_project
+                else:
+                    cicd_project = await loop.run_in_executor(
+                        None, connector.gitlab.projects.get, project_info.id
+                    )
+
+                pipeline_runs = await loop.run_in_executor(
+                    None,
+                    _fetch_gitlab_pipelines_sync,
+                    cicd_project,
+                    db_repo.id,
+                    BATCH_SIZE,
+                    since,
+                )
+                if pipeline_runs:
+                    await store.insert_ci_pipeline_runs(pipeline_runs)
+            except Exception as e:
+                logging.warning(
+                    "Failed to fetch CI/CD runs for GitLab project %s: %s",
+                    project_info.full_name,
+                    e,
+                )
+
+        if sync_deployments:
+            try:
+                deployments = await loop.run_in_executor(
+                    None,
+                    _fetch_gitlab_deployments_sync,
+                    connector,
+                    project_info.id,
+                    db_repo.id,
+                    BATCH_SIZE,
+                    since,
+                )
+                if deployments:
+                    await store.insert_deployments(deployments)
+            except Exception as e:
+                logging.warning(
+                    "Failed to fetch deployments for GitLab project %s: %s",
+                    project_info.full_name,
+                    e,
+                )
+
+        if sync_incidents:
+            try:
+                incidents = await loop.run_in_executor(
+                    None,
+                    _fetch_gitlab_incidents_sync,
+                    connector,
+                    project_info.id,
+                    db_repo.id,
+                    BATCH_SIZE,
+                    since,
+                )
+                if incidents:
+                    await store.insert_incidents(incidents)
+            except Exception as e:
+                logging.warning(
+                    "Failed to fetch incidents for GitLab project %s: %s",
+                    project_info.full_name,
+                    e,
+                )
 
         if result.stats:
             stat = GitCommitStat(

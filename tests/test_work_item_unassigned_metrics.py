@@ -52,6 +52,7 @@ def test_unassigned_completed_items_are_tracked() -> None:
     group_rows, user_rows, _cycle_rows = compute_work_item_metrics_daily(
         day=day,
         work_items=[assigned, unassigned],
+        transitions=[],
         computed_at=computed_at,
         team_resolver=None,
     )

@@ -10,6 +10,9 @@ from models.git import (
     GitPullRequest,
     GitPullRequestReview,
     GitFile,
+    CiPipelineRun,
+    Deployment,
+    Incident,
 )
 from models.work_items import WorkItem, WorkItemStatusTransition, WorkItemType
 from metrics.schemas import (
@@ -23,7 +26,10 @@ from metrics.schemas import (
 
 class SyntheticDataGenerator:
     def __init__(
-        self, repo_name: str = "acme/demo-app", repo_id: Optional[uuid.UUID] = None
+        self,
+        repo_name: str = "acme/demo-app",
+        repo_id: Optional[uuid.UUID] = None,
+        provider: str = "synthetic",
     ):
         self.repo_name = repo_name
         if repo_id:
@@ -32,6 +38,7 @@ class SyntheticDataGenerator:
             # Deterministic UUID based on repo name
             namespace = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
             self.repo_id = uuid.uuid5(namespace, repo_name)
+        self.provider = provider
         self.authors = [
             ("Alice Smith", "alice@example.com"),
             ("Bob Jones", "bob@example.com"),
@@ -183,6 +190,115 @@ class SyntheticDataGenerator:
             })
         return prs
 
+    def generate_ci_pipeline_runs(
+        self, days: int = 30, runs_per_day: int = 3
+    ) -> List[CiPipelineRun]:
+        runs = []
+        end_date = datetime.now(timezone.utc)
+        start_date = end_date - timedelta(days=days)
+
+        run_index = 0
+        current_date = start_date
+        while current_date <= end_date:
+            daily_count = random.randint(1, max(1, runs_per_day * 2))
+            for _ in range(daily_count):
+                queued_at = current_date + timedelta(
+                    minutes=random.randint(0, 60 * 12)
+                )
+                started_at = queued_at + timedelta(minutes=random.randint(1, 30))
+                duration_minutes = random.randint(5, 60)
+                finished_at = started_at + timedelta(minutes=duration_minutes)
+                status = random.choice(["success", "success", "failed"])
+
+                run_index += 1
+                runs.append(
+                    CiPipelineRun(
+                        repo_id=self.repo_id,
+                        run_id=f"synth-run-{run_index}",
+                        status=status,
+                        queued_at=queued_at,
+                        started_at=started_at,
+                        finished_at=finished_at,
+                    )
+                )
+            current_date += timedelta(days=1)
+        return runs
+
+    def generate_deployments(
+        self, days: int = 30, deployments_per_day: int = 2, pr_numbers: Optional[List[int]] = None
+    ) -> List[Deployment]:
+        deployments = []
+        end_date = datetime.now(timezone.utc)
+        start_date = end_date - timedelta(days=days)
+
+        deploy_index = 0
+        current_date = start_date
+        while current_date <= end_date:
+            daily_count = random.randint(0, max(1, deployments_per_day * 2))
+            for _ in range(daily_count):
+                started_at = current_date + timedelta(
+                    minutes=random.randint(0, 60 * 20)
+                )
+                duration_minutes = random.randint(5, 90)
+                finished_at = started_at + timedelta(minutes=duration_minutes)
+                deployed_at = finished_at + timedelta(minutes=random.randint(0, 15))
+                status = random.choice(["success", "success", "failed"])
+                environment = random.choice(["production", "staging"])
+                merged_at = started_at - timedelta(hours=random.randint(1, 72))
+                pr_number = None
+                if pr_numbers:
+                    pr_number = random.choice(pr_numbers)
+
+                deploy_index += 1
+                deployments.append(
+                    Deployment(
+                        repo_id=self.repo_id,
+                        deployment_id=f"synth-deploy-{deploy_index}",
+                        status=status,
+                        environment=environment,
+                        started_at=started_at,
+                        finished_at=finished_at,
+                        deployed_at=deployed_at,
+                        merged_at=merged_at,
+                        pull_request_number=pr_number,
+                    )
+                )
+            current_date += timedelta(days=1)
+        return deployments
+
+    def generate_incidents(
+        self, days: int = 30, incidents_per_day: int = 1
+    ) -> List[Incident]:
+        incidents = []
+        end_date = datetime.now(timezone.utc)
+        start_date = end_date - timedelta(days=days)
+
+        incident_index = 0
+        current_date = start_date
+        while current_date <= end_date:
+            daily_count = random.randint(0, max(1, incidents_per_day * 2))
+            for _ in range(daily_count):
+                started_at = current_date + timedelta(
+                    minutes=random.randint(0, 60 * 20)
+                )
+                resolved_at = started_at + timedelta(hours=random.randint(1, 12))
+                status = random.choice(["resolved", "resolved", "open"])
+                if status == "open":
+                    resolved_at = None
+
+                incident_index += 1
+                incidents.append(
+                    Incident(
+                        repo_id=self.repo_id,
+                        incident_id=f"synth-incident-{incident_index}",
+                        status=status,
+                        started_at=started_at,
+                        resolved_at=resolved_at,
+                    )
+                )
+            current_date += timedelta(days=1)
+        return incidents
+
     def _generate_pr_reviews(
         self, pr_number: int, first_review_at: datetime, count: int
     ) -> List[GitPullRequestReview]:
@@ -222,7 +338,7 @@ class SyntheticDataGenerator:
             records.append(
                 WorkItemMetricsDailyRecord(
                     day=day,
-                    provider="github",
+                    provider=self.provider,
                     work_scope_id=self.repo_name,
                     team_id="alpha",
                     team_name="Alpha Team",
@@ -240,6 +356,11 @@ class SyntheticDataGenerator:
                     wip_age_p90_hours=float(random.randint(48, 168)),
                     bug_completed_ratio=random.uniform(0.1, 0.4),
                     story_points_completed=float(random.randint(10, 50)),
+                    # Phase 2 metrics
+                    new_bugs_count=random.randint(0, 3),
+                    new_items_count=random.randint(3, 10),
+                    defect_intro_rate=random.uniform(0.0, 0.3),
+                    wip_congestion_ratio=random.uniform(0.5, 2.0),
                     computed_at=datetime.now(timezone.utc),
                 )
             )
@@ -255,10 +376,17 @@ class SyntheticDataGenerator:
             started_at = created_at + timedelta(hours=random.randint(4, 48))
             completed_at = started_at + timedelta(hours=random.randint(24, 168))
 
+            cycle_time = (completed_at - started_at).total_seconds() / 3600
+            
+            # Simulate flow efficiency (typically 10-40%)
+            efficiency = random.uniform(0.1, 0.6)
+            active_hours = cycle_time * efficiency
+            wait_hours = cycle_time * (1.0 - efficiency)
+
             records.append(
                 WorkItemCycleTimeRecord(
                     work_item_id=f"synth:{self.repo_name}#{i}",
-                    provider="github",
+                    provider=self.provider,
                     day=completed_at.date(),
                     work_scope_id=self.repo_name,
                     team_id="alpha",
@@ -269,8 +397,11 @@ class SyntheticDataGenerator:
                     created_at=created_at,
                     started_at=started_at,
                     completed_at=completed_at,
-                    cycle_time_hours=(completed_at - started_at).total_seconds() / 3600,
+                    cycle_time_hours=cycle_time,
                     lead_time_hours=(completed_at - created_at).total_seconds() / 3600,
+                    active_time_hours=active_hours,
+                    wait_time_hours=wait_hours,
+                    flow_efficiency=efficiency,
                     computed_at=datetime.now(timezone.utc),
                 )
             )
@@ -306,7 +437,7 @@ class SyntheticDataGenerator:
             items.append(
                 WorkItem(
                     work_item_id=f"synth:{self.repo_name}#{i}",
-                    provider="github",  # "github" is fine for synthetic
+                    provider=self.provider,
                     title=f"Synthetic {item_type} {i}",
                     type=item_type,
                     status=status,
@@ -352,7 +483,44 @@ class SyntheticDataGenerator:
                         to_status="in_progress",
                     )
                 )
+
+                # Randomly inject a wait state (blocked) between start and complete
+                if item.completed_at and random.random() > 0.5:
+                    duration = (item.completed_at - item.started_at).total_seconds()
+                    if duration > 7200:  # If duration > 2 hours
+                        blocked_at = item.started_at + timedelta(
+                            seconds=random.randint(3600, int(duration * 0.4))
+                        )
+                        unblocked_at = blocked_at + timedelta(
+                            seconds=random.randint(1800, int(duration * 0.4))
+                        )
+
+                        transitions.append(
+                            WorkItemStatusTransition(
+                                work_item_id=item.work_item_id,
+                                provider=item.provider,
+                                occurred_at=blocked_at,
+                                from_status_raw="in_progress",
+                                to_status_raw="blocked",
+                                from_status="in_progress",
+                                to_status="blocked",
+                            )
+                        )
+                        transitions.append(
+                            WorkItemStatusTransition(
+                                work_item_id=item.work_item_id,
+                                provider=item.provider,
+                                occurred_at=unblocked_at,
+                                from_status_raw="blocked",
+                                to_status_raw="in_progress",
+                                from_status="blocked",
+                                to_status="in_progress",
+                            )
+                        )
+
             if item.completed_at:
+                # Need to determine the 'from' status
+                # Ideally we track current status, but for now assuming we return to 'in_progress' before done
                 transitions.append(
                     WorkItemStatusTransition(
                         work_item_id=item.work_item_id,

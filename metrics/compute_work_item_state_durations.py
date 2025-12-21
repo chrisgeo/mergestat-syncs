@@ -135,6 +135,7 @@ def compute_work_item_state_durations_daily(
         totals.items(), key=lambda kv: (kv[0][0], kv[0][1], kv[0][2], kv[0][3])
     ):
         team_name = team_name_by_key.get((provider, work_scope_id, team_id), "")
+        avg_wip = float(total_hours) / 24.0
         rows.append(
             WorkItemStateDurationDailyRecord(
                 day=day,
@@ -144,7 +145,10 @@ def compute_work_item_state_durations_daily(
                 team_name=team_name,
                 status=status,
                 duration_hours=float(total_hours),
-                items_touched=len(items_seen.get((provider, work_scope_id, team_id, status), set())),
+                items_touched=len(
+                    items_seen.get((provider, work_scope_id, team_id, status), set())
+                ),
+                avg_wip=avg_wip,
                 computed_at=computed_at_utc,
             )
         )

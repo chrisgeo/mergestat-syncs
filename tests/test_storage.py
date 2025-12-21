@@ -604,15 +604,36 @@ async def test_clickhouse_store_context_manager_initializes_and_creates_tables()
     mock_client.query = MagicMock(return_value=MagicMock(result_rows=[]))
     mock_client.close = MagicMock()
 
-    with patch(
-        "storage.clickhouse_connect.get_client", return_value=mock_client
-    ) as get_client:
+    # Mock filesystem operations
+    mock_sql_file = MagicMock()
+    mock_sql_file.read_text.return_value = "CREATE TABLE test1; CREATE TABLE test2;"
+
+    with patch("storage.clickhouse_connect.get_client", return_value=mock_client) as get_client, \
+         patch("storage.Path") as MockPath:
+
+        # Setup the chain: Path(__file__).resolve().parent / "migrations" / "clickhouse"
+        mock_file_path = MagicMock()
+        mock_resolved_path = MagicMock()
+        mock_parent_path = MagicMock()
+        mock_migrations_path = MagicMock()
+        mock_clickhouse_path = MagicMock()
+
+        MockPath.return_value = mock_file_path
+        mock_file_path.resolve.return_value = mock_resolved_path
+        mock_resolved_path.parent = mock_parent_path
+        mock_parent_path.__truediv__.return_value = mock_migrations_path
+        mock_migrations_path.__truediv__.return_value = mock_clickhouse_path
+        
+        mock_clickhouse_path.exists.return_value = True
+        mock_clickhouse_path.glob.return_value = [mock_sql_file]
+
         store = ClickHouseStore("clickhouse://localhost:8123/default")
         async with store as s:
             assert s.client is mock_client
 
     get_client.assert_called_once_with(dsn="clickhouse://localhost:8123/default")
-    assert mock_client.command.call_count == 7
+    # Expect 2 calls because our mock SQL has 2 statements
+    assert mock_client.command.call_count == 2
     mock_client.close.assert_called_once()
 
 

@@ -64,6 +64,7 @@ def test_work_item_cycle_time_percentiles() -> None:
     group_rows, user_rows, cycle_rows = compute_work_item_metrics_daily(
         day=day,
         work_items=items,
+        transitions=[],
         computed_at=computed_at,
         team_resolver=team_resolver,
     )

@@ -7,5 +7,5 @@ __pycache__/**
 .coverage
 *coverage.xml
 *.db
-benckmarks**
+benchmark**
 demo-data**

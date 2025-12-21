@@ -6,7 +6,7 @@ import asyncio
 import logging
 import os
 import subprocess
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional
 
@@ -130,21 +130,24 @@ def _cmd_sync_github(ns: argparse.Namespace) -> int:
         if ns.search_pattern:
             org_name = ns.group
             user_name = ns.owner if not ns.group else None
-            await process_github_repos_batch(
-                store=store,
-                token=token,
-                org_name=org_name,
-                user_name=user_name,
-                pattern=ns.search_pattern,
-                batch_size=ns.batch_size,
-                max_concurrent=ns.max_concurrent,
-                rate_limit_delay=ns.rate_limit_delay,
-                max_commits_per_repo=ns.max_commits_per_repo,
-                max_repos=ns.max_repos,
-                use_async=ns.use_async,
-                since=since,
-            )
-            return
+        await process_github_repos_batch(
+            store=store,
+            token=token,
+            org_name=org_name,
+            user_name=user_name,
+            pattern=ns.search_pattern,
+            batch_size=ns.batch_size,
+            max_concurrent=ns.max_concurrent,
+            rate_limit_delay=ns.rate_limit_delay,
+            max_commits_per_repo=ns.max_commits_per_repo,
+            max_repos=ns.max_repos,
+            use_async=ns.use_async,
+            sync_cicd=ns.sync_cicd,
+            sync_deployments=ns.sync_deployments,
+            sync_incidents=ns.sync_incidents,
+            since=since,
+        )
+        return
 
         if not (ns.owner and ns.repo):
             raise SystemExit(
@@ -157,6 +160,9 @@ def _cmd_sync_github(ns: argparse.Namespace) -> int:
             token,
             fetch_blame=ns.fetch_blame,
             max_commits=ns.max_commits_per_repo or 100,
+            sync_cicd=ns.sync_cicd,
+            sync_deployments=ns.sync_deployments,
+            sync_incidents=ns.sync_incidents,
             since=since,
         )
 
@@ -192,6 +198,9 @@ def _cmd_sync_gitlab(ns: argparse.Namespace) -> int:
                 max_commits_per_project=ns.max_commits_per_repo,
                 max_projects=ns.max_repos,
                 use_async=ns.use_async,
+                sync_cicd=ns.sync_cicd,
+                sync_deployments=ns.sync_deployments,
+                sync_incidents=ns.sync_incidents,
                 since=since,
             )
             return
@@ -207,6 +216,9 @@ def _cmd_sync_gitlab(ns: argparse.Namespace) -> int:
             ns.gitlab_url,
             fetch_blame=ns.fetch_blame,
             max_commits=ns.max_commits_per_repo or 100,
+            sync_cicd=ns.sync_cicd,
+            sync_deployments=ns.sync_deployments,
+            sync_incidents=ns.sync_incidents,
             since=since,
         )
 
@@ -319,6 +331,27 @@ def build_parser() -> argparse.ArgumentParser:
     gh.add_argument("--max-repos", type=int)
     gh.add_argument("--use-async", action="store_true")
     gh.add_argument("--fetch-blame", action="store_true")
+    gh.add_argument(
+        "--sync-cicd",
+        dest="sync_cicd",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Sync CI/CD workflow runs (default: enabled).",
+    )
+    gh.add_argument(
+        "--sync-deployments",
+        dest="sync_deployments",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Sync deployments (default: enabled).",
+    )
+    gh.add_argument(
+        "--sync-incidents",
+        dest="sync_incidents",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Sync incidents from issues labeled 'incident' (default: enabled).",
+    )
     gh.add_argument("--max-commits-per-repo", type=int)
     gh.add_argument(
         "--date",
@@ -359,6 +392,27 @@ def build_parser() -> argparse.ArgumentParser:
     gl.add_argument("--max-repos", type=int)
     gl.add_argument("--use-async", action="store_true")
     gl.add_argument("--fetch-blame", action="store_true")
+    gl.add_argument(
+        "--sync-cicd",
+        dest="sync_cicd",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Sync CI/CD pipelines (default: enabled).",
+    )
+    gl.add_argument(
+        "--sync-deployments",
+        dest="sync_deployments",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Sync deployments (default: enabled).",
+    )
+    gl.add_argument(
+        "--sync-incidents",
+        dest="sync_incidents",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Sync incidents from issues labeled 'incident' (default: enabled).",
+    )
     gl.add_argument("--max-commits-per-repo", type=int)
     gl.add_argument(
         "--date",
@@ -414,7 +468,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     daily.add_argument(
         "--sink",
-        choices=["auto", "clickhouse", "mongo", "sqlite", "both"],
+        choices=["auto", "clickhouse", "mongo", "sqlite", "postgres", "both"],
         default="auto",
         help="Where to write derived metrics.",
     )
@@ -499,11 +553,23 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
         if all_reviews:
             await store.insert_git_pull_request_reviews(all_reviews)
 
+        # 5. CI/CD + Deployments + Incidents
+        pr_numbers = [pr.number for pr in prs]
+        pipeline_runs = generator.generate_ci_pipeline_runs(days=ns.days)
+        deployments = generator.generate_deployments(days=ns.days, pr_numbers=pr_numbers)
+        incidents = generator.generate_incidents(days=ns.days)
+        await store.insert_ci_pipeline_runs(pipeline_runs)
+        await store.insert_deployments(deployments)
+        await store.insert_incidents(incidents)
+
         logging.info(f"Generated synthetic data for {ns.repo_name}")
         logging.info(f"- Repo ID: {repo.id}")
         logging.info(f"- Commits: {len(commits)}")
         logging.info(f"- PRs: {len(prs)}")
         logging.info(f"- Reviews: {len(all_reviews)}")
+        logging.info(f"- CI pipeline runs: {len(pipeline_runs)}")
+        logging.info(f"- Deployments: {len(deployments)}")
+        logging.info(f"- Incidents: {len(incidents)}")
 
         if ns.with_metrics:
             from metrics.job_daily import (
@@ -521,13 +587,117 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
 
             if sink:
                 sink.ensure_tables()
-                from datetime import timedelta
-
+                from metrics.compute import compute_daily_metrics
+                from metrics.compute_cicd import compute_cicd_metrics_daily
+                from metrics.compute_deployments import compute_deploy_metrics_daily
+                from metrics.compute_incidents import compute_incident_metrics_daily
+                from metrics.compute_wellbeing import (
+                    compute_team_wellbeing_metrics_daily,
+                )
                 from metrics.compute_work_item_state_durations import (
                     compute_work_item_state_durations_daily,
                 )
                 from metrics.compute_work_items import compute_work_item_metrics_daily
+                from metrics.hotspots import compute_file_hotspots
+                from metrics.quality import (
+                    compute_rework_churn_ratio,
+                    compute_single_owner_file_ratio,
+                )
+                from metrics.reviews import compute_review_edges_daily
                 from providers.teams import TeamResolver
+
+                commit_by_hash = {c.hash: c for c in commits}
+                commit_stat_rows = []
+                for stat in stats:
+                    commit = commit_by_hash.get(stat.commit_hash)
+                    if not commit:
+                        continue
+                    commit_stat_rows.append(
+                        {
+                            "repo_id": stat.repo_id,
+                            "commit_hash": stat.commit_hash,
+                            "author_email": commit.author_email,
+                            "author_name": commit.author_name,
+                            "committer_when": commit.committer_when,
+                            "file_path": stat.file_path,
+                            "additions": stat.additions,
+                            "deletions": stat.deletions,
+                        }
+                    )
+
+                pull_request_rows = []
+                for pr in prs:
+                    pull_request_rows.append(
+                        {
+                            "repo_id": pr.repo_id,
+                            "number": pr.number,
+                            "author_email": pr.author_email,
+                            "author_name": pr.author_name,
+                            "created_at": pr.created_at,
+                            "merged_at": pr.merged_at,
+                            "first_review_at": pr.first_review_at,
+                            "first_comment_at": pr.first_comment_at,
+                            "reviews_count": pr.reviews_count,
+                            "comments_count": pr.comments_count,
+                            "changes_requested_count": pr.changes_requested_count,
+                            "additions": pr.additions,
+                            "deletions": pr.deletions,
+                            "changed_files": pr.changed_files,
+                        }
+                    )
+
+                review_rows = []
+                for review in all_reviews:
+                    review_rows.append(
+                        {
+                            "repo_id": review.repo_id,
+                            "number": review.number,
+                            "reviewer": review.reviewer,
+                            "submitted_at": review.submitted_at,
+                            "state": review.state,
+                        }
+                    )
+
+                pipeline_rows = []
+                for run in pipeline_runs:
+                    pipeline_rows.append(
+                        {
+                            "repo_id": run.repo_id,
+                            "run_id": run.run_id,
+                            "status": run.status,
+                            "queued_at": run.queued_at,
+                            "started_at": run.started_at,
+                            "finished_at": run.finished_at,
+                        }
+                    )
+
+                deployment_rows = []
+                for deployment in deployments:
+                    deployment_rows.append(
+                        {
+                            "repo_id": deployment.repo_id,
+                            "deployment_id": deployment.deployment_id,
+                            "status": deployment.status,
+                            "environment": deployment.environment,
+                            "started_at": deployment.started_at,
+                            "finished_at": deployment.finished_at,
+                            "deployed_at": deployment.deployed_at,
+                            "merged_at": deployment.merged_at,
+                            "pull_request_number": deployment.pull_request_number,
+                        }
+                    )
+
+                incident_rows = []
+                for incident in incidents:
+                    incident_rows.append(
+                        {
+                            "repo_id": incident.repo_id,
+                            "incident_id": incident.incident_id,
+                            "status": incident.status,
+                            "started_at": incident.started_at,
+                            "resolved_at": incident.resolved_at,
+                        }
+                    )
 
                 work_items = generator.generate_work_items(days=ns.days)
                 transitions = generator.generate_work_item_transitions(work_items)
@@ -549,13 +719,90 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
                 total_wi_users = 0
                 total_cycles = 0
                 total_state = 0
+                total_repos = 0
+                total_users = 0
+                total_commits = 0
+                total_files = 0
+                total_teams = 0
+                total_review_edges = 0
+                total_cicd = 0
+                total_deploy = 0
+                total_incident = 0
 
                 for i in range(max(1, int(ns.days))):
                     day = start_day + timedelta(days=i)
 
+                    start_dt = datetime.combine(day, time.min, tzinfo=timezone.utc)
+                    end_dt = start_dt + timedelta(days=1)
+
+                    mttr_by_repo = {}
+                    bug_times = {}
+                    for item in work_items:
+                        if item.type == "bug" and item.completed_at and item.started_at:
+                            start_item = item.started_at
+                            end_item = item.completed_at
+                            if start_item is None or end_item is None:
+                                continue
+                            if start_item < end_dt and end_item >= start_dt:
+                                r_id = getattr(item, "repo_id", None)
+                                if r_id:
+                                    hours = (
+                                        end_item - start_item
+                                    ).total_seconds() / 3600.0
+                                    bug_times.setdefault(r_id, []).append(hours)
+                    for r_id, times in bug_times.items():
+                        mttr_by_repo[r_id] = sum(times) / len(times)
+
+                    window_days = 30
+                    h_start = datetime.combine(
+                        day - timedelta(days=window_days - 1),
+                        time.min,
+                        tzinfo=timezone.utc,
+                    )
+                    window_stats = [
+                        row
+                        for row in commit_stat_rows
+                        if h_start <= row["committer_when"] < end_dt
+                    ]
+                    day_commit_stats = [
+                        row
+                        for row in commit_stat_rows
+                        if start_dt <= row["committer_when"] < end_dt
+                    ]
+                    rework_ratio_by_repo = {
+                        repo.id: compute_rework_churn_ratio(
+                            repo_id=str(repo.id), window_stats=window_stats
+                        )
+                    }
+                    single_owner_ratio_by_repo = {
+                        repo.id: compute_single_owner_file_ratio(
+                            repo_id=str(repo.id), window_stats=window_stats
+                        )
+                    }
+
+                    repo_result = compute_daily_metrics(
+                        day=day,
+                        commit_stat_rows=day_commit_stats,
+                        pull_request_rows=pull_request_rows,
+                        pull_request_review_rows=review_rows,
+                        computed_at=computed_at,
+                        include_commit_metrics=True,
+                        team_resolver=team_resolver,
+                        mttr_by_repo=mttr_by_repo,
+                        rework_churn_ratio_by_repo=rework_ratio_by_repo,
+                        single_owner_file_ratio_by_repo=single_owner_ratio_by_repo,
+                    )
+                    team_metrics = compute_team_wellbeing_metrics_daily(
+                        day=day,
+                        commit_stat_rows=day_commit_stats,
+                        team_resolver=team_resolver,
+                        computed_at=computed_at,
+                    )
+
                     wi_rows, wi_user_rows, cycle_rows = compute_work_item_metrics_daily(
                         day=day,
                         work_items=work_items,
+                        transitions=transitions,
                         computed_at=computed_at,
                         team_resolver=team_resolver,
                     )
@@ -580,12 +827,81 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
                         sink.write_work_item_state_durations(state_rows)
                         total_state += len(state_rows)
 
+                    file_metrics = compute_file_hotspots(
+                        repo_id=repo.id,
+                        day=day,
+                        window_stats=window_stats,
+                        computed_at=computed_at,
+                    )
+                    if file_metrics:
+                        sink.write_file_metrics(file_metrics)
+                        total_files += len(file_metrics)
+
+                    review_edges = compute_review_edges_daily(
+                        day=day,
+                        pull_request_rows=pull_request_rows,
+                        pull_request_review_rows=review_rows,
+                        computed_at=computed_at,
+                    )
+                    if review_edges:
+                        sink.write_review_edges(review_edges)
+                        total_review_edges += len(review_edges)
+
+                    if repo_result.repo_metrics:
+                        sink.write_repo_metrics(repo_result.repo_metrics)
+                        total_repos += len(repo_result.repo_metrics)
+                    if repo_result.user_metrics:
+                        sink.write_user_metrics(repo_result.user_metrics)
+                        total_users += len(repo_result.user_metrics)
+                    if repo_result.commit_metrics:
+                        sink.write_commit_metrics(repo_result.commit_metrics)
+                        total_commits += len(repo_result.commit_metrics)
+                    if team_metrics:
+                        sink.write_team_metrics(team_metrics)
+                        total_teams += len(team_metrics)
+
+                    cicd_metrics = compute_cicd_metrics_daily(
+                        day=day,
+                        pipeline_runs=pipeline_rows,
+                        computed_at=computed_at,
+                    )
+                    if cicd_metrics:
+                        sink.write_cicd_metrics(cicd_metrics)
+                        total_cicd += len(cicd_metrics)
+
+                    deploy_metrics = compute_deploy_metrics_daily(
+                        day=day,
+                        deployments=deployment_rows,
+                        computed_at=computed_at,
+                    )
+                    if deploy_metrics:
+                        sink.write_deploy_metrics(deploy_metrics)
+                        total_deploy += len(deploy_metrics)
+
+                    incident_metrics = compute_incident_metrics_daily(
+                        day=day,
+                        incidents=incident_rows,
+                        computed_at=computed_at,
+                    )
+                    if incident_metrics:
+                        sink.write_incident_metrics(incident_metrics)
+                        total_incident += len(incident_metrics)
+
                 logging.info(
-                    "Generated work tracking fixtures rows: work_item_metrics_daily=%d work_item_user_metrics_daily=%d work_item_cycle_times=%d work_item_state_durations_daily=%d",
+                    "Generated fixtures metrics: repo=%d user=%d commit=%d team=%d file=%d review_edges=%d work_item_metrics=%d work_item_user_metrics=%d work_item_cycle_times=%d work_item_state_durations=%d cicd=%d deploy=%d incident=%d",
+                    total_repos,
+                    total_users,
+                    total_commits,
+                    total_teams,
+                    total_files,
+                    total_review_edges,
                     total_wi,
                     total_wi_users,
                     total_cycles,
                     total_state,
+                    total_cicd,
+                    total_deploy,
+                    total_incident,
                 )
 
     asyncio.run(_run_with_store(ns.db, db_type, _handler))
