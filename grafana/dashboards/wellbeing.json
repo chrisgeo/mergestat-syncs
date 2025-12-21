@@ -1,19 +1,28 @@
 {
   "uid": "wellbeing",
   "title": "Well-being (Team-Level)",
-  "tags": ["mergestat", "developer-health"],
+  "tags": [
+    "mergestat",
+    "developer-health"
+  ],
   "timezone": "utc",
   "schemaVersion": 39,
   "version": 1,
   "refresh": "5m",
-  "time": { "from": "now-30d", "to": "now" },
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
   "templating": {
     "list": [
       {
         "name": "team_id",
         "label": "Team",
         "type": "query",
-        "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "clickhouse"
+        },
         "refresh": 1,
         "query": "SELECT DISTINCT team_id AS __text, team_id AS __value FROM team_metrics_daily ORDER BY team_id",
         "multi": true,
@@ -27,9 +36,23 @@
       "type": "timeseries",
       "title": "After-hours Commit Ratio (Weekdays)",
       "description": "Commits outside BUSINESS_HOURS_START/BUSINESS_HOURS_END in BUSINESS_TIMEZONE (weekdays only).",
-      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
-      "fieldConfig": { "defaults": { "unit": "percentunit" }, "overrides": [] },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "displayName": "${__field.labels.metric}"
+        },
+        "overrides": []
+      },
       "targets": [
         {
           "refId": "A",
@@ -43,9 +66,23 @@
       "type": "timeseries",
       "title": "Weekend Commit Ratio (Weekly)",
       "description": "Weekend commits / total commits, grouped by week.",
-      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
-      "fieldConfig": { "defaults": { "unit": "percentunit" }, "overrides": [] },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "displayName": "${__field.labels.metric}"
+        },
+        "overrides": []
+      },
       "targets": [
         {
           "refId": "A",

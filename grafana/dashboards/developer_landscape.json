@@ -1,4 +1,14 @@
 {
+  "uid": "dev-landscape",
+  "title": "Developer Landscape",
+  "tags": [
+    "mergestat",
+    "developer-health"
+  ],
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5m",
   "annotations": {
     "list": []
   },
@@ -9,100 +19,161 @@
   "liveNow": false,
   "panels": [
     {
+      "id": 1,
       "title": "Churn (Loc Touched) vs Throughput (Delivery Units)",
       "type": "xychart",
-      "datasource": "ClickHouse",
-      "gridPos": { "h": 12, "w": 12, "x": 0, "y": 0 },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
       "targets": [
         {
-          "format": "table",
-          "rawSql": "SELECT \n  x_norm as x,\n  y_norm as y,\n  identity_id as name,\n  team_id\nFROM ic_landscape_rolling_30d\nWHERE \n  map_name = 'churn_throughput'\n  AND as_of_day = toDate(now()) -- specific date selection needed in real usage\n  AND ($team_id = 'All' OR team_id = '$team_id')\nORDER BY delivery_units_30d DESC",
+          "rawQuery": true,
+          "rawSql": "SELECT (x_norm - 0.5) AS x_centered, (y_norm - 0.5) AS y_centered, identity_id AS name, team_id FROM stats.ic_landscape_rolling_30d WHERE map_name = 'churn_throughput' AND as_of_day = toDate(toDateTime(intDiv($__to, 1000))) AND match(ifNull(nullIf(team_id, ''), 'unassigned'), '${team_id:regex}') ORDER BY delivery_units_30d DESC",
           "refId": "A"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "palette-classic" },
+          "color": {
+            "mode": "palette-classic"
+          },
           "custom": {
             "showPoints": "auto",
-            "pointSize": { "fixed": 5 },
+            "pointSize": {
+              "fixed": 5
+            },
             "lineWidth": 0
           }
         },
         "overrides": []
       },
       "options": {
-        "seriesMapping": "manual",
-        "xField": "x",
-        "yField": "y"
+        "seriesMapping": "auto",
+        "xField": "x_centered",
+        "yField": "y_centered",
+        "seriesField": "name",
+        "xMin": -0.5,
+        "xMax": 0.5,
+        "yMin": -0.5,
+        "yMax": 0.5,
+        "xAxis": {
+          "centeredZero": true,
+          "label": "Churn (normalized)"
+        },
+        "yAxis": {
+          "centeredZero": true,
+          "label": "Throughput (normalized)"
+        }
       }
     },
     {
+      "id": 2,
       "title": "Cycle Time vs Throughput",
       "type": "xychart",
-      "datasource": "ClickHouse",
-      "gridPos": { "h": 12, "w": 12, "x": 12, "y": 0 },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
       "targets": [
         {
-          "format": "table",
-          "rawSql": "SELECT \n  x_norm as x,\n  y_norm as y,\n  identity_id as name,\n  team_id\nFROM ic_landscape_rolling_30d\nWHERE \n  map_name = 'cycle_throughput'\n  AND as_of_day = toDate(now())\n  AND ($team_id = 'All' OR team_id = '$team_id')",
+          "rawQuery": true,
+          "rawSql": "SELECT (x_norm - 0.5) AS x_centered, (y_norm - 0.5) AS y_centered, identity_id AS name, team_id FROM stats.ic_landscape_rolling_30d WHERE map_name = 'cycle_throughput' AND as_of_day = toDate(toDateTime(intDiv($__to, 1000))) AND match(ifNull(nullIf(team_id, ''), 'unassigned'), '${team_id:regex}')",
           "refId": "A"
         }
       ],
       "options": {
-        "seriesMapping": "manual",
-        "xField": "x",
-        "yField": "y"
+        "seriesMapping": "auto",
+        "xField": "x_centered",
+        "yField": "y_centered",
+        "seriesField": "name",
+        "xMin": -0.5,
+        "xMax": 0.5,
+        "yMin": -0.5,
+        "yMax": 0.5,
+        "xAxis": {
+          "centeredZero": true,
+          "label": "Cycle Time (normalized)"
+        },
+        "yAxis": {
+          "centeredZero": true,
+          "label": "Throughput (normalized)"
+        }
       }
     },
     {
+      "id": 3,
       "title": "WIP vs Throughput",
       "type": "xychart",
-      "datasource": "ClickHouse",
-      "gridPos": { "h": 12, "w": 12, "x": 0, "y": 12 },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 12,
+        "x": 0,
+        "y": 12
+      },
       "targets": [
         {
-          "format": "table",
-          "rawSql": "SELECT \n  x_norm as x,\n  y_norm as y,\n  identity_id as name,\n  team_id\nFROM ic_landscape_rolling_30d\nWHERE \n  map_name = 'wip_throughput'\n  AND as_of_day = toDate(now())\n  AND ($team_id = 'All' OR team_id = '$team_id')",
+          "rawQuery": true,
+          "rawSql": "SELECT (x_norm - 0.5) AS x_centered, (y_norm - 0.5) AS y_centered, identity_id AS name, team_id FROM stats.ic_landscape_rolling_30d WHERE map_name = 'wip_throughput' AND as_of_day = toDate(toDateTime(intDiv($__to, 1000))) AND match(ifNull(nullIf(team_id, ''), 'unassigned'), '${team_id:regex}')",
           "refId": "A"
         }
       ],
       "options": {
-        "seriesMapping": "manual",
-        "xField": "x",
-        "yField": "y"
+        "seriesMapping": "auto",
+        "xField": "x_centered",
+        "yField": "y_centered",
+        "seriesField": "name",
+        "xMin": -0.5,
+        "xMax": 0.5,
+        "yMin": -0.5,
+        "yMax": 0.5,
+        "xAxis": {
+          "centeredZero": true,
+          "label": "WIP (normalized)"
+        },
+        "yAxis": {
+          "centeredZero": true,
+          "label": "Throughput (normalized)"
+        }
       }
     }
   ],
-  "schemaVersion": 38,
-  "style": "dark",
-  "tags": ["landscape", "ic"],
   "templating": {
     "list": [
       {
-        "current": { "text": "All", "value": "All" },
-        "datasource": "ClickHouse",
-        "definition": "SELECT DISTINCT team_id FROM ic_landscape_rolling_30d ORDER BY 1",
-        "hide": 0,
-        "includeAll": true,
-        "multi": false,
         "name": "team_id",
-        "options": [],
-        "query": "SELECT DISTINCT team_id FROM ic_landscape_rolling_30d ORDER BY 1",
+        "label": "Team",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "clickhouse"
+        },
         "refresh": 1,
-        "regex": "",
-        "skipUrlSync": false,
-        "sort": 1,
-        "type": "query"
+        "query": "SELECT DISTINCT ifNull(nullIf(team_id, ''), 'unassigned') AS __text, ifNull(nullIf(team_id, ''), 'unassigned') AS __value FROM stats.ic_landscape_rolling_30d ORDER BY __value",
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*"
       }
     ]
   },
   "time": {
     "from": "now-30d",
     "to": "now"
-  },
-  "title": "Developer Landscape",
-  "uid": "dev-landscape",
-  "version": 1,
-  "weekStart": ""
+  }
 }

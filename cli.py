@@ -598,6 +598,10 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
                     compute_work_item_state_durations_daily,
                 )
                 from metrics.compute_work_items import compute_work_item_metrics_daily
+                from metrics.compute_ic import (
+                    compute_ic_metrics_daily,
+                    compute_ic_landscape_rolling,
+                )
                 from metrics.hotspots import compute_file_hotspots
                 from metrics.quality import (
                     compute_rework_churn_ratio,
@@ -806,6 +810,18 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
                         computed_at=computed_at,
                         team_resolver=team_resolver,
                     )
+                    
+                    # Enrich User Metrics with IC fields
+                    # Convert TeamResolver map to simple identity->team_id map
+                    team_map = {k: v[0] for k, v in member_to_team.items()}
+                    ic_metrics = compute_ic_metrics_daily(
+                        git_metrics=repo_result.user_metrics,
+                        wi_metrics=wi_user_rows,
+                        team_map=team_map,
+                    )
+                    # Use the enriched list for writing
+                    repo_result.user_metrics[:] = ic_metrics
+
                     if wi_rows:
                         sink.write_work_item_metrics(wi_rows)
                         total_wi += len(wi_rows)
@@ -886,6 +902,27 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
                     if incident_metrics:
                         sink.write_incident_metrics(incident_metrics)
                         total_incident += len(incident_metrics)
+                        
+                    # Landscape rolling metrics
+                    try:
+                        # For fixtures, we can't easily query the DB we just wrote to in the same transaction context/loop easily 
+                        # if using batch inserts or if it's not committed.
+                        # However, for ClickHouse sink, inserts are immediate.
+                        # For SQLite/Postgres, it depends on the driver/transaction.
+                        # But sink methods handle their own transactions usually.
+                        # Let's try to compute it.
+                        if hasattr(sink, "get_rolling_30d_user_stats") and hasattr(sink, "write_ic_landscape_rolling"):
+                            rolling_stats = sink.get_rolling_30d_user_stats(
+                                as_of_day=day, repo_id=repo.id
+                            )
+                            landscape_recs = compute_ic_landscape_rolling(
+                                as_of_day=day,
+                                rolling_stats=rolling_stats,
+                                team_map=team_map,
+                            )
+                            sink.write_ic_landscape_rolling(landscape_recs)
+                    except Exception as e:
+                        logging.warning("Failed to compute/write fixture landscape metrics: %s", e)
 
                 logging.info(
                     "Generated fixtures metrics: repo=%d user=%d commit=%d team=%d file=%d review_edges=%d work_item_metrics=%d work_item_user_metrics=%d work_item_cycle_times=%d work_item_state_durations=%d cicd=%d deploy=%d incident=%d",

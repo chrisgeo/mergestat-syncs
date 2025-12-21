@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, List, Optional, Sequence, Dict
 import uuid
@@ -449,7 +449,7 @@ class ClickHouseMetricsSink:
         # We look at [as_of_day - 29 days, as_of_day] inclusive.
         # Note: 'day' in user_metrics_daily is the date of the metrics.
         
-        start_day = as_of_day - datetime.timedelta(days=29)
+        start_day = as_of_day - timedelta(days=29)
         
         params = {
             "start": start_day.isoformat(),

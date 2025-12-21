@@ -31,6 +31,9 @@ services:
       CLICKHOUSE_DB: ${CLICKHOUSE_DB:-stats}
       CLICKHOUSE_USER: ${CLICKHOUSE_USER:-ch}
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-ch}
+      GF_AUTH_ANONYMOUS_ENABLED: true
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: true
     ports:
       - "3000:3000"
     depends_on:
