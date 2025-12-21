@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import List, Sequence, Tuple
 
 from metrics.schemas import CICDMetricsDailyRecord, PipelineRunRow
 
