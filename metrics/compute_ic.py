@@ -71,6 +71,9 @@ def compute_ic_metrics_daily(
         git_map[identity] = r
     
     # Process WI metrics
+    # TODO: Find a way to map JIRA/LinearB/whatever to git commits more reliably.
+    # Currently we rely on identity_mapping.yaml to normalize identities separately
+    # for Git (via compute.py) and WorkItems (via compute_work_items.py).
     wi_map: Dict[str, WorkItemUserMetricsDailyRecord] = {}
     for r in wi_metrics:
         # wi metrics might be per-provider, we aggregate per user

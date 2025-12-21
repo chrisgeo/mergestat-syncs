@@ -15,6 +15,7 @@ from metrics.schemas import (
     UserMetricsDailyRecord,
 )
 from providers.teams import TeamResolver
+from providers.identity import IdentityResolver
 
 
 def commit_size_bucket(total_loc: int) -> str:
@@ -32,12 +33,26 @@ def commit_size_bucket(total_loc: int) -> str:
     return "large"
 
 
-def _normalize_identity(author_email: Optional[str], author_name: Optional[str]) -> str:
+def _normalize_identity(
+    author_email: Optional[str],
+    author_name: Optional[str],
+    identity_resolver: Optional[IdentityResolver] = None,
+) -> str:
     """
     Prefer email when present; fall back to author_name; otherwise 'unknown'.
+    If identity_resolver is provided, it is used to resolve the canonical identity.
 
     The returned value is used as `author_email` in stored metrics for stability.
     """
+    if identity_resolver:
+        # Use the shared identity resolver logic for Git authors.
+        # We use 'git' as the provider.
+        return identity_resolver.resolve(
+            provider="git",  # type: ignore
+            email=author_email,
+            display_name=author_name,
+        )
+
     if author_email:
         normalized = author_email.strip()
         if normalized:
@@ -171,6 +186,7 @@ def compute_daily_metrics(
     include_commit_metrics: bool = True,
     large_pr_total_loc_threshold: int = 1000,
     team_resolver: Optional[TeamResolver] = None,
+    identity_resolver: Optional[IdentityResolver] = None,
     mttr_by_repo: Optional[Dict[uuid.UUID, float]] = None,
     rework_churn_ratio_by_repo: Optional[Dict[uuid.UUID, float]] = None,
     single_owner_file_ratio_by_repo: Optional[Dict[uuid.UUID, float]] = None,
@@ -200,7 +216,9 @@ def compute_daily_metrics(
                 repo_id=row["repo_id"],
                 commit_hash=row["commit_hash"],
                 author_identity=_normalize_identity(
-                    row.get("author_email"), row.get("author_name")
+                    row.get("author_email"),
+                    row.get("author_name"),
+                    identity_resolver,
                 ),
                 committer_when=_to_utc(row["committer_when"]),
             )
@@ -253,7 +271,9 @@ def compute_daily_metrics(
     pr_author_map: Dict[Tuple[uuid.UUID, int], str] = {}
     for pr in pull_request_rows:
         author_identity = _normalize_identity(
-            pr.get("author_email"), pr.get("author_name")
+            pr.get("author_email"),
+            pr.get("author_name"),
+            identity_resolver,
         )
         pr_author_map[(pr["repo_id"], pr["number"])] = author_identity
         user_key = (pr["repo_id"], author_identity)
@@ -364,7 +384,11 @@ def compute_daily_metrics(
             if not (start <= submitted_at < end):
                 continue
 
-            reviewer_identity = _normalize_identity(None, review["reviewer"])
+            reviewer_identity = _normalize_identity(
+                None,
+                review["reviewer"],
+                identity_resolver,
+            )
             rua = user_aggs.get((review["repo_id"], reviewer_identity))
             if rua is None:
                 rua = _UserAgg(

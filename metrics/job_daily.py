@@ -511,6 +511,7 @@ def run_daily_metrics_job(
                 computed_at=computed_at,
                 include_commit_metrics=include_commit_metrics,
                 team_resolver=team_resolver,
+                identity_resolver=identity,
                 mttr_by_repo=mttr_by_repo,
                 rework_churn_ratio_by_repo=rework_ratio_by_repo,
                 single_owner_file_ratio_by_repo=single_owner_ratio_by_repo,
