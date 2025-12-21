@@ -905,52 +905,6 @@ class MongoStore:
             rows,
         )
 
-    async def insert_incidents(self, incidents: List[Incident]) -> None:
-        if not incidents:
-            return
-        synced_at_default = self._normalize_datetime(datetime.now(timezone.utc))
-        rows: List[Dict[str, Any]] = []
-        for item in incidents:
-            if isinstance(item, dict):
-                rows.append({
-                    "repo_id": self._normalize_uuid(item.get("repo_id")),
-                    "incident_id": item.get("incident_id"),
-                    "status": item.get("status"),
-                    "started_at": self._normalize_datetime(item.get("started_at")),
-                    "resolved_at": self._normalize_datetime(item.get("resolved_at")),
-                    "_mergestat_synced_at": self._normalize_datetime(
-                        item.get("_mergestat_synced_at") or synced_at_default
-                    ),
-                })
-            else:
-                rows.append({
-                    "repo_id": self._normalize_uuid(getattr(item, "repo_id")),
-                    "incident_id": getattr(item, "incident_id"),
-                    "status": getattr(item, "status"),
-                    "started_at": self._normalize_datetime(
-                        getattr(item, "started_at")
-                    ),
-                    "resolved_at": self._normalize_datetime(
-                        getattr(item, "resolved_at", None)
-                    ),
-                    "_mergestat_synced_at": self._normalize_datetime(
-                        getattr(item, "_mergestat_synced_at", None) or synced_at_default
-                    ),
-                })
-
-        await self._insert_rows(
-            "incidents",
-            [
-                "repo_id",
-                "incident_id",
-                "status",
-                "started_at",
-                "resolved_at",
-                "_mergestat_synced_at",
-            ],
-            rows,
-        )
-
     async def insert_deployments(self, deployments: List[Deployment]) -> None:
         await self._upsert_many(
             "deployments",
