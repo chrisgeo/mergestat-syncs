@@ -75,6 +75,9 @@ Keyed by `(repo_id, day)`.
 - Commits: count, LOC touched, avg size, large commit ratio
 - PRs: merged count, p50/p75/p90 PR cycle hours
 - Quality (best-effort): `large_pr_ratio`, `pr_rework_ratio` (requires PR size and review facts)
+- Knowledge:
+  - `bus_factor`: smallest number of developers accounting for ≥ 50% of code churn
+  - `code_ownership_gini`: Gini coefficient of code contribution inequality (0..1)
 
 ### Optional per-commit metrics (`commit_metrics`)
 Keyed by `(repo_id, day, author_email, commit_hash)`.
@@ -107,6 +110,7 @@ Keyed by `(day, provider, team_id, work_scope_id)`.
 - WIP age distributions (nullable if no WIP samples): p50/p90
 - `bug_completed_ratio`: completed bugs / total completed
 - `story_points_completed`: sum of story points completed (Jira only, when configured)
+- `predictability_score`: Completion Rate = `items_completed / (items_completed + wip_count_end_of_day)`
 
 ### Work item facts (`work_item_cycle_times`)
 Keyed by `(provider, work_item_id)`; stored as ClickHouse `ReplacingMergeTree` by `computed_at` and as Mongo upserts.

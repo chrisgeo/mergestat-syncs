@@ -49,8 +49,8 @@ This inventory tracks the implementation status of all metrics defined in the `d
 | Review Responsiveness | [x] | `pr_pickup_time_p50_hours` in [compute.py](file:///Users/chris/projects/dev-health-ops/metrics/compute.py) |
 | Review Load | [x] | `reviews_given` in [compute.py](file:///Users/chris/projects/dev-health-ops/metrics/compute.py) |
 | Review Reciprocity | [x] | Ratio of reviews given vs received in [compute.py](file:///Users/chris/projects/dev-health-ops/metrics/compute.py) |
-| Bus Factor | [ ] | Requires aggregation of `FileMetricsRecord.contributors` |
-| Knowledge Distribution | [ ] | Requires ownership mapping visualization |
+| Bus Factor | [x] | [metrics/knowledge.py](file:///Users/chris/projects/dev-health-ops/metrics/knowledge.py) (Truck Factor: min authors for 50% churn) |
+| Knowledge Distribution | [x] | [metrics/knowledge.py](file:///Users/chris/projects/dev-health-ops/metrics/knowledge.py) (Gini Coefficient of churn ownership) |
 
 ## 5. Developer Well-being & Cognitive Load
 | Metric | Status | Source/Implementation |
@@ -66,6 +66,6 @@ This inventory tracks the implementation status of all metrics defined in the `d
 | :--- | :---: | :--- |
 | Bottleneck Index | [x] | [metrics/compute_work_item_state_durations.py](file:///Users/chris/projects/dev-health-ops/metrics/compute_work_item_state_durations.py) |
 | WIP Congestion | [x] | [metrics/compute_work_items.py](file:///Users/chris/projects/dev-health-ops/metrics/compute_work_items.py) (WIP / Weekly Throughput) |
-| Predictability Index | [ ] | Requires estimate data mapping |
+| Predictability Index | [x] | [metrics/compute_work_items.py](file:///Users/chris/projects/dev-health-ops/metrics/compute_work_items.py) (Completion Rate: Completed / (Completed + WIP)) |
 | Pipeline Success Rate | [x] | [metrics/compute_cicd.py](file:///Users/chris/projects/dev-health-ops/metrics/compute_cicd.py) (GitHub only, GitLab pending) |
 | Deploy Success Rate | [x] | [metrics/compute_deployments.py](file:///Users/chris/projects/dev-health-ops/metrics/compute_deployments.py) (GitHub only, GitLab pending) |

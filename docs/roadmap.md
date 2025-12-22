@@ -26,8 +26,8 @@ This checklist tracks what is complete and what remains to finalize `dev-health-
 - [ ] **Fix dashboard templating filters**: Ensure variable regex and `match(...)` filters do not return empty results.
 
 ### Metrics Enhancements
-- [ ] **Bus factor (true)**: Replace single-owner proxy with contributor coverage model (e.g., 80% rule).
-- [ ] **Predictability index**: Estimated vs. actual story points/time.
+- [x] **Bus factor (true)**: Top contributors accounting for >50% of churn (Bus Factor) and Gini coefficient (Knowledge Distribution).
+- [x] **Predictability index**: Completion Rate (items completed / (completed + wip)).
 - [ ] **Capacity planning**: Forecast completion using historical throughput.
 - [ ] **Identity Linking**: Reliable mapping of Work Items (Jira/LinearB) to Git commits (e.g. via commit messages or smart matching).
 
