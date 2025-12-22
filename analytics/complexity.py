@@ -72,6 +72,43 @@ class ComplexityScanner:
 
         return results
 
+    def scan_git_ref(self, repo_root: Path, ref: str) -> List[FileComplexity]:
+        """Scan files at a specific git reference/commit using GitPython."""
+        import git
+        
+        results = []
+        try:
+            repo = git.Repo(repo_root)
+            commit = repo.commit(ref)
+            
+            # Walk the tree of the commit
+            # stack of (tree, parent_path)
+            stack = [(commit.tree, "")]
+            
+            while stack:
+                tree, parent = stack.pop()
+                for item in tree:
+                    if item.type == 'tree':
+                        # Directory
+                        stack.append((item, os.path.join(parent, item.name)))
+                    elif item.type == 'blob':
+                        # File
+                        rel_path = os.path.join(parent, item.name)
+                        if self.should_process(rel_path):
+                            try:
+                                # Get content from blob
+                                content = item.data_stream.read().decode("utf-8", errors="replace")
+                                metrics = self._analyze_content(content, rel_path)
+                                if metrics:
+                                    results.append(metrics)
+                            except Exception as e:
+                                logger.warning(f"Failed to analyze blob {rel_path} at {ref}: {e}")
+                                
+        except Exception as e:
+            logger.error(f"Failed to scan git ref {ref}: {e}")
+            
+        return results
+
     def _analyze_file(self, file_path: Path) -> Optional[FileComplexity]:
         # Currently only Python is supported via radon
         if not file_path.suffix == ".py":
@@ -80,7 +117,16 @@ class ComplexityScanner:
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 code = f.read()
-            
+            return self._analyze_content(code, str(file_path))
+        except Exception:
+            # Syntax errors or other issues
+            return None
+
+    def _analyze_content(self, code: str, file_path: str) -> Optional[FileComplexity]:
+        if not file_path.endswith(".py"):
+             return None
+
+        try:
             # Radon analysis
             blocks = cc_visit(code)
             
@@ -91,7 +137,7 @@ class ComplexityScanner:
             high_count = sum(1 for b in blocks if b.complexity > self.high_threshold)
             very_high_count = sum(1 for b in blocks if b.complexity > self.very_high_threshold)
             
-            # Count LOC (simple line count for now, or use radon's raw metrics if needed)
+            # Count LOC
             loc = len(code.splitlines())
 
             return FileComplexity(
@@ -105,5 +151,4 @@ class ComplexityScanner:
                 very_high_complexity_functions=very_high_count
             )
         except Exception:
-            # Syntax errors or other issues
             return None

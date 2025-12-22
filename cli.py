@@ -253,6 +253,7 @@ def _cmd_metrics_complexity(ns: argparse.Namespace) -> int:
         repo_id=ns.repo_id,
         db_url=ns.db,
         date=ns.date,
+        backfill_days=ns.backfill,
         ref=ns.ref,
     )
     return 0
@@ -511,6 +512,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     complexity.add_argument(
         "--ref", default="HEAD", help="Git ref/branch analyzed."
+    )
+    complexity.add_argument(
+        "--backfill",
+        type=int,
+        default=1,
+        help="Compute N days ending at --date (inclusive).",
     )
     complexity.add_argument(
         "--db",
