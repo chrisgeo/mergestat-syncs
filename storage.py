@@ -204,6 +204,11 @@ class SQLAlchemyStore:
             self.session.add(repo)
             await self.session.commit()
 
+    async def get_all_repos(self) -> List[Repo]:
+        assert self.session is not None
+        result = await self.session.execute(select(Repo))
+        return list(result.scalars().all())
+
     async def has_any_git_files(self, repo_id) -> bool:
         assert self.session is not None
         result = await self.session.execute(
@@ -717,6 +722,15 @@ class MongoStore:
             {"_id": doc["_id"]}, {"$set": doc}, upsert=True
         )
 
+    async def get_all_repos(self) -> List[Repo]:
+        cursor = self.db["repos"].find({})
+        repos = []
+        async for doc in cursor:
+            # Basic reconstruction
+            r_id = uuid.UUID(doc["_id"]) if isinstance(doc["_id"], str) else doc["_id"]
+            repos.append(Repo(id=r_id, repo=doc.get("repo", "")))
+        return repos
+
     async def has_any_git_files(self, repo_id) -> bool:
         repo_id_val = _serialize_value(repo_id)
         count = await self.db["git_files"].count_documents(
@@ -1062,6 +1076,21 @@ class ClickHouseStore:
             ],
             [row],
         )
+
+    async def get_all_repos(self) -> List[Repo]:
+        assert self.client is not None
+        query = "SELECT id, repo FROM repos"
+        async with self._lock:
+            result = await asyncio.to_thread(self.client.query, query)
+        
+        repos = []
+        if result.result_rows:
+            for row in result.result_rows:
+                r_id = uuid.UUID(str(row[0]))
+                r_name = row[1]
+                # We return minimal Repo objects
+                repos.append(Repo(id=r_id, repo=r_name))
+        return repos
 
     async def has_any_git_files(self, repo_id) -> bool:
         return await self._has_any("git_files", self._normalize_uuid(repo_id))

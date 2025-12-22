@@ -246,16 +246,78 @@ def _cmd_metrics_daily(ns: argparse.Namespace) -> int:
 def _cmd_metrics_complexity(ns: argparse.Namespace) -> int:
     from metrics.job_complexity import run_complexity_scan_job
     
-    repo_path = Path(ns.repo_path).resolve()
+    root_path = Path(ns.repo_path).resolve()
+
+    if ns.repo_id:
+        # Explicit single repo mode
+        run_complexity_scan_job(
+            repo_path=root_path,
+            repo_id=ns.repo_id,
+            db_url=ns.db,
+            date=ns.date,
+            backfill_days=ns.backfill,
+            ref=ns.ref,
+        )
+        return 0
+
+    # Batch mode: Fetch repos from DB and try to find them locally
+    async def fetch_repos():
+        db_type = _resolve_db_type(ns.db, None)
+        store = create_store(ns.db, db_type)
+        async with store:
+            return await store.get_all_repos()
+
+    try:
+        repos = asyncio.run(fetch_repos())
+    except Exception as e:
+        logging.error(f"Failed to fetch repos from DB: {e}")
+        return 1
+
+    if not repos:
+        logging.warning("No repositories found in database.")
+        return 0
+
+    logging.info(f"Found {len(repos)} repositories in DB. Checking local availability in {root_path}...")
     
-    run_complexity_scan_job(
-        repo_path=repo_path,
-        repo_id=ns.repo_id,
-        db_url=ns.db,
-        date=ns.date,
-        backfill_days=ns.backfill,
-        ref=ns.ref,
-    )
+    processed_count = 0
+    for repo in repos:
+        # Heuristics to find repo locally based on DB identifier (name/URL)
+        candidates = []
+        if repo.repo:
+            # 1. Exact match (e.g. 'owner/repo' or 'repo') relative to root
+            candidates.append(root_path / repo.repo)
+            # 2. Basename match (e.g. 'repo' from 'owner/repo') relative to root
+            candidates.append(root_path / Path(repo.repo).name)
+        
+        # 3. The root path itself might be the repo (if user pointed directly to it)
+        candidates.append(root_path)
+
+        found_path = None
+        for cand in candidates:
+            if cand.is_dir() and (cand / ".git").exists():
+                # Simple check: assuming name match implies identity.
+                # (Could be improved by checking git remotes)
+                found_path = cand
+                break
+        
+        if found_path:
+            logging.info(f"Processing DB repo '{repo.repo}' ({repo.id}) at {found_path}")
+            try:
+                run_complexity_scan_job(
+                    repo_path=found_path,
+                    repo_id=repo.id,
+                    db_url=ns.db,
+                    date=ns.date,
+                    backfill_days=ns.backfill,
+                    ref=ns.ref,
+                )
+                processed_count += 1
+            except Exception as e:
+                logging.error(f"Failed to process {repo.repo}: {e}")
+        else:
+            logging.debug(f"Skipping DB repo '{repo.repo}': not found locally.")
+
+    logging.info(f"Processed {processed_count} repositories.")
     return 0
 
 
@@ -502,7 +564,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--repo-path", required=True, help="Path to local git repo."
     )
     complexity.add_argument(
-        "--repo-id", required=True, type=lambda s: __import__("uuid").UUID(s), help="Repo UUID."
+        "--repo-id", type=lambda s: __import__("uuid").UUID(s), help="Repo UUID. If omitted, scans dir for repos."
     )
     complexity.add_argument(
         "--date", 
