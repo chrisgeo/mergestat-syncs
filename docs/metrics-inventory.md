@@ -1,6 +1,7 @@
 # Metrics Inventory
 
 This inventory tracks the implementation status of all metrics defined in the `dev-health-ops` project.
+Work item metrics assume provider data has been synced via `python cli.py sync work-items ...` (use `-s` to filter repos; `--auth` to override GitHub/GitLab tokens when needed).
 
 ## 1. Delivery & Velocity (Flow & DORA)
 
@@ -33,7 +34,7 @@ This inventory tracks the implementation status of all metrics defined in the `d
 | PR Rework Ratio          |  [x]   | `pr_rework_ratio` in [compute.py](file:///Users/chris/projects/dev-health-ops/metrics/compute.py) (based on changes requested)                                                         |
 | Defect Introduction Rate |  [x]   | [metrics/compute_work_items.py](file:///Users/chris/projects/dev-health-ops/metrics/compute_work_items.py) (bugs created vs items closed)                                              |
 | Single Owner File Ratio  |  [x]   | Computed in [quality.py](file:///Users/chris/projects/dev-health-ops/metrics/quality.py) and wired in [job_daily.py](file:///Users/chris/projects/dev-health-ops/metrics/job_daily.py) |
-| Cyclomatic Complexity    |  [x]   | Computed via `metrics complexity` using `radon`. Stored in `repo_complexity_daily`.                                                                                                    |
+| Cyclomatic Complexity    |  [x]   | Computed via `metrics complexity` using `radon`. Stored in `file_complexity_snapshots` (per-file) and `repo_complexity_daily`; loaded in `metrics daily` via `store.get_complexity_snapshots()`. |
 
 ## 3. Investment & Portfolio
 

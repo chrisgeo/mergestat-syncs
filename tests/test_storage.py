@@ -1,11 +1,11 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import pytest_asyncio
 from pymongo import UpdateOne
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from models import GitBlame, GitCommit, GitCommitStat, GitFile, Repo
 from models.git import Base
@@ -215,6 +215,187 @@ async def test_sqlalchemy_store_insert_repo_duplicate(sqlalchemy_store):
         repos = result.scalars().all()
 
         assert len(repos) == 1
+
+
+@pytest.mark.asyncio
+async def test_sqlalchemy_store_get_complexity_snapshots_latest_for_repo(sqlalchemy_store):
+    repo_id = uuid.uuid4()
+    other_repo_id = uuid.uuid4()
+    computed_at = datetime(2025, 1, 10, tzinfo=timezone.utc).isoformat()
+
+    async with sqlalchemy_store as store:
+        await store.insert_repo(Repo(id=repo_id, repo="owner/repo"))
+        await store.insert_repo(Repo(id=other_repo_id, repo="owner/other"))
+
+        await store.session.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS file_complexity_snapshots (
+                  repo_id TEXT NOT NULL,
+                  as_of_day TEXT NOT NULL,
+                  ref TEXT NOT NULL,
+                  file_path TEXT NOT NULL,
+                  language TEXT,
+                  loc INTEGER NOT NULL,
+                  functions_count INTEGER NOT NULL,
+                  cyclomatic_total INTEGER NOT NULL,
+                  cyclomatic_avg REAL NOT NULL,
+                  high_complexity_functions INTEGER NOT NULL,
+                  very_high_complexity_functions INTEGER NOT NULL,
+                  computed_at TEXT NOT NULL,
+                  PRIMARY KEY (repo_id, as_of_day, file_path)
+                )
+                """
+            )
+        )
+        await store.session.commit()
+
+        # repo_id: snapshots on two different days
+        await store.session.execute(
+            text(
+                """
+                INSERT INTO file_complexity_snapshots
+                (repo_id, as_of_day, ref, file_path, language, loc, functions_count,
+                 cyclomatic_total, cyclomatic_avg, high_complexity_functions,
+                 very_high_complexity_functions, computed_at)
+                VALUES
+                (:repo_id, '2025-01-01', 'main', 'a.py', 'python', 10, 1, 5, 5.0, 0, 0, :computed_at),
+                (:repo_id, '2025-01-03', 'main', 'a.py', 'python', 12, 1, 8, 8.0, 0, 0, :computed_at),
+                (:repo_id, '2025-01-03', 'main', 'b.py', 'python', 20, 2, 3, 1.5, 0, 0, :computed_at)
+                """
+            ),
+            {"repo_id": str(repo_id), "computed_at": computed_at},
+        )
+        # other_repo_id: only one day
+        await store.session.execute(
+            text(
+                """
+                INSERT INTO file_complexity_snapshots
+                (repo_id, as_of_day, ref, file_path, language, loc, functions_count,
+                 cyclomatic_total, cyclomatic_avg, high_complexity_functions,
+                 very_high_complexity_functions, computed_at)
+                VALUES
+                (:repo_id, '2025-01-02', 'main', 'x.py', 'python', 1, 1, 1, 1.0, 0, 0, :computed_at)
+                """
+            ),
+            {"repo_id": str(other_repo_id), "computed_at": computed_at},
+        )
+        await store.session.commit()
+
+        snaps = await store.get_complexity_snapshots(
+            as_of_day=date(2025, 1, 5),
+            repo_id=repo_id,
+        )
+        assert {s.file_path for s in snaps} == {"a.py", "b.py"}
+        assert {s.as_of_day for s in snaps} == {date(2025, 1, 3)}
+
+
+@pytest.mark.asyncio
+async def test_sqlalchemy_store_get_complexity_snapshots_latest_for_all_repos(sqlalchemy_store):
+    repo_id = uuid.uuid4()
+    other_repo_id = uuid.uuid4()
+    computed_at = datetime(2025, 1, 10, tzinfo=timezone.utc).isoformat()
+
+    async with sqlalchemy_store as store:
+        await store.insert_repo(Repo(id=repo_id, repo="owner/repo"))
+        await store.insert_repo(Repo(id=other_repo_id, repo="owner/other"))
+
+        await store.session.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS file_complexity_snapshots (
+                  repo_id TEXT NOT NULL,
+                  as_of_day TEXT NOT NULL,
+                  ref TEXT NOT NULL,
+                  file_path TEXT NOT NULL,
+                  language TEXT,
+                  loc INTEGER NOT NULL,
+                  functions_count INTEGER NOT NULL,
+                  cyclomatic_total INTEGER NOT NULL,
+                  cyclomatic_avg REAL NOT NULL,
+                  high_complexity_functions INTEGER NOT NULL,
+                  very_high_complexity_functions INTEGER NOT NULL,
+                  computed_at TEXT NOT NULL,
+                  PRIMARY KEY (repo_id, as_of_day, file_path)
+                )
+                """
+            )
+        )
+        await store.session.commit()
+
+        await store.session.execute(
+            text(
+                """
+                INSERT INTO file_complexity_snapshots
+                (repo_id, as_of_day, ref, file_path, language, loc, functions_count,
+                 cyclomatic_total, cyclomatic_avg, high_complexity_functions,
+                 very_high_complexity_functions, computed_at)
+                VALUES
+                (:repo1, '2025-01-01', 'main', 'a.py', 'python', 10, 1, 5, 5.0, 0, 0, :computed_at),
+                (:repo1, '2025-01-03', 'main', 'a.py', 'python', 12, 1, 8, 8.0, 0, 0, :computed_at),
+                (:repo2, '2025-01-02', 'main', 'x.py', 'python', 1, 1, 1, 1.0, 0, 0, :computed_at),
+                (:repo2, '2025-01-04', 'main', 'x.py', 'python', 2, 1, 2, 2.0, 0, 0, :computed_at)
+                """
+            ),
+            {"repo1": str(repo_id), "repo2": str(other_repo_id), "computed_at": computed_at},
+        )
+        await store.session.commit()
+
+        snaps = await store.get_complexity_snapshots(as_of_day=date(2025, 1, 5))
+        by_repo = {}
+        for s in snaps:
+            by_repo.setdefault(s.repo_id, []).append(s)
+
+        assert {s.as_of_day for s in by_repo[repo_id]} == {date(2025, 1, 3)}
+        assert {s.as_of_day for s in by_repo[other_repo_id]} == {date(2025, 1, 4)}
+
+
+@pytest.mark.asyncio
+async def test_sqlalchemy_store_get_work_item_user_metrics_daily(sqlalchemy_store):
+    computed_at = datetime(2025, 1, 10, tzinfo=timezone.utc).isoformat()
+
+    async with sqlalchemy_store as store:
+        await store.session.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS work_item_user_metrics_daily (
+                  day TEXT NOT NULL,
+                  provider TEXT NOT NULL,
+                  work_scope_id TEXT NOT NULL,
+                  user_identity TEXT NOT NULL,
+                  team_id TEXT NOT NULL,
+                  team_name TEXT NOT NULL,
+                  items_started INTEGER NOT NULL,
+                  items_completed INTEGER NOT NULL,
+                  wip_count_end_of_day INTEGER NOT NULL,
+                  cycle_time_p50_hours REAL,
+                  cycle_time_p90_hours REAL,
+                  computed_at TEXT NOT NULL,
+                  PRIMARY KEY (provider, work_scope_id, user_identity, day)
+                )
+                """
+            )
+        )
+        await store.session.execute(
+            text(
+                """
+                INSERT INTO work_item_user_metrics_daily
+                (day, provider, work_scope_id, user_identity, team_id, team_name,
+                 items_started, items_completed, wip_count_end_of_day,
+                 cycle_time_p50_hours, cycle_time_p90_hours, computed_at)
+                VALUES
+                ('2025-01-05', 'github', 'gh:owner/repo', 'dev@example.com', 'team-a', 'Team A',
+                 2, 1, 3, 12.0, 48.0, :computed_at)
+                """
+            ),
+            {"computed_at": computed_at},
+        )
+        await store.session.commit()
+
+        rows = await store.get_work_item_user_metrics_daily(day=date(2025, 1, 5))
+        assert len(rows) == 1
+        assert rows[0].user_identity == "dev@example.com"
+        assert rows[0].items_completed == 1
 
 
 @pytest.mark.asyncio
@@ -608,8 +789,15 @@ async def test_clickhouse_store_context_manager_initializes_and_creates_tables()
     mock_sql_file = MagicMock()
     mock_sql_file.read_text.return_value = "CREATE TABLE test1; CREATE TABLE test2;"
 
-    with patch("storage.clickhouse_connect.get_client", return_value=mock_client) as get_client, \
-         patch("storage.Path") as MockPath:
+    import sys
+    from types import SimpleNamespace
+
+    get_client = MagicMock(return_value=mock_client)
+    fake_clickhouse_connect = SimpleNamespace(get_client=get_client)
+
+    with patch.dict(sys.modules, {"clickhouse_connect": fake_clickhouse_connect}), patch(
+        "storage.Path"
+    ) as MockPath:
 
         # Setup the chain: Path(__file__).resolve().parent / "migrations" / "clickhouse"
         mock_file_path = MagicMock()
@@ -655,7 +843,13 @@ async def test_clickhouse_store_insert_git_file_data_calls_insert():
     mock_client.query = MagicMock(return_value=MagicMock(result_rows=[]))
     mock_client.close = MagicMock()
 
-    with patch("storage.clickhouse_connect.get_client", return_value=mock_client):
+    import sys
+    from types import SimpleNamespace
+
+    get_client = MagicMock(return_value=mock_client)
+    fake_clickhouse_connect = SimpleNamespace(get_client=get_client)
+
+    with patch.dict(sys.modules, {"clickhouse_connect": fake_clickhouse_connect}):
         store = ClickHouseStore("clickhouse://localhost:8123/default")
         async with store:
             await store.insert_git_file_data(file_data)

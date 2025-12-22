@@ -12,6 +12,8 @@ Purpose: compact, actionable rules for an AI coding agent (Copilot-like) working
 - Local sync orchestration lives in `processors/local.py` (`process_local_repo`).
 - Connectors live in `connectors/` and must handle pagination, rate-limits, and provide batch helpers.
 - Processors in `processors/` implement the pipeline: commits → PRs → commit-stats → files/blame.
+- Work item sync is separate (`sync work-items`); `metrics daily` expects work items already stored unless explicitly asked to fetch providers.
+- Planned: repo filtering for `sync work-items` by tags/settings (beyond name glob).
 - Fixtures in `fixtures/` generate synthetic data for testing/demos.
 - Implementation plans, metrics inventory, and requirement details live in `docs/project.md`, `docs/metrics-inventory.md`, and `docs/roadmap.md`.
 
@@ -27,6 +29,12 @@ python cli.py sync local --db "<DB_CONN>" --repo-path /path/to/repo
 
 ```bash
 python cli.py fixtures generate --db "<DB_CONN>" --days 30
+```
+
+- Sync work items (provider APIs → work item tables):
+
+```bash
+python cli.py sync work-items --provider github --auth "$GITHUB_TOKEN" -s "org/*" --db "<DB_CONN>" --date 2025-02-01 --backfill 30
 ```
 
 - Compute complexity metrics (batch mode):

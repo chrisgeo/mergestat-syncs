@@ -1,5 +1,12 @@
 # Part 1 — Existing Platforms: What They Measure
 
+## System Flow (Connect → Sync → Calculate)
+
+- **Connect & sync**: ingest Git facts via `sync local|github|gitlab`.
+- **Sync work items**: fetch Jira/GitHub/GitLab issues separately via `sync work-items` (use `--auth` to override GitHub/GitLab tokens).
+- **Calculate**: run `metrics daily` using stored facts (no provider calls by default).
+- **Planned**: allow `sync work-items` filtering by repo tags/settings.
+
 ## LinearB — Flow & Team Efficiency
 
 Focus: flow, predictability, PR health, resource allocation.
@@ -155,7 +162,7 @@ Focus: IDE-level behavior and burnout risk.
   - Churn
   - Ownership concentration
   - Hotspots
-  - Cyclomatic Complexity (radon)
+  - Cyclomatic Complexity (radon; snapshots persisted and loaded via `store.get_complexity_snapshots()`)
 - Rework Rate
 - PR Quality
 

@@ -17,8 +17,8 @@ Git facts must already exist in the backend you point the job at:
 - `git_commit_stats`
 - `git_pull_requests`
 
-Work tracking facts are fetched live from provider APIs during metrics computation when `--provider` is not `none`.
-See `docs/task_trackers.md` for configuration.
+Work tracking facts should be synced from provider APIs via `python cli.py sync work-items ...`.
+See `docs/task_trackers.md` for configuration. (`metrics daily --provider ...` still exists as a convenience/backward-compatible path.)
 
 CI/CD pipeline facts are synced from GitHub/GitLab during the `sync` command when `--sync-cicd` is enabled:
 
@@ -235,7 +235,8 @@ It also supports SQLite, reading the same tables and writing metrics tables into
 - Filter to one repository:
   - `python cli.py metrics daily --date 2025-02-01 --repo-id <uuid> --db clickhouse://localhost:8123/default`
 - Compute git + work item metrics (requires provider credentials; see `docs/task_trackers.md`):
-  - `python cli.py metrics daily --date 2025-02-01 --db clickhouse://localhost:8123/default --provider all`
+  - `python cli.py sync work-items --provider all --date 2025-02-01 --backfill 30 --db clickhouse://localhost:8123/default`
+  - `python cli.py metrics daily --date 2025-02-01 --backfill 30 --db clickhouse://localhost:8123/default`
 
 ## Dependencies
 

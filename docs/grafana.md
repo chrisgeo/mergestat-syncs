@@ -66,7 +66,8 @@ python cli.py sync local --db "clickhouse://localhost:8123/default" --repo-path 
 2) Compute derived metrics:
 
 ```bash
-python cli.py metrics daily --date 2025-02-01 --backfill 30 --db "clickhouse://localhost:8123/default" --provider all
+python cli.py sync work-items --provider all --date 2025-02-01 --backfill 30 --db "clickhouse://localhost:8123/default"
+python cli.py metrics daily --date 2025-02-01 --backfill 30 --db "clickhouse://localhost:8123/default"
 ```
 
 Work tracking providers require credentials; see `docs/task_trackers.md`.

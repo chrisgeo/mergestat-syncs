@@ -7,7 +7,9 @@ This file orients AI coding agents to the dev-health-ops repository: key archite
 - Local sync: `python cli.py sync local --db "$DB_CONN_STRING" --repo-path .`
 - GitHub sync: `python cli.py sync github --db "$DB_CONN_STRING" --owner <owner> --repo <repo>`
 - GitLab sync: `python cli.py sync gitlab --db "$DB_CONN_STRING" --project-id <id>`
-- Metrics: `python cli.py metrics daily --date YYYY-MM-DD --db "$DB_CONN_STRING" --provider all` (includes Investment metrics)
+- Work items sync: `python cli.py sync work-items --provider jira|github|gitlab|synthetic|all -s "org/*" --date YYYY-MM-DD --db "$DB_CONN_STRING"` (use `--auth` for GitHub/GitLab token override)
+- Planned: repo filtering for `sync work-items` by tags/settings (beyond name glob).
+- Metrics: `python cli.py metrics daily --date YYYY-MM-DD --db "$DB_CONN_STRING"` (uses already-synced work items; `--provider` remains for backward-compatible fetch+compute)
 - Complexity: `python cli.py metrics complexity -s "*" --backfill 30`
 - Fixtures: `python cli.py fixtures generate --db "$DB_CONN_STRING" --days 30`
 
@@ -16,7 +18,7 @@ This file orients AI coding agents to the dev-health-ops repository: key archite
 - `cli.py` dispatches sync/metrics flows and calls processors directly.
 - `processors/` implement data pipelines; `processors/local.py` orchestrates local sync.
 - `connectors/` wrap GitHub/GitLab API access with pagination + rate limits.
-- `storage.py` abstracts DB backends (Postgres/Mongo/SQLite/ClickHouse).
+- `storage.py` abstracts DB backends (Postgres/Mongo/SQLite/ClickHouse), including unified reads like `get_complexity_snapshots`.
 - `utils.py` holds shared helpers (parsing, git iteration, file filtering).
 - `fixtures/` generates synthetic data for testing.
 

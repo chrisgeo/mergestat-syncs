@@ -9,7 +9,7 @@ This file provides a high-level overview and context for Gemini to understand th
 The project follows a pipeline-like architecture:
 1.  **Connectors (`connectors/`)**: Fetch raw data from providers (GitHub, GitLab, Jira).
 2.  **Processors (`processors/`)**: Normalize and process the raw data.
-3.  **Storage (`storage.py`, `models/`)**: Persist processed data into various backends.
+3.  **Storage (`storage.py`, `models/`)**: Persist processed data into various backends (also provides unified read helpers like `get_complexity_snapshots`).
 4.  **Metrics (`metrics/`)**: Compute high-level metrics (e.g., throughput, cycle time, rework, bus factor, predictability) from the stored data.
 5.  **Visualization (`grafana/`)**: Provision Grafana dashboards to visualize the computed metrics.
 
@@ -40,7 +40,9 @@ The project follows a pipeline-like architecture:
 
 ## Development Workflow
 - **Syncing Data**: `python cli.py sync <provider> --db <connection_string> ...`
-- **Computing Metrics**: `python cli.py metrics daily --db <connection_string> ...` (includes Investment metrics)
+- **Syncing Work Items**: `python cli.py sync work-items --provider <jira|github|gitlab|synthetic|all> -s "<org/*>" --db <connection_string> ...` (use `--auth` to override `GITHUB_TOKEN`/`GITLAB_TOKEN`)
+- **Planned**: repo filtering for `sync work-items` by tags/settings (beyond name glob).
+- **Computing Metrics**: `python cli.py metrics daily --db <connection_string> ...` (expects work items already synced unless `--provider` is set)
 - **Complexity Metrics**: `python cli.py metrics complexity --repo-path . -s "*" --db <connection_string> ...`
 - **Generating Data**: `python cli.py fixtures generate --db <connection_string> ...`
 - **Visualization**: `python cli.py grafana up` to start the dashboard stack.

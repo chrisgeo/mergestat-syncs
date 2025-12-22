@@ -226,6 +226,37 @@ def _cmd_sync_gitlab(ns: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_sync_work_items(ns: argparse.Namespace) -> int:
+    from metrics.job_work_items import run_work_items_sync_job
+
+    if ns.auth:
+        provider = (ns.provider or "").strip().lower()
+        if provider == "gitlab":
+            os.environ["GITLAB_TOKEN"] = ns.auth
+        elif provider == "github":
+            os.environ["GITHUB_TOKEN"] = ns.auth
+        elif provider == "jira":
+            raise SystemExit(
+                "--auth is not supported for Jira; use JIRA_BASE_URL/JIRA_EMAIL/JIRA_API_TOKEN."
+            )
+        elif provider in {"all", "*"}:
+            raise SystemExit(
+                "--auth is ambiguous with --provider all; set GITHUB_TOKEN and GITLAB_TOKEN env vars."
+            )
+
+    run_work_items_sync_job(
+        db_url=ns.db,
+        day=ns.date,
+        backfill_days=max(1, int(ns.backfill)),
+        provider=ns.provider,
+        sink=ns.sink,
+        repo_id=ns.repo_id,
+        repo_name=getattr(ns, "repo_name", None),
+        search_pattern=getattr(ns, "search", None),
+    )
+    return 0
+
+
 def _cmd_metrics_daily(ns: argparse.Namespace) -> int:
     # Import lazily to keep CLI startup fast and avoid optional deps at import time.
     from metrics.job_daily import run_daily_metrics_job
@@ -548,6 +579,55 @@ def build_parser() -> argparse.ArgumentParser:
     )
     gl.set_defaults(func=_cmd_sync_gitlab)
 
+    wi = sync_sub.add_parser(
+        "work-items",
+        help="Sync work tracking data from provider APIs (and write derived work item tables).",
+    )
+    wi.add_argument("--db", required=True, help="Database connection string.")
+    wi.add_argument(
+        "--provider",
+        choices=["all", "jira", "github", "gitlab", "synthetic"],
+        required=True,
+        help="Which work item providers to sync.",
+    )
+    wi.add_argument(
+        "--auth",
+        help="Provider token override (GitHub/GitLab). Sets GITHUB_TOKEN or GITLAB_TOKEN.",
+    )
+    wi.add_argument(
+        "--sink",
+        choices=["auto", "clickhouse", "mongo", "sqlite", "postgres", "both"],
+        default="auto",
+        help="Where to write derived work item metrics.",
+    )
+    wi.add_argument(
+        "--date",
+        required=True,
+        type=_parse_date,
+        help="Target day (UTC) as YYYY-MM-DD.",
+    )
+    wi.add_argument(
+        "--backfill",
+        type=int,
+        default=1,
+        help="Sync and compute N days ending at --date (inclusive).",
+    )
+    wi.add_argument(
+        "--repo-id",
+        type=lambda s: __import__("uuid").UUID(s),
+        help="Optional repo_id UUID filter (affects GitHub/GitLab repo selection).",
+    )
+    wi.add_argument(
+        "--repo-name",
+        help="Optional repo name filter (e.g. 'owner/repo') (affects GitHub/GitLab repo selection).",
+    )
+    wi.add_argument(
+        "-s",
+        "--search",
+        help="Filter repos by name (glob pattern, e.g. 'org/*').",
+    )
+    wi.set_defaults(func=_cmd_sync_work_items)
+
     # ---- metrics ----
     metrics = sub.add_parser("metrics", help="Compute and write derived metrics.")
     metrics_sub = metrics.add_subparsers(dest="metrics_command", required=True)
@@ -584,7 +664,7 @@ def build_parser() -> argparse.ArgumentParser:
     daily.add_argument(
         "--provider",
         choices=["all", "jira", "github", "gitlab", "synthetic", "none"],
-        default="all",
+        default="none",
         help="Which work item providers to include.",
     )
     daily.add_argument(
