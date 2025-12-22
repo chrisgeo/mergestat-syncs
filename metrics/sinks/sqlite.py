@@ -22,6 +22,9 @@ from metrics.schemas import (
     DeployMetricsDailyRecord,
     IncidentMetricsDailyRecord,
     ICLandscapeRollingRecord,
+    FileComplexitySnapshot,
+    RepoComplexityDaily,
+    FileHotspotDaily,
 )
 
 
@@ -306,6 +309,51 @@ class SQLiteMetricsSink:
               PRIMARY KEY (repo_id, map_name, as_of_day, identity_id)
             )
             """,
+            """
+            CREATE TABLE IF NOT EXISTS file_complexity_snapshots (
+              repo_id TEXT NOT NULL,
+              as_of_day TEXT NOT NULL,
+              ref TEXT NOT NULL,
+              file_path TEXT NOT NULL,
+              language TEXT,
+              loc INTEGER NOT NULL,
+              functions_count INTEGER NOT NULL,
+              cyclomatic_total INTEGER NOT NULL,
+              cyclomatic_avg REAL NOT NULL,
+              high_complexity_functions INTEGER NOT NULL,
+              very_high_complexity_functions INTEGER NOT NULL,
+              computed_at TEXT NOT NULL,
+              PRIMARY KEY (repo_id, as_of_day, file_path)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS repo_complexity_daily (
+              repo_id TEXT NOT NULL,
+              day TEXT NOT NULL,
+              loc_total INTEGER NOT NULL,
+              cyclomatic_total INTEGER NOT NULL,
+              cyclomatic_per_kloc REAL NOT NULL,
+              high_complexity_functions INTEGER NOT NULL,
+              very_high_complexity_functions INTEGER NOT NULL,
+              computed_at TEXT NOT NULL,
+              PRIMARY KEY (repo_id, day)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS file_hotspot_daily (
+              repo_id TEXT NOT NULL,
+              day TEXT NOT NULL,
+              file_path TEXT NOT NULL,
+              churn_loc_30d INTEGER NOT NULL,
+              churn_commits_30d INTEGER NOT NULL,
+              cyclomatic_total INTEGER NOT NULL,
+              cyclomatic_avg REAL NOT NULL,
+              blame_concentration REAL,
+              risk_score REAL NOT NULL,
+              computed_at TEXT NOT NULL,
+              PRIMARY KEY (repo_id, day, file_path)
+            )
+            """,
             "CREATE INDEX IF NOT EXISTS idx_repo_metrics_daily_day ON repo_metrics_daily(day)",
             "CREATE INDEX IF NOT EXISTS idx_user_metrics_daily_day ON user_metrics_daily(day)",
             "CREATE INDEX IF NOT EXISTS idx_commit_metrics_day ON commit_metrics(day)",
@@ -318,6 +366,9 @@ class SQLiteMetricsSink:
             "CREATE INDEX IF NOT EXISTS idx_deploy_metrics_daily_day ON deploy_metrics_daily(day)",
             "CREATE INDEX IF NOT EXISTS idx_incident_metrics_daily_day ON incident_metrics_daily(day)",
             "CREATE INDEX IF NOT EXISTS idx_ic_landscape_rolling_30d_day ON ic_landscape_rolling_30d(as_of_day)",
+            "CREATE INDEX IF NOT EXISTS idx_file_complexity_snapshots_day ON file_complexity_snapshots(as_of_day)",
+            "CREATE INDEX IF NOT EXISTS idx_repo_complexity_daily_day ON repo_complexity_daily(day)",
+            "CREATE INDEX IF NOT EXISTS idx_file_hotspot_daily_day ON file_hotspot_daily(day)",
         ]
         with self.engine.begin() as conn:
             for stmt in stmts:
@@ -1344,3 +1395,133 @@ class SQLiteMetricsSink:
         payload = [self._incident_row(r) for r in rows]
         with self.engine.begin() as conn:
             conn.execute(stmt, payload)
+
+    def write_file_complexity_snapshots(
+        self, rows: Sequence[FileComplexitySnapshot]
+    ) -> None:
+        if not rows:
+            return
+        stmt = text(
+            """
+            INSERT INTO file_complexity_snapshots (
+              repo_id, as_of_day, ref, file_path, language, loc, functions_count,
+              cyclomatic_total, cyclomatic_avg, high_complexity_functions,
+              very_high_complexity_functions, computed_at
+            ) VALUES (
+              :repo_id, :as_of_day, :ref, :file_path, :language, :loc, :functions_count,
+              :cyclomatic_total, :cyclomatic_avg, :high_complexity_functions,
+              :very_high_complexity_functions, :computed_at
+            )
+            ON CONFLICT(repo_id, as_of_day, file_path) DO UPDATE SET
+              ref=excluded.ref,
+              language=excluded.language,
+              loc=excluded.loc,
+              functions_count=excluded.functions_count,
+              cyclomatic_total=excluded.cyclomatic_total,
+              cyclomatic_avg=excluded.cyclomatic_avg,
+              high_complexity_functions=excluded.high_complexity_functions,
+              very_high_complexity_functions=excluded.very_high_complexity_functions,
+              computed_at=excluded.computed_at
+            """
+        )
+        payload = [self._complexity_row(r) for r in rows]
+        with self.engine.begin() as conn:
+            conn.execute(stmt, payload)
+
+    def write_repo_complexity_daily(
+        self, rows: Sequence[RepoComplexityDaily]
+    ) -> None:
+        if not rows:
+            return
+        stmt = text(
+            """
+            INSERT INTO repo_complexity_daily (
+              repo_id, day, loc_total, cyclomatic_total, cyclomatic_per_kloc,
+              high_complexity_functions, very_high_complexity_functions, computed_at
+            ) VALUES (
+              :repo_id, :day, :loc_total, :cyclomatic_total, :cyclomatic_per_kloc,
+              :high_complexity_functions, :very_high_complexity_functions, :computed_at
+            )
+            ON CONFLICT(repo_id, day) DO UPDATE SET
+              loc_total=excluded.loc_total,
+              cyclomatic_total=excluded.cyclomatic_total,
+              cyclomatic_per_kloc=excluded.cyclomatic_per_kloc,
+              high_complexity_functions=excluded.high_complexity_functions,
+              very_high_complexity_functions=excluded.very_high_complexity_functions,
+              computed_at=excluded.computed_at
+            """
+        )
+        payload = [self._repo_complexity_row(r) for r in rows]
+        with self.engine.begin() as conn:
+            conn.execute(stmt, payload)
+
+    def write_file_hotspot_daily(self, rows: Sequence[FileHotspotDaily]) -> None:
+        if not rows:
+            return
+        stmt = text(
+            """
+            INSERT INTO file_hotspot_daily (
+              repo_id, day, file_path, churn_loc_30d, churn_commits_30d,
+              cyclomatic_total, cyclomatic_avg, blame_concentration, risk_score, computed_at
+            ) VALUES (
+              :repo_id, :day, :file_path, :churn_loc_30d, :churn_commits_30d,
+              :cyclomatic_total, :cyclomatic_avg, :blame_concentration, :risk_score, :computed_at
+            )
+            ON CONFLICT(repo_id, day, file_path) DO UPDATE SET
+              churn_loc_30d=excluded.churn_loc_30d,
+              churn_commits_30d=excluded.churn_commits_30d,
+              cyclomatic_total=excluded.cyclomatic_total,
+              cyclomatic_avg=excluded.cyclomatic_avg,
+              blame_concentration=excluded.blame_concentration,
+              risk_score=excluded.risk_score,
+              computed_at=excluded.computed_at
+            """
+        )
+        payload = [self._hotspot_row(r) for r in rows]
+        with self.engine.begin() as conn:
+            conn.execute(stmt, payload)
+
+    def _complexity_row(self, row: FileComplexitySnapshot) -> dict:
+        data = asdict(row)
+        return {
+            "repo_id": str(data["repo_id"]),
+            "as_of_day": data["as_of_day"].isoformat(),
+            "ref": str(data["ref"]),
+            "file_path": str(data["file_path"]),
+            "language": str(data.get("language") or ""),
+            "loc": int(data["loc"]),
+            "functions_count": int(data["functions_count"]),
+            "cyclomatic_total": int(data["cyclomatic_total"]),
+            "cyclomatic_avg": float(data["cyclomatic_avg"]),
+            "high_complexity_functions": int(data["high_complexity_functions"]),
+            "very_high_complexity_functions": int(data["very_high_complexity_functions"]),
+            "computed_at": _dt_to_sqlite(data["computed_at"]),
+        }
+
+    def _repo_complexity_row(self, row: RepoComplexityDaily) -> dict:
+        data = asdict(row)
+        return {
+            "repo_id": str(data["repo_id"]),
+            "day": data["day"].isoformat(),
+            "loc_total": int(data["loc_total"]),
+            "cyclomatic_total": int(data["cyclomatic_total"]),
+            "cyclomatic_per_kloc": float(data["cyclomatic_per_kloc"]),
+            "high_complexity_functions": int(data["high_complexity_functions"]),
+            "very_high_complexity_functions": int(data["very_high_complexity_functions"]),
+            "computed_at": _dt_to_sqlite(data["computed_at"]),
+        }
+
+    def _hotspot_row(self, row: FileHotspotDaily) -> dict:
+        data = asdict(row)
+        return {
+            "repo_id": str(data["repo_id"]),
+            "day": data["day"].isoformat(),
+            "file_path": str(data["file_path"]),
+            "churn_loc_30d": int(data["churn_loc_30d"]),
+            "churn_commits_30d": int(data["churn_commits_30d"]),
+            "cyclomatic_total": int(data["cyclomatic_total"]),
+            "cyclomatic_avg": float(data["cyclomatic_avg"]),
+            "blame_concentration": data.get("blame_concentration"),
+            "risk_score": float(data["risk_score"]),
+            "computed_at": _dt_to_sqlite(data["computed_at"]),
+        }

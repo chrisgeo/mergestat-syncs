@@ -7,7 +7,8 @@ This file orients AI coding agents to the dev-health-ops repository: key archite
 - Local sync: `python cli.py sync local --db "$DB_CONN_STRING" --repo-path .`
 - GitHub sync: `python cli.py sync github --db "$DB_CONN_STRING" --owner <owner> --repo <repo>`
 - GitLab sync: `python cli.py sync gitlab --db "$DB_CONN_STRING" --project-id <id>`
-- Metrics: `python cli.py metrics daily --date YYYY-MM-DD --db "$DB_CONN_STRING" --provider all`
+- Metrics: `python cli.py metrics daily --date YYYY-MM-DD --db "$DB_CONN_STRING" --provider all` (includes Investment metrics)
+- Complexity: `python cli.py metrics complexity -s "*" --backfill 30`
 - Fixtures: `python cli.py fixtures generate --db "$DB_CONN_STRING" --days 30`
 
 **Big-picture architecture**
@@ -128,3 +129,6 @@ pytest tests/test_github_connector.py -q
 - GitHub / GitLab APIs: tokens required (`GITHUB_TOKEN`, `GITLAB_TOKEN`). Tokens require repository scopes listed in README.
 - Databases: supports `postgres`, `mongo`, `sqlite`, `clickhouse` (auto-detected from URL). Use `alembic` for Postgres migrations.
 - Local git: uses `gitpython` for local-mode iteration.
+
+---
+**Note for AI Agents**: Always update this document, along with `GEMINI.md`, `AGENTS.md`, `docs/roadmap.md`, `docs/project.md`, and `docs/metrics-inventory.md` whenever a task is completed or a feature is modified to maintain an accurate system context.

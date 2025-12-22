@@ -602,6 +602,28 @@ def run_daily_metrics_job(
                     repo_id=repo_id,
                     repo_name=repo_name,
                 )
+            elif backend == "sqlite":
+                 complexity_map = _load_sqlite_complexity_snapshots(
+                    primary_sink.engine,
+                    as_of_day=d,
+                    repo_id=repo_id,
+                    repo_name=repo_name,
+                )
+            elif backend == "mongo":
+                 complexity_map = _load_mongo_complexity_snapshots(
+                    primary_sink.db,
+                    as_of_day=d,
+                    repo_id=repo_id,
+                    repo_name=repo_name,
+                )
+            elif backend == "postgres":
+                 # Postgres uses same logic as sqlite via SQLAlchemy engine
+                 complexity_map = _load_sqlite_complexity_snapshots(
+                    primary_sink.engine,
+                    as_of_day=d,
+                    repo_id=repo_id,
+                    repo_name=repo_name,
+                )
             
             risk_hotspots: List[FileHotspotDaily] = []
             if complexity_map:
@@ -2133,6 +2155,150 @@ def _load_clickhouse_complexity_snapshots(
             high_complexity_functions=row.get("high_complexity_functions", 0),
             very_high_complexity_functions=row.get("very_high_complexity_functions", 0),
             computed_at=row.get("computed_at") # type: ignore
+        )
+    return result
+
+
+def _load_sqlite_complexity_snapshots(
+    engine: Any,
+    *,
+    as_of_day: date,
+    repo_id: Optional[uuid.UUID],
+    repo_name: Optional[str] = None,
+) -> Dict[str, FileComplexitySnapshot]:
+    from sqlalchemy import text
+    
+    params: Dict[str, Any] = {"day": as_of_day}
+    date_query = "SELECT max(as_of_day) FROM file_complexity_snapshots WHERE as_of_day <= :day"
+    
+    if repo_id:
+        date_query += " AND repo_id = :repo_id"
+        params["repo_id"] = str(repo_id)
+    elif repo_name:
+        date_query += " AND repo_id IN (SELECT id FROM repos WHERE repo = :repo_name)"
+        params["repo_name"] = repo_name
+        
+    try:
+        with engine.connect() as conn:
+            res = conn.execute(text(date_query), params).fetchone()
+            if not res or not res[0]:
+                return {}
+            max_day_str = res[0]
+            # Ensure it is a string if not already (SQLite usually stores dates as strings)
+            if isinstance(max_day_str, date):
+                max_day = max_day_str
+            else:
+                max_day = date.fromisoformat(str(max_day_str))
+            
+            params["max_day"] = max_day
+            
+            query = """
+            SELECT
+                repo_id, as_of_day, ref, file_path, language, loc, functions_count,
+                cyclomatic_total, cyclomatic_avg, high_complexity_functions,
+                very_high_complexity_functions, computed_at
+            FROM file_complexity_snapshots
+            WHERE as_of_day = :max_day
+            """
+            if repo_id:
+                query += " AND repo_id = :repo_id"
+            elif repo_name:
+                query += " AND repo_id IN (SELECT id FROM repos WHERE repo = :repo_name)"
+            
+            rows = conn.execute(text(query), params).fetchall()
+            result = {}
+            for r in rows:
+                r_id = uuid.UUID(str(r[0]))
+                f_path = str(r[3])
+                
+                as_of_day_val = r[1]
+                if isinstance(as_of_day_val, str):
+                    as_of_day_val = date.fromisoformat(as_of_day_val)
+                    
+                computed_at_val = r[11]
+                if isinstance(computed_at_val, str):
+                     computed_at_val = datetime.fromisoformat(computed_at_val.replace("Z", "+00:00"))
+
+                result[f_path] = FileComplexitySnapshot(
+                    repo_id=r_id,
+                    as_of_day=as_of_day_val,
+                    ref=str(r[2]),
+                    file_path=f_path,
+                    language=str(r[4] or ""),
+                    loc=int(r[5]),
+                    functions_count=int(r[6]),
+                    cyclomatic_total=int(r[7]),
+                    cyclomatic_avg=float(r[8]),
+                    high_complexity_functions=int(r[9]),
+                    very_high_complexity_functions=int(r[10]),
+                    computed_at=computed_at_val
+                )
+            return result
+            
+    except Exception as e:
+        logger.warning(f"Failed to load complexity snapshots from SQLite: {e}")
+        return {}
+
+
+def _load_mongo_complexity_snapshots(
+    db: Any,
+    *,
+    as_of_day: date,
+    repo_id: Optional[uuid.UUID],
+    repo_name: Optional[str] = None,
+) -> Dict[str, FileComplexitySnapshot]:
+    from metrics.schemas import FileComplexitySnapshot
+    
+    as_of_dt = datetime(as_of_day.year, as_of_day.month, as_of_day.day)
+    
+    query: Dict[str, Any] = {"as_of_day": {"$lte": as_of_dt}}
+    if repo_id:
+        query["repo_id"] = str(repo_id)
+    elif repo_name:
+         repo_doc = db["repos"].find_one({"repo": repo_name}, {"id": 1, "_id": 1})
+         if repo_doc:
+            query["repo_id"] = str(repo_doc.get("id") or repo_doc.get("_id"))
+         else:
+            return {}
+
+    # Find max day
+    max_day_doc = db["file_complexity_snapshots"].find_one(
+        query, 
+        sort=[("as_of_day", -1)],
+        projection={"as_of_day": 1}
+    )
+    if not max_day_doc:
+        return {}
+    
+    max_day_dt = max_day_doc["as_of_day"]
+    query["as_of_day"] = max_day_dt
+    
+    docs = list(db["file_complexity_snapshots"].find(query))
+    result = {}
+    for doc in docs:
+        f_path = doc.get("file_path")
+        if not f_path: continue
+        
+        # doc might have string repo_id
+        r_id_raw = doc.get("repo_id")
+        r_id = uuid.UUID(r_id_raw) if isinstance(r_id_raw, str) else r_id_raw
+        
+        # as_of_day in schema is date, but mongo stores datetime
+        as_of_day_val = doc["as_of_day"].date() if isinstance(doc["as_of_day"], datetime) else doc["as_of_day"]
+
+        result[f_path] = FileComplexitySnapshot(
+            repo_id=r_id,
+            as_of_day=as_of_day_val,
+            ref=doc.get("ref", ""),
+            file_path=f_path,
+            language=doc.get("language", ""),
+            loc=int(doc.get("loc", 0)),
+            functions_count=int(doc.get("functions_count", 0)),
+            cyclomatic_total=int(doc.get("cyclomatic_total", 0)),
+            cyclomatic_avg=float(doc.get("cyclomatic_avg", 0.0)),
+            high_complexity_functions=int(doc.get("high_complexity_functions", 0)),
+            very_high_complexity_functions=int(doc.get("very_high_complexity_functions", 0)),
+            computed_at=doc.get("computed_at")
         )
     return result
 

@@ -40,7 +40,8 @@ The project follows a pipeline-like architecture:
 
 ## Development Workflow
 - **Syncing Data**: `python cli.py sync <provider> --db <connection_string> ...`
-- **Computing Metrics**: `python cli.py metrics daily --db <connection_string> ...`
+- **Computing Metrics**: `python cli.py metrics daily --db <connection_string> ...` (includes Investment metrics)
+- **Complexity Metrics**: `python cli.py metrics complexity --repo-path . -s "*" --db <connection_string> ...`
 - **Generating Data**: `python cli.py fixtures generate --db <connection_string> ...`
 - **Visualization**: `python cli.py grafana up` to start the dashboard stack.
 - **Testing**: Run `pytest` to execute the test suite.
@@ -51,3 +52,6 @@ The project follows a pipeline-like architecture:
 - **Database Agnostic**: Most commands support switching between DB types using the `--db` flag or `DB_CONN_STRING` env var.
 - **Metrics Computation**: Can be run daily or backfilled for a period.
 - **Plans & Requirements**: Implementation plans in `docs/project.md`, metrics inventory in `docs/metrics-inventory.md`, requirements/roadmap in `docs/roadmap.md`.
+
+---
+**Note for AI Agents**: Always update this document, along with `AGENTS.md`, `.github/copilot-instructions.md`, `docs/roadmap.md`, `docs/project.md`, and `docs/metrics-inventory.md` whenever a task is completed or a feature is modified to maintain an accurate system context.

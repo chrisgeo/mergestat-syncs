@@ -278,3 +278,29 @@ Stored in ClickHouse table `ic_landscape_rolling_30d`.
 - **Y**: `delivery_units_30d`
 
 Each coordinate (`x_raw`, `y_raw`) is normalized per team into (`x_norm`, `y_norm`) representing the percentile rank within the team.
+
+## Code Complexity (`repo_complexity_daily`)
+
+Complexity metrics are computed by scanning local git clones at specific historical references using `radon`.
+
+- **Cyclomatic Complexity (CC)**: Measures the number of linearly independent paths through a program's source code.
+- **Metric fields**:
+  - `cyclomatic_total`: Sum of CC for all functions/classes in the repo.
+  - `cyclomatic_avg`: Mean CC per function.
+  - `high_complexity_functions`: Count of functions with CC > 15 (configurable).
+  - `very_high_complexity_functions`: Count of functions with CC > 25.
+- **Backfilling**: Uses `git checkout` (via `GitPython`) to analyze historical state.
+
+## Investment Metrics (`investment_metrics_daily`)
+
+Categorizes engineering effort into investment areas (e.g., "New Value", "Security", "Infrastructure") using a rule-based classifier.
+
+- **Artifacts Classified**:
+  - **Work Items**: Based on labels, components, and title keywords.
+  - **Commits (Churn)**: Based on file path patterns (e.g., `infra/` or `tests/`).
+- **Metric fields**:
+  - `investment_area`: The assigned category.
+  - `project_stream`: A secondary grouping (e.g., "Project Phoenix").
+  - `delivery_units`: Story points or count of work items completed.
+  - `churn_loc`: Sum of additions + deletions associated with the area.
+- **Configuration**: `config/investment_areas.yaml` defines the matching rules and priorities.

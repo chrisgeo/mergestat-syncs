@@ -277,6 +277,13 @@ def _cmd_metrics_complexity(ns: argparse.Namespace) -> int:
         logging.warning("No repositories found in database.")
         return 0
 
+    # Filter by search pattern if provided
+    if ns.search:
+        import fnmatch
+        original_count = len(repos)
+        repos = [r for r in repos if fnmatch.fnmatch(r.repo, ns.search)]
+        logging.info(f"Filtered repos by '{ns.search}': {len(repos)}/{original_count}")
+
     logging.info(f"Found {len(repos)} repositories in DB. Checking local availability in {root_path}...")
     
     processed_count = 0
@@ -561,10 +568,13 @@ def build_parser() -> argparse.ArgumentParser:
         "complexity", help="Scan and compute complexity metrics."
     )
     complexity.add_argument(
-        "--repo-path", required=True, help="Path to local git repo."
+        "--repo-path", default=".", help="Path to local git repo (or root dir for batch mode). Defaults to current dir."
     )
     complexity.add_argument(
         "--repo-id", type=lambda s: __import__("uuid").UUID(s), help="Repo UUID. If omitted, scans dir for repos."
+    )
+    complexity.add_argument(
+        "-s", "--search", help="Filter repos by name (glob pattern, e.g. 'org/*')."
     )
     complexity.add_argument(
         "--date", 

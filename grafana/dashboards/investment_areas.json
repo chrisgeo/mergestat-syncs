@@ -18,7 +18,10 @@
   "links": [],
   "panels": [
     {
-      "datasource": "ClickHouse",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -87,37 +90,25 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "8.3.3",
       "targets": [
         {
-          "datasource": "ClickHouse",
-          "format": 0,
-          "group": [],
-          "metricType": "any",
-          "orderByKey": "time",
-          "rawQuery": "SELECT day, investment_area, sum(delivery_units) as units FROM investment_metrics_daily WHERE $timeFilter GROUP BY day, investment_area ORDER BY day",
           "refId": "A",
-          "select": [
-            [
-              {
-                "params": [
-                  "units"
-                ],
-                "type": "column"
-              }
-            ]
-          ],
-          "table": "investment_metrics_daily",
-          "timeColumn": "day",
-          "timeColumnType": "date",
-          "where": []
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "rawQuery": true,
+          "rawSql": "SELECT day AS time, investment_area AS metric, sum(delivery_units) AS value FROM investment_metrics_daily WHERE ifNull(nullIf(team_id, ''), 'unassigned') IN (${team_id:sqlstring}) AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY time, metric ORDER BY time"
         }
       ],
       "title": "Delivery Units by Investment Area",
       "type": "timeseries"
     },
     {
-      "datasource": "ClickHouse",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -159,54 +150,48 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "8.3.3",
       "targets": [
         {
-          "datasource": "ClickHouse",
-          "format": 1,
-          "group": [],
-          "metricType": "any",
-          "orderByKey": "units",
-          "rawQuery": "SELECT investment_area, sum(delivery_units) as units FROM investment_metrics_daily WHERE $timeFilter GROUP BY investment_area ORDER BY units DESC",
           "refId": "A",
-          "select": [
-            [
-              {
-                "params": [
-                  "investment_area"
-                ],
-                "type": "column"
-              },
-              {
-                "params": [
-                  "units"
-                ],
-                "type": "column"
-              }
-            ]
-          ],
-          "table": "investment_metrics_daily",
-          "timeColumn": "day",
-          "timeColumnType": "date",
-          "where": []
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "rawQuery": true,
+          "rawSql": "SELECT investment_area, sum(delivery_units) AS units FROM investment_metrics_daily WHERE ifNull(nullIf(team_id, ''), 'unassigned') IN (${team_id:sqlstring}) AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY investment_area ORDER BY units DESC"
         }
       ],
       "title": "Investment Mix (Total Period)",
       "type": "piechart"
     }
   ],
-  "schemaVersion": 34,
+  "schemaVersion": 39,
   "style": "dark",
   "tags": [],
   "templating": {
-    "list": []
+    "list": [
+      {
+        "name": "team_id",
+        "label": "Team",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "clickhouse"
+        },
+        "refresh": 1,
+        "query": "SELECT DISTINCT ifNull(nullIf(team_id, ''), 'unassigned') AS __text, ifNull(nullIf(team_id, ''), 'unassigned') AS __value FROM investment_metrics_daily ORDER BY __value",
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*"
+      }
+    ]
   },
   "time": {
     "from": "now-30d",
     "to": "now"
   },
   "timepicker": {},
-  "timezone": "",
+  "timezone": "utc",
   "title": "Investment Areas",
   "uid": "investment_areas",
   "version": 1,

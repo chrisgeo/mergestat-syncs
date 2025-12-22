@@ -29,6 +29,12 @@ python cli.py sync local --db "<DB_CONN>" --repo-path /path/to/repo
 python cli.py fixtures generate --db "<DB_CONN>" --days 30
 ```
 
+- Compute complexity metrics (batch mode):
+
+```bash
+python cli.py metrics complexity --repo-path . -s "*"
+```
+
 - Run tests: `pytest -q` or `pytest tests/test_github_connector.py -q`.
 - Apply Postgres migrations: `alembic upgrade head` (use docker compose if needed).
 
@@ -66,3 +72,6 @@ await process_github_repos_batch(store, token="$GITHUB_TOKEN", org_name="myorg",
 
 - If a test fails intermittently, check network-dependent tests and toggle `CONNECTORS_AVAILABLE` or mock connector clients to isolate logic.
 - For rate-limit issues, inspect logs for `Retry-After` or `X-RateLimit-Reset` and ensure code uses `RateLimitGate`/`RateLimitConfig` to backoff.
+
+---
+**Note for AI Agents**: Always update this document, along with `GEMINI.md`, `.github/copilot-instructions.md`, `docs/roadmap.md`, `docs/project.md`, and `docs/metrics-inventory.md` whenever a task is completed or a feature is modified to maintain an accurate system context.

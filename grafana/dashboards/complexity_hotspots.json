@@ -18,7 +18,10 @@
   "links": [],
   "panels": [
     {
-      "datasource": "ClickHouse",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -87,37 +90,25 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "8.3.3",
       "targets": [
         {
-          "datasource": "ClickHouse",
-          "format": 0,
-          "group": [],
-          "metricType": "any",
-          "orderByKey": "time",
-          "rawQuery": "SELECT day, cyclomatic_total FROM repo_complexity_daily WHERE $timeFilter ORDER BY day",
           "refId": "A",
-          "select": [
-            [
-              {
-                "params": [
-                  "cyclomatic_total"
-                ],
-                "type": "column"
-              }
-            ]
-          ],
-          "table": "repo_complexity_daily",
-          "timeColumn": "day",
-          "timeColumnType": "date",
-          "where": []
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "rawQuery": true,
+          "rawSql": "SELECT m.day AS time, r.repo AS metric, argMax(m.cyclomatic_total, m.computed_at) AS value FROM repo_complexity_daily AS m INNER JOIN repos AS r ON r.id = m.repo_id WHERE match(r.repo, '${repo_id:regex}') AND m.day >= toDate(toDateTime(intDiv($__from, 1000))) AND m.day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY time, metric ORDER BY time"
         }
       ],
       "title": "Repo Complexity Trend",
       "type": "timeseries"
     },
     {
-      "datasource": "ClickHouse",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -158,66 +149,48 @@
         },
         "showHeader": true
       },
-      "pluginVersion": "8.3.3",
       "targets": [
         {
-          "datasource": "ClickHouse",
-          "format": 1,
-          "group": [],
-          "metricType": "any",
-          "orderByKey": "risk_score",
-          "rawQuery": "SELECT file_path, churn_loc_30d, cyclomatic_total, risk_score FROM file_hotspot_daily WHERE day = toDate(now()) ORDER BY risk_score DESC LIMIT 20",
           "refId": "A",
-          "select": [
-            [
-              {
-                "params": [
-                  "file_path"
-                ],
-                "type": "column"
-              },
-              {
-                "params": [
-                  "churn_loc_30d"
-                ],
-                "type": "column"
-              },
-              {
-                "params": [
-                  "cyclomatic_total"
-                ],
-                "type": "column"
-              },
-              {
-                "params": [
-                  "risk_score"
-                ],
-                "type": "column"
-              }
-            ]
-          ],
-          "table": "file_hotspot_daily",
-          "timeColumn": "day",
-          "timeColumnType": "date",
-          "where": []
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "rawQuery": true,
+          "rawSql": "SELECT m.file_path, argMax(m.churn_loc_30d, m.computed_at) AS churn_loc_30d, argMax(m.cyclomatic_total, m.computed_at) AS cyclomatic_total, argMax(m.risk_score, m.computed_at) AS risk_score FROM file_hotspot_daily AS m INNER JOIN repos AS r ON r.id = m.repo_id WHERE match(r.repo, '${repo_id:regex}') AND m.day = (SELECT max(day) FROM file_hotspot_daily WHERE repo_id = m.repo_id) GROUP BY m.file_path ORDER BY risk_score DESC LIMIT 20"
         }
       ],
-      "title": "Top Risky Hotspots (Today)",
+      "title": "Top Risky Hotspots (Latest Snapshot)",
       "type": "table"
     }
   ],
-  "schemaVersion": 34,
+  "schemaVersion": 39,
   "style": "dark",
   "tags": [],
   "templating": {
-    "list": []
+    "list": [
+      {
+        "name": "repo_id",
+        "label": "Repo",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "clickhouse"
+        },
+        "refresh": 1,
+        "query": "SELECT repo AS __text, repo AS __value FROM repos ORDER BY repo",
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*"
+      }
+    ]
   },
   "time": {
     "from": "now-30d",
     "to": "now"
   },
   "timepicker": {},
-  "timezone": "",
+  "timezone": "utc",
   "title": "Complexity & Hotspots",
   "uid": "complexity_hotspots",
   "version": 1,

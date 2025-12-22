@@ -6,33 +6,38 @@ Focus: flow, predictability, PR health, resource allocation.
 
 **Metrics**
 
-* Cycle Time
+- Cycle Time
 
-  * Coding Time
-  * Pickup Time
-  * Review Time
-  * Deploy Time
-* Deployment Frequency
-* Lead Time for Changes
-* Work Breakdown
+  - Coding Time
+  - Pickup Time
+  - Review Time
+  - Deploy Time
 
-  * New work vs rework vs unplanned vs refactor
-* Investment Profile
+- Deployment Frequency
+- Lead Time for Changes
+- Work Breakdown
 
-  * Strategic work %
-  * Maintenance %
-  * Unplanned work %
-* PR Process Health
+  - New work vs rework vs unplanned vs refactor
 
-  * PR size
-  * Review depth
-  * Review response time
-  * Time-to-approve
-* Bottlenecks
+- Investment Profile
 
-  * Review congestion
-  * Idle WIP
-* Review Silos / Single-reviewer dependencies
+  - Strategic work %
+  - Maintenance %
+  - Unplanned work %
+
+- PR Process Health
+
+  - PR size
+  - Review depth
+  - Review response time
+  - Time-to-approve
+
+- Bottlenecks
+
+  - Review congestion
+  - Idle WIP
+
+- Review Silos / Single-reviewer dependencies
 
 ---
 
@@ -42,29 +47,32 @@ Focus: individual contribution patterns and risk.
 
 **Metrics**
 
-* Impact Score (weighted contribution proxy)
-* Efficiency (merged vs reworked code)
-* Code Fundamentals
+- Impact Score (weighted contribution proxy)
+- Efficiency (merged vs reworked code)
+- Code Fundamentals
 
-  * Active days
-  * Commits/day
-  * PRs opened/merged
-  * Lines changed
-  * Rework rate
-  * Churn %
-* Collaboration
+  - Active days
+  - Commits/day
+  - PRs opened/merged
+  - Lines changed
+  - Rework rate
+  - Churn %
 
-  * Review load
-  * Review turnaround
-* Risk Indicators
+- Collaboration
 
-  * High-churn files
-  * Ownership hotspots
-* Health Signals
+  - Review load
+  - Review turnaround
 
-  * Sustained intensity
-  * Weekend / off-hours work
-  * Irregular contribution patterns
+- Risk Indicators
+
+  - High-churn files
+  - Ownership hotspots
+
+- Health Signals
+
+  - Sustained intensity
+  - Weekend / off-hours work
+  - Irregular contribution patterns
 
 ---
 
@@ -74,24 +82,27 @@ Focus: delivery pipeline and DORA.
 
 **Metrics**
 
-* Lead Time for Changes
-* Value Stream Stages
+- Lead Time for Changes
+- Value Stream Stages
 
-  * Issue → Code → Review → Merge → Deploy
-* Merge Request Analytics
+  - Issue → Code → Review → Merge → Deploy
 
-  * MR size
-  * Approval count
-  * Discussion count
-  * Time to merge
-* CI/CD
+- Merge Request Analytics
 
-  * Pipeline duration
-  * Success rate
-  * MTTR
-  * Change failure rate
-* Contribution Analytics
-* Security / Vulnerability introduction rate
+  - MR size
+  - Approval count
+  - Discussion count
+  - Time to merge
+
+- CI/CD
+
+  - Pipeline duration
+  - Success rate
+  - MTTR
+  - Change failure rate
+
+- Contribution Analytics
+- Security / Vulnerability introduction rate
 
 ---
 
@@ -101,22 +112,25 @@ Focus: IDE-level behavior and burnout risk.
 
 **Metrics**
 
-* Flow State Duration
-* Context Switching
+- Flow State Duration
+- Context Switching
 
-  * File switches
-  * Tab switches
-  * Project switches
-* Typing Behavior
+  - File switches
+  - Tab switches
+  - Project switches
 
-  * Error rate
-  * Undo/redo density
-* Distraction Index
-* Wellness Signals
+- Typing Behavior
 
-  * Late-night streaks
-  * Burst–burnout cycles
-* Cognitive Load Index
+  - Error rate
+  - Undo/redo density
+
+- Distraction Index
+- Wellness Signals
+
+  - Late-night streaks
+  - Burst–burnout cycles
+
+- Cognitive Load Index
 
 ---
 
@@ -124,67 +138,71 @@ Focus: IDE-level behavior and burnout risk.
 
 ## 1. Delivery & Velocity
 
-* Coding Time
-* Review Time
-* Rework Time
-* Deploy Time
-* Deployment Frequency
-* Throughput (PRs, issues, story points)
-* Work Composition
+- Coding Time
+- Review Time
+- Rework Time
+- Deploy Time
+- Deployment Frequency
+- Throughput (PRs, issues, story points)
+- Work Composition
+- Investment Profile (Strategic vs Maintenance)
 
 ---
 
 ## 2. Code Quality & Risk
 
-* Code Risk Index
+- Code Risk Index
+  - Churn
+  - Ownership concentration
+  - Hotspots
+  - Cyclomatic Complexity (radon)
+- Rework Rate
+- PR Quality
 
-  * Churn
-  * Ownership concentration
-  * Hotspots
-* Rework Rate
-* PR Quality
+  - Size distribution
+  - Comment density
+  - Rejection rate
 
-  * Size distribution
-  * Comment density
-  * Rejection rate
-* Stability
+- Stability
 
-  * Bugs introduced
-  * Defect escape rate
+  - Bugs introduced
+  - Defect escape rate
 
 ---
 
 ## 3. Collaboration & Team Dynamics
 
-* Review Responsiveness
-* Reviewer Load
-* Review Network Graph
-* Knowledge Distribution
+- Review Responsiveness
+- Reviewer Load
+- Review Network Graph
+- Knowledge Distribution
 
-  * Bus factor
-  * Contribution entropy
-* Communication Density
+  - Bus factor
+  - Contribution entropy
+
+- Communication Density
 
 ---
 
 ## 4. Developer Health & Cognitive Load
 
-* Context Switching Score
-* Focus Time Index
-* Work Pattern Health
+- Context Switching Score
+- Focus Time Index
+- Work Pattern Health
 
-  * Late-night activity
-  * Weekend work
-* Editing & Typing Behavior
+  - Late-night activity
+  - Weekend work
+
+- Editing & Typing Behavior
 
 ---
 
 ## 5. Systemic & Process Health
 
-* Bottleneck Index
-* WIP Congestion
-* Stale Work Detection
-* Predictability Index
+- Bottleneck Index
+- WIP Congestion
+- Stale Work Detection
+- Predictability Index
 
 ---
 
@@ -199,28 +217,26 @@ Focus: IDE-level behavior and burnout risk.
 
 This framework fully covers and extends LinearB, GitPrime, GitLab, and typeapp.app with a single coherent analytics model.
 
-Absolutely — I’ll continue *without pause* and expand the entire system:
+Absolutely — I’ll continue _without pause_ and expand the entire system:
 
-* **Data model**
-* **Events and ingestion**
-* **Scoring & formulas**
-* **Detailed metric definitions**
-* **Architecture**
-* **Dashboards & views**
-* **Roadmap**
+- **Data model**
+- **Events and ingestion**
+- **Scoring & formulas**
+- **Detailed metric definitions**
+- **Architecture**
+- **Dashboards & views**
+- **Roadmap**
 
-This will give you a complete **draft developer health platform** capable of rivaling LinearB, GitPrime, TypeApp, and GitLab Analytics *in one unified product*.
+This will give you a complete **draft developer health platform** capable of rivaling LinearB, GitPrime, TypeApp, and GitLab Analytics _in one unified product_.
 
 ---
 
 # 🚧 PART 4 — Detailed Data Model
 
-
 1. **Git Events** (commits, branches, PRs, reviews)
 2. **Issue/Task Events** (create, update, close, transitions)
 3. **CI/CD Events** (pipelines, deploys, failures, restores)
 4. **IDE Telemetry Events** (typing, context switching, focus time)
-
 
 ---
 
@@ -287,10 +303,10 @@ refactor_percent = refactor_loc / total_loc
 
 ## **DORA Metrics**
 
-* Deployment frequency = deploy_count / time_period
-* Lead time for changes = average(coding_time + review_time + deploy_time)
-* MTTR = mean(time_from_incident_to_restore)
-* Change failure rate = failed_deploys / total_deploys
+- Deployment frequency = deploy_count / time_period
+- Lead time for changes = average(coding_time + review_time + deploy_time)
+- MTTR = mean(time_from_incident_to_restore)
+- Change failure rate = failed_deploys / total_deploys
 
 ---
 
@@ -341,10 +357,10 @@ Track edges:
 
 Metrics:
 
-* reciprocity
-* centrality
-* isolated contributors
-* bottleneck reviewers
+- reciprocity
+- centrality
+- isolated contributors
+- bottleneck reviewers
 
 ## **Knowledge Distribution (Bus Factor)**
 
@@ -400,42 +416,43 @@ build_queue_length = count(pipelines waiting)
 estimate_accuracy = |estimate - actual| / estimate
 cycle_time_variance = variance(cycle_time)
 ```
+
 ---
 
 # 📊 PART 7 — Dashboard Drafts
 
 ## 1. **Org Dashboard**
 
-* Cycle Time
-* Deployment Frequency
-* Hotspot files
-* Bottleneck teams
-* Investment Profile
-* Predictability Index
+- Cycle Time
+- Deployment Frequency
+- Hotspot files
+- Bottleneck teams
+- Investment Profile
+- Predictability Index
 
 ## 2. **Team Dashboard**
 
-* PR review health
-* Collaboration graph
-* Throughput
-* Roadmap completion forecast
-* Team burnout risk
+- PR review health
+- Collaboration graph
+- Throughput
+- Roadmap completion forecast
+- Team burnout risk
 
 ## 3. **Developer Dashboard**
 
-* Flow score
-* Deep work patterns
-* Impact score
-* Review contribution
-* Churn & rework (healthy or high)
+- Flow score
+- Deep work patterns
+- Impact score
+- Review contribution
+- Churn & rework (healthy or high)
 
 ## 4. **Repo Dashboard**
 
-* Hotspots
-* Bus factor
-* Risky files
-* Churn trends
-* Contribution activity
+- Hotspots
+- Bus factor
+- Risky files
+- Churn trends
+- Contribution activity
 
 ---
 
@@ -447,8 +464,8 @@ cycle_time_variance = variance(cycle_time)
 
 General pattern (so everything fits into 0–100):
 
-- **Raw metric** → normalize into \[0,1\] using either  
-  - min–max based on historical window, or  
+- **Raw metric** → normalize into \[0,1\] using either
+  - min–max based on historical window, or
   - percentile within org/team.
 - **Direction**: some metrics “lower is better”.
   - If lower is better: `score = 1 - normalized_value`
@@ -534,10 +551,10 @@ cfr_score = (1 - cfr_norm) * 100
 
 For a team or org:
 
-- `Cycle Time score` (CT)  
-- `Deploy Frequency score` (DF)  
-- `Lead Time score` (LT)  
-- `MTTR score` (MT)  
+- `Cycle Time score` (CT)
+- `Deploy Frequency score` (DF)
+- `Lead Time score` (LT)
+- `MTTR score` (MT)
 - `Change Failure Rate score` (CF)
 
 Weights (example):
@@ -635,10 +652,10 @@ Where `sigmoid(x) = 100 / (1 + exp(-x))` scaled to \[0,100\].
 
 Metrics:
 
-- Rework score  
-- Code risk score  
-- Review health score  
-- Defect introduction rate score  
+- Rework score
+- Code risk score
+- Review health score
+- Defect introduction rate score
 
 Weights:
 
@@ -692,9 +709,9 @@ gini = (2 * sum(i * y_i) / (n * sum(y_i))) - (n + 1) / n
 
 Use:
 
-- ReviewResponsivenessScore  
-- ReciprocityScore  
-- BusFactorScore  
+- ReviewResponsivenessScore
+- ReciprocityScore
+- BusFactorScore
 - Cross-team-review score (optional)
 
 ```text
@@ -737,8 +754,9 @@ Start with `w1=2, w2=0.1, w3=1, w4=1` as tunables.
 #### 1.5.2 Cognitive load index
 
 Signals:
-- avg time between edits in same file  
-- undo/redo density  
+
+- avg time between edits in same file
+- undo/redo density
 - error bursts (rapid changes + reverts)
 
 Example:
@@ -832,75 +850,83 @@ These are initial org-agnostic defaults; tune them to your context.
 
 ### Delivery
 
-- **Cycle time (PR → deploy)**  
-  - Excellent: < 24h  
-  - Healthy: 24–72h  
-  - At risk: 3–7 days  
+- **Cycle time (PR → deploy)**
+
+  - Excellent: < 24h
+  - Healthy: 24–72h
+  - At risk: 3–7 days
   - Unhealthy: > 7 days
 
-- **Time to first review**  
-  - Excellent: < 2h  
-  - Healthy: 2–8h  
-  - At risk: 8–24h  
+- **Time to first review**
+
+  - Excellent: < 2h
+  - Healthy: 2–8h
+  - At risk: 8–24h
   - Unhealthy: > 24h
 
-- **Deployment frequency**  
-  - Excellent: multiple times per day  
-  - Healthy: daily–few times/week  
-  - At risk: < 1/week  
+- **Deployment frequency**
+
+  - Excellent: multiple times per day
+  - Healthy: daily–few times/week
+  - At risk: < 1/week
   - Unhealthy: < 1/month
 
-- **Change failure rate**  
-  - Excellent: < 10%  
-  - Healthy: 10–20%  
-  - At risk: 20–30%  
+- **Change failure rate**
+  - Excellent: < 10%
+  - Healthy: 10–20%
+  - At risk: 20–30%
   - Unhealthy: > 30%
 
 ### Code Quality & Risk
 
-- **Rework rate (loc re-touched within 30 days)**  
-  - Excellent: < 10%  
-  - Healthy: 10–20%  
-  - At risk: 20–35%  
+- **Rework rate (loc re-touched within 30 days)**
+
+  - Excellent: < 10%
+  - Healthy: 10–20%
+  - At risk: 20–35%
   - Unhealthy: > 35%
 
-- **Average PR size (median)**  
-  - Healthy: 50–300 LOC  
-  - At risk: 300–600 LOC  
+- **Average PR size (median)**
+
+  - Healthy: 50–300 LOC
+  - At risk: 300–600 LOC
   - Unhealthy: > 600 LOC regularly
 
-- **Hotspot concentration (files with high risk)**  
-  - Healthy: < 5% of files  
-  - At risk: 5–15%  
+- **Hotspot concentration (files with high risk)**
+  - Healthy: < 5% of files
+  - At risk: 5–15%
   - Unhealthy: > 15%
 
 ### Dynamics & Collaboration
 
-- **Bus factor (single-owner files >75%)**  
-  - Healthy: < 25% of team files  
-  - At risk: 25–50%  
+- **Bus factor (single-owner files >75%)**
+
+  - Healthy: < 25% of team files
+  - At risk: 25–50%
   - Unhealthy: > 50%
 
-- **Review reciprocity**  
-  - Healthy: most devs in [.5, 2] given/received ratio  
+- **Review reciprocity**
+  - Healthy: most devs in [.5, 2] given/received ratio
   - Unhealthy: many devs only receiving or only giving
 
 ### Well-being
 
-- **Late-night ratio**  
-  - Healthy: < 5%  
-  - At risk: 5–15%  
+- **Late-night ratio**
+
+  - Healthy: < 5%
+  - At risk: 5–15%
   - Unhealthy: > 15%
 
-- **Weekend ratio**  
-  - Healthy: < 5–10%  
-  - At risk: 10–25%  
+- **Weekend ratio**
+
+  - Healthy: < 5–10%
+  - At risk: 10–25%
   - Unhealthy: > 25%
 
-- **Flow time** (uninterrupted focus per day)  
-  - Excellent: ≥ 2–3 hours  
-  - Healthy: 1–2 hours  
-  - At risk: < 1 hour  
+- **Flow time** (uninterrupted focus per day)
+  - Excellent: ≥ 2–3 hours
+  - Healthy: 1–2 hours
+  - At risk: < 1 hour
   - Unhealthy: mostly fragmented 10–15 min blocks
 
 ---
@@ -909,10 +935,10 @@ These are initial org-agnostic defaults; tune them to your context.
 
 Use the **4D model**:
 
-1. **DeliveryScore**  
-2. **DurabilityScore**  
-3. **WellBeingScore**  
-4. **DynamicsScore**  
+1. **DeliveryScore**
+2. **DurabilityScore**
+3. **WellBeingScore**
+4. **DynamicsScore**
 
 Optionally add **SystemHealthScore** as a 5th dimension.
 
@@ -983,75 +1009,87 @@ Compute per org, per team, per repo, per individual (with some metric substituti
 ### 8.1 Org Dashboard (“Executive View”)
 
 **Top bar**
+
 - Time range selector (Last 7 / 30 / 90 days)
 - Org dropdown
 - Overall Developer Health Score pill (e.g. 82/100) + sparkline
 
 **Row 1: 4 dimension cards**
+
 - Delivery: score + median cycle time, deploy frequency, change failure rate
 - Durability: score + rework %, hotspot count, defect rate
 - Well-being: score + flow hrs/dev/day, burnout risk index
 - Dynamics: score + review responsiveness, bus factor
 
 **Row 2: Charts**
+
 - Cycle Time Breakdown (stacked: coding, review, deploy) over time
 - Deploy Frequency vs Change Failure Rate (dual-axis)
 
 **Row 3: Tables**
+
 - Teams ranked by Developer Health Score
 - Top 10 hotspot repos/services
 
 ### 8.2 Team Dashboard (“Eng Lead View”)
 
 **Header**
+
 - Team name + date range + Team Health Score
 
 **Row 1: KPIs**
+
 - Delivery: cycle time, time to first review, deploys/week
 - Quality: rework %, defect rate, top hotspots
 - Well-being: flow hrs/dev/day, late-night %, burnout risk
 - Dynamics: review delay, bus factor, review balance
 
 **Row 2: Charts**
+
 - PR Flow Timeline (scatter: PRs by age vs cycle time, colored by size)
 - Team Review Network (graph: nodes=devs, edges=reviews)
 
 **Row 3: People table**
+
 - Dev, Impact proxy, FlowScore, BurnoutRisk, ReviewLoad, Churn%
 - Flags: high review load, high late-night work, isolation
 
 ### 8.3 Developer Dashboard (“Personal View”)
 
 **Header**
+
 - Dev name + “Your Health this month: 78/100”
 
 **Row 1: Summary**
+
 - Delivery vs team, Quality vs team, Flow, Burnout risk
 
 **Row 2: Charts**
+
 - Flow over time
 - Work mix (new vs bugfix vs refactor)
 
 **Row 3: Suggestions**
+
 - Auto-generated coaching insights (split PRs, protect focus blocks, reduce late-night pattern, etc.)
 
 ### 8.4 Repo / Service Dashboard
 
 **Header**
+
 - Repo name + risk indicator
 
 **Row 1: Risk & Quality**
+
 - Risk gauge
 - Hotspot file count
 - Defects tied to repo
 
 **Row 2: Hotspots table**
+
 - file path, risk, churn, contributors, linked bugs
 
 **Row 3: Ownership & Bus factor**
+
 - contributor distribution
 - single-owner file visualization
-
-
-
-

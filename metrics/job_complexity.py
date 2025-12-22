@@ -2,16 +2,32 @@ import logging
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 
 import git
 from analytics.complexity import ComplexityScanner
 from metrics.schemas import FileComplexitySnapshot, RepoComplexityDaily
 from metrics.sinks.clickhouse import ClickHouseMetricsSink
+from metrics.sinks.sqlite import SQLiteMetricsSink
+from metrics.sinks.mongo import MongoMetricsSink
+from storage import detect_db_type
 
 logger = logging.getLogger(__name__)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+
+
+def _normalize_sqlite_url(db_url: str) -> str:
+    if "sqlite+aiosqlite://" in db_url:
+        return db_url.replace("sqlite+aiosqlite://", "sqlite://", 1)
+    return db_url
+
+
+def _normalize_postgres_url(db_url: str) -> str:
+    if "postgresql+asyncpg://" in db_url:
+        return db_url.replace("postgresql+asyncpg://", "postgresql://", 1)
+    return db_url
+
 
 def run_complexity_scan_job(
     *,
@@ -23,7 +39,7 @@ def run_complexity_scan_job(
     ref: str = "HEAD",
 ) -> None:
     if not db_url:
-        raise ValueError("ClickHouse DB connection string is required.")
+        raise ValueError("DB connection string is required.")
 
     if not repo_path.exists():
         raise FileNotFoundError(f"Repo path {repo_path} does not exist.")
@@ -36,7 +52,19 @@ def run_complexity_scan_job(
     start_date = date - timedelta(days=max(1, backfill_days) - 1)
     dates_to_process = [start_date + timedelta(days=i) for i in range(max(1, backfill_days))]
 
-    sink = ClickHouseMetricsSink(db_url)
+    backend = detect_db_type(db_url)
+    sink: Any = None
+    if backend == "clickhouse":
+        sink = ClickHouseMetricsSink(db_url)
+    elif backend == "sqlite":
+        sink = SQLiteMetricsSink(_normalize_sqlite_url(db_url))
+    elif backend == "mongo":
+        sink = MongoMetricsSink(db_url)
+    elif backend == "postgres":
+        sink = SQLiteMetricsSink(_normalize_postgres_url(db_url))
+    else:
+        raise ValueError(f"Unsupported backend for complexity job: {backend}")
+
     try:
         sink.ensure_tables()
         
