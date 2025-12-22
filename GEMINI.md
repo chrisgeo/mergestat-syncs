@@ -12,6 +12,7 @@ The project follows a pipeline-like architecture:
 3.  **Storage (`storage.py`, `models/`)**: Persist processed data into various backends (also provides unified read helpers like `get_complexity_snapshots`).
 4.  **Metrics (`metrics/`)**: Compute high-level metrics (e.g., throughput, cycle time, rework, bus factor, predictability) from the stored data.
 5.  **Visualization (`grafana/`)**: Provision Grafana dashboards to visualize the computed metrics.
+    - Investment Areas dashboard filters teams via `match(..., '${team_id:regex}')`.
 
 ## Key Technologies
 - **Language**: Python 3.10+

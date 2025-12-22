@@ -29,6 +29,7 @@ This checklist tracks what is complete and what remains to finalize `dev-health-
 ### Dashboards
 
 - [x] **Dashboards for CI/CD, deployments, incidents** (panels for success rate, duration, deploy counts, MTTR).
+- [x] **Investment Areas team filter**: use regex `match(...)` filters for the team variable in ClickHouse queries.
 - [ ] **Work tracking dashboards audit**: Validate filters and table joins for synthetic + real providers.
 - [ ] **Fix dashboard templating filters**: Ensure variable regex and `match(...)` filters do not return empty results.
 

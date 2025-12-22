@@ -98,7 +98,7 @@
             "uid": "clickhouse"
           },
           "rawQuery": true,
-          "rawSql": "SELECT day AS time, investment_area AS metric, sum(delivery_units) AS value FROM investment_metrics_daily WHERE ifNull(nullIf(team_id, ''), 'unassigned') IN (${team_id:sqlstring}) AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY time, metric ORDER BY time"
+          "rawSql": "SELECT day AS time, investment_area AS metric, sum(delivery_units) AS value FROM investment_metrics_daily WHERE match(ifNull(nullIf(team_id, ''), 'unassigned'), '${team_id:regex}') AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY time, metric ORDER BY time"
         }
       ],
       "title": "Delivery Units by Investment Area",
@@ -158,7 +158,7 @@
             "uid": "clickhouse"
           },
           "rawQuery": true,
-          "rawSql": "SELECT investment_area, sum(delivery_units) AS units FROM investment_metrics_daily WHERE ifNull(nullIf(team_id, ''), 'unassigned') IN (${team_id:sqlstring}) AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY investment_area ORDER BY units DESC"
+          "rawSql": "SELECT investment_area, sum(delivery_units) AS units FROM investment_metrics_daily WHERE match(ifNull(nullIf(team_id, ''), 'unassigned'), '${team_id:regex}') AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY investment_area ORDER BY units DESC"
         }
       ],
       "title": "Investment Mix (Total Period)",

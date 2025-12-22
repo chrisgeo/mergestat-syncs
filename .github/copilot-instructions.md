@@ -21,6 +21,7 @@ This file orients AI coding agents to the dev-health-ops repository: key archite
 - `storage.py` abstracts DB backends (Postgres/Mongo/SQLite/ClickHouse), including unified reads like `get_complexity_snapshots`.
 - `utils.py` holds shared helpers (parsing, git iteration, file filtering).
 - `fixtures/` generates synthetic data for testing.
+- Investment Areas dashboard uses regex team filters in ClickHouse queries.
 
 **Project-specific conventions & patterns**
 

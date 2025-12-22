@@ -6,6 +6,7 @@
 - **Sync work items**: fetch Jira/GitHub/GitLab issues separately via `sync work-items` (use `--auth` to override GitHub/GitLab tokens).
 - **Calculate**: run `metrics daily` using stored facts (no provider calls by default).
 - **Planned**: allow `sync work-items` filtering by repo tags/settings.
+- **Dashboards**: Investment Areas uses regex `match(...)` filtering for the team variable in ClickHouse queries.
 
 ## LinearB — Flow & Team Efficiency
 
