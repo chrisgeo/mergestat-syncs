@@ -100,6 +100,7 @@ Jira is **not** a replacement for pull request data — it’s used to track ass
 **Docs**
 
 - Metrics definitions + tables: `docs/metrics.md`
+- Implementation plans, metrics inventory, requirements/roadmap: `docs/project.md`, `docs/metrics-inventory.md`, `docs/roadmap.md`
 - Task tracker configuration (Jira/GitHub/GitLab, status mapping, teams): `docs/task_trackers.md`
 - Grafana dashboards + provisioning: `docs/grafana.md`
 

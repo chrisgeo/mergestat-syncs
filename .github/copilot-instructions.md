@@ -25,6 +25,7 @@ This file orients AI coding agents to the dev-health-ops repository: key archite
 - Performance knobs: `BATCH_SIZE` and `MAX_WORKERS`.
 - Prefer async batch helpers for network I/O; respect `RateLimitGate` backoff.
 - Keep DB writes batched; avoid concurrent writes with SQLite.
+- Implementation plans, metrics inventory, and requirement details: `docs/project.md`, `docs/metrics-inventory.md`, `docs/roadmap.md`.
 
 **How to add or modify connectors**
 

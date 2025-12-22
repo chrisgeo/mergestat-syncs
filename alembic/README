@@ -1,1 +1,2 @@
 Generic single-database configuration with an async dbapi.
+Implementation plans, metrics inventory, and requirements details: `docs/project.md`, `docs/metrics-inventory.md`, `docs/roadmap.md`.

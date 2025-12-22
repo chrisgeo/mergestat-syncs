@@ -13,6 +13,7 @@ Purpose: compact, actionable rules for an AI coding agent (Copilot-like) working
 - Connectors live in `connectors/` and must handle pagination, rate-limits, and provide batch helpers.
 - Processors in `processors/` implement the pipeline: commits → PRs → commit-stats → files/blame.
 - Fixtures in `fixtures/` generate synthetic data for testing/demos.
+- Implementation plans, metrics inventory, and requirement details live in `docs/project.md`, `docs/metrics-inventory.md`, and `docs/roadmap.md`.
 
 ## Developer workflows
 

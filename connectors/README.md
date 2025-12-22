@@ -49,6 +49,7 @@ with GitHubConnector(token="your_token") as connector:
 - **Context Manager Support**: Use `with` statement for automatic cleanup
 - **Backward Compatible**: All legacy parameters still supported
 - **Date filtering**: CLI local mode supports `--since`/`--start-date` for commit/stats/blame. Connector methods continue to honor `max_commits` but otherwise operate on the latest history returned by the providers.
+- **Planning docs**: Implementation plans in `docs/project.md`, metrics inventory in `docs/metrics-inventory.md`, requirements/roadmap in `docs/roadmap.md`.
 
 ## Installation
 
