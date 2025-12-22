@@ -140,6 +140,9 @@ def gitlab_issue_to_work_item(
     if completed_at is None and closed_at is not None:
         completed_at = closed_at
 
+    weight = _get(issue, "weight")
+    story_points = float(weight) if weight is not None else None
+
     work_item = WorkItem(
         work_item_id=work_item_id,
         provider="gitlab",
@@ -159,7 +162,8 @@ def gitlab_issue_to_work_item(
         completed_at=completed_at,
         closed_at=closed_at,
         labels=labels,
-        sprint_id=None,
+        story_points=story_points,
+        sprint_id=str(_get(_get(issue, "milestone"), "id")) if _get(issue, "milestone") else None,
         sprint_name=_get(_get(issue, "milestone"), "title") if _get(issue, "milestone") else None,
         url=url,
     )

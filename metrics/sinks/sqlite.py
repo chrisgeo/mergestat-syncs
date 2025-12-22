@@ -76,6 +76,8 @@ class SQLiteMetricsSink:
               rework_churn_ratio_30d REAL NOT NULL DEFAULT 0.0,
               single_owner_file_ratio_30d REAL NOT NULL DEFAULT 0.0,
               review_load_top_reviewer_ratio REAL NOT NULL DEFAULT 0.0,
+              bus_factor INTEGER NOT NULL DEFAULT 0,
+              code_ownership_gini REAL NOT NULL DEFAULT 0.0,
               mttr_hours REAL,
               change_failure_rate REAL NOT NULL DEFAULT 0.0,
               computed_at TEXT NOT NULL,
@@ -181,6 +183,7 @@ class SQLiteMetricsSink:
               new_items_count INTEGER NOT NULL DEFAULT 0,
               defect_intro_rate REAL NOT NULL DEFAULT 0.0,
               wip_congestion_ratio REAL NOT NULL DEFAULT 0.0,
+              predictability_score REAL NOT NULL DEFAULT 0.0,
               computed_at TEXT NOT NULL,
               PRIMARY KEY (provider, day, team_id, work_scope_id)
             )
@@ -451,6 +454,15 @@ class SQLiteMetricsSink:
                     )
                 )
             if not self._table_has_column(
+                conn, "work_item_metrics_daily", "predictability_score"
+            ):
+                conn.execute(
+                    text(
+                        "ALTER TABLE work_item_metrics_daily "
+                        "ADD COLUMN predictability_score REAL NOT NULL DEFAULT 0.0"
+                    )
+                )
+            if not self._table_has_column(
                 conn, "work_item_state_durations_daily", "avg_wip"
             ):
                 conn.execute(
@@ -491,6 +503,8 @@ class SQLiteMetricsSink:
                 ("rework_churn_ratio_30d", "REAL NOT NULL DEFAULT 0.0"),
                 ("single_owner_file_ratio_30d", "REAL NOT NULL DEFAULT 0.0"),
                 ("review_load_top_reviewer_ratio", "REAL NOT NULL DEFAULT 0.0"),
+                ("bus_factor", "INTEGER NOT NULL DEFAULT 0"),
+                ("code_ownership_gini", "REAL NOT NULL DEFAULT 0.0"),
                 ("mttr_hours", "REAL"),
                 ("change_failure_rate", "REAL NOT NULL DEFAULT 0.0"),
             ]:
@@ -542,6 +556,7 @@ class SQLiteMetricsSink:
               large_pr_ratio, pr_rework_ratio,
               pr_size_p50_loc, pr_size_p90_loc, pr_comments_per_100_loc, pr_reviews_per_100_loc,
               rework_churn_ratio_30d, single_owner_file_ratio_30d, review_load_top_reviewer_ratio,
+              bus_factor, code_ownership_gini,
               mttr_hours, change_failure_rate,
               computed_at
             ) VALUES (
@@ -552,6 +567,7 @@ class SQLiteMetricsSink:
               :large_pr_ratio, :pr_rework_ratio,
               :pr_size_p50_loc, :pr_size_p90_loc, :pr_comments_per_100_loc, :pr_reviews_per_100_loc,
               :rework_churn_ratio_30d, :single_owner_file_ratio_30d, :review_load_top_reviewer_ratio,
+              :bus_factor, :code_ownership_gini,
               :mttr_hours, :change_failure_rate,
               :computed_at
             )
@@ -578,6 +594,8 @@ class SQLiteMetricsSink:
               rework_churn_ratio_30d=excluded.rework_churn_ratio_30d,
               single_owner_file_ratio_30d=excluded.single_owner_file_ratio_30d,
               review_load_top_reviewer_ratio=excluded.review_load_top_reviewer_ratio,
+              bus_factor=excluded.bus_factor,
+              code_ownership_gini=excluded.code_ownership_gini,
               mttr_hours=excluded.mttr_hours,
               change_failure_rate=excluded.change_failure_rate,
               computed_at=excluded.computed_at
@@ -741,6 +759,8 @@ class SQLiteMetricsSink:
             "review_load_top_reviewer_ratio": float(
                 data.get("review_load_top_reviewer_ratio", 0.0) or 0.0
             ),
+            "bus_factor": int(data.get("bus_factor", 0) or 0),
+            "code_ownership_gini": float(data.get("code_ownership_gini", 0.0) or 0.0),
             "mttr_hours": data.get("mttr_hours"),
             "change_failure_rate": float(data.get("change_failure_rate", 0.0) or 0.0),
             "computed_at": _dt_to_sqlite(data["computed_at"]),
@@ -1010,13 +1030,13 @@ class SQLiteMetricsSink:
                   items_started_unassigned, items_completed_unassigned, wip_unassigned_end_of_day,
                   cycle_time_p50_hours, cycle_time_p90_hours, lead_time_p50_hours, lead_time_p90_hours,
                   wip_age_p50_hours, wip_age_p90_hours, bug_completed_ratio, story_points_completed,
-                  new_bugs_count, new_items_count, defect_intro_rate, wip_congestion_ratio, computed_at
+                  new_bugs_count, new_items_count, defect_intro_rate, wip_congestion_ratio, predictability_score, computed_at
                 ) VALUES (
                   :day, :provider, :work_scope_id, :team_id, :team_name, :items_started, :items_completed, :wip_count_end_of_day,
                   :items_started_unassigned, :items_completed_unassigned, :wip_unassigned_end_of_day,
                   :cycle_time_p50_hours, :cycle_time_p90_hours, :lead_time_p50_hours, :lead_time_p90_hours,
                   :wip_age_p50_hours, :wip_age_p90_hours, :bug_completed_ratio, :story_points_completed,
-                  :new_bugs_count, :new_items_count, :defect_intro_rate, :wip_congestion_ratio, :computed_at
+                  :new_bugs_count, :new_items_count, :defect_intro_rate, :wip_congestion_ratio, :predictability_score, :computed_at
                 )
                 ON CONFLICT(provider, day, team_id, work_scope_id) DO UPDATE SET
                   team_name=excluded.team_name,
@@ -1038,6 +1058,7 @@ class SQLiteMetricsSink:
                   new_items_count=excluded.new_items_count,
                   defect_intro_rate=excluded.defect_intro_rate,
                   wip_congestion_ratio=excluded.wip_congestion_ratio,
+                  predictability_score=excluded.predictability_score,
                   computed_at=excluded.computed_at
                 """
             )
@@ -1050,13 +1071,13 @@ class SQLiteMetricsSink:
                   items_started_unassigned, items_completed_unassigned, wip_unassigned_end_of_day,
                   cycle_time_p50_hours, cycle_time_p90_hours, lead_time_p50_hours, lead_time_p90_hours,
                   wip_age_p50_hours, wip_age_p90_hours, bug_completed_ratio, story_points_completed,
-                  new_bugs_count, new_items_count, defect_intro_rate, wip_congestion_ratio, computed_at
+                  new_bugs_count, new_items_count, defect_intro_rate, wip_congestion_ratio, predictability_score, computed_at
                 ) VALUES (
                   :day, :provider, :repo_id, :team_id, :team_name, :items_started, :items_completed, :wip_count_end_of_day,
                   :items_started_unassigned, :items_completed_unassigned, :wip_unassigned_end_of_day,
                   :cycle_time_p50_hours, :cycle_time_p90_hours, :lead_time_p50_hours, :lead_time_p90_hours,
                   :wip_age_p50_hours, :wip_age_p90_hours, :bug_completed_ratio, :story_points_completed,
-                  :new_bugs_count, :new_items_count, :defect_intro_rate, :wip_congestion_ratio, :computed_at
+                  :new_bugs_count, :new_items_count, :defect_intro_rate, :wip_congestion_ratio, :predictability_score, :computed_at
                 )
                 ON CONFLICT(provider, day, team_id, repo_id) DO UPDATE SET
                   team_name=excluded.team_name,
@@ -1078,6 +1099,7 @@ class SQLiteMetricsSink:
                   new_items_count=excluded.new_items_count,
                   defect_intro_rate=excluded.defect_intro_rate,
                   wip_congestion_ratio=excluded.wip_congestion_ratio,
+                  predictability_score=excluded.predictability_score,
                   computed_at=excluded.computed_at
                 """
             )

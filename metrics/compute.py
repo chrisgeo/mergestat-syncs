@@ -190,6 +190,8 @@ def compute_daily_metrics(
     mttr_by_repo: Optional[Dict[uuid.UUID, float]] = None,
     rework_churn_ratio_by_repo: Optional[Dict[uuid.UUID, float]] = None,
     single_owner_file_ratio_by_repo: Optional[Dict[uuid.UUID, float]] = None,
+    bus_factor_by_repo: Optional[Dict[uuid.UUID, int]] = None,
+    code_ownership_gini_by_repo: Optional[Dict[uuid.UUID, float]] = None,
 ) -> DailyMetricsResult:
     """
     Compute daily commit/user/repo metrics for a single UTC day.
@@ -618,6 +620,14 @@ def compute_daily_metrics(
                     else 0.0
                 ),
                 review_load_top_reviewer_ratio=float(top_reviewer_ratio),
+                bus_factor=int(
+                    bus_factor_by_repo.get(repo_id, 0) if bus_factor_by_repo else 0
+                ),
+                code_ownership_gini=float(
+                    code_ownership_gini_by_repo.get(repo_id, 0.0)
+                    if code_ownership_gini_by_repo
+                    else 0.0
+                ),
                 mttr_hours=mttr_by_repo.get(repo_id) if mttr_by_repo else None,
                 change_failure_rate=float(change_failure_rate),
                 computed_at=computed_at_utc,

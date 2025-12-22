@@ -198,16 +198,34 @@ def github_project_v2_item_to_work_item(
     content = item_node.get("content") or {}
     typename = content.get("__typename")
 
-    # Extract a status value from single-select field values.
+    # Extract a status, iteration, and estimate values from field values.
     status_raw = None
+    iteration_title = None
+    iteration_id = None
+    estimate = None
+    
     for fv in (item_node.get("fieldValues") or {}).get("nodes") or []:
-        if (fv or {}).get("__typename") != "ProjectV2ItemFieldSingleSelectValue":
-            continue
+        typename = (fv or {}).get("__typename")
         field = (fv or {}).get("field") or {}
-        field_name = str(field.get("name") or "")
-        if field_name.strip().lower() == "status":
-            status_raw = fv.get("name")
-            break
+        field_name = str(field.get("name") or "").strip().lower()
+
+        if typename == "ProjectV2ItemFieldSingleSelectValue":
+            if field_name == "status":
+                status_raw = fv.get("name")
+        
+        elif typename == "ProjectV2ItemFieldIterationValue":
+            # GitHub Iterations
+            if "iteration" in field_name or "sprint" in field_name:
+                iteration_title = fv.get("title")
+                iteration_id = fv.get("id") # internal node id
+        
+        elif typename == "ProjectV2ItemFieldNumberValue":
+            # Estimates / Points
+            if field_name in {"estimate", "points", "story points", "size"}:
+                try:
+                    estimate = float(fv.get("number") or 0)
+                except (ValueError, TypeError):
+                    pass
 
     if typename == "Issue":
         repo_full_name = ((content.get("repository") or {}).get("nameWithOwner")) or ""
@@ -267,6 +285,9 @@ def github_project_v2_item_to_work_item(
             completed_at=completed_at,
             closed_at=closed_at,
             labels=labels,
+            story_points=estimate,
+            sprint_id=iteration_id,
+            sprint_name=iteration_title,
             url=content.get("url"),
         )
 
@@ -297,6 +318,9 @@ def github_project_v2_item_to_work_item(
             completed_at=None,
             closed_at=None,
             labels=[],
+            story_points=estimate,
+            sprint_id=iteration_id,
+            sprint_name=iteration_title,
             url=None,
         )
 
