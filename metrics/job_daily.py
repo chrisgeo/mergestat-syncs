@@ -16,6 +16,11 @@ from metrics.compute_work_items import compute_work_item_metrics_daily
 from metrics.compute_work_item_state_durations import (
     compute_work_item_state_durations_daily,
 )
+from metrics.compute_ic import (
+    compute_ic_metrics_daily,
+    compute_ic_landscape_rolling,
+)
+from metrics.identity import load_team_map
 from metrics.hotspots import compute_file_hotspots
 from metrics.quality import compute_rework_churn_ratio, compute_single_owner_file_ratio
 from metrics.reviews import compute_review_edges_daily
@@ -506,6 +511,7 @@ def run_daily_metrics_job(
                 computed_at=computed_at,
                 include_commit_metrics=include_commit_metrics,
                 team_resolver=team_resolver,
+                identity_resolver=identity,
                 mttr_by_repo=mttr_by_repo,
                 rework_churn_ratio_by_repo=rework_ratio_by_repo,
                 single_owner_file_ratio_by_repo=single_owner_ratio_by_repo,
@@ -558,6 +564,17 @@ def run_daily_metrics_job(
                 incidents=incident_rows,
                 computed_at=computed_at,
             )
+            
+            # --- IC Metrics & Landscape ---
+            team_map = load_team_map()
+            ic_metrics = compute_ic_metrics_daily(
+                git_metrics=result.user_metrics,
+                wi_metrics=wi_user_metrics,
+                team_map=team_map,
+            )
+            # Replace basic user metrics with extended IC metrics
+            result.user_metrics[:] = ic_metrics
+            
             logger.info(
                 "Computed derived metrics: repo=%d user=%d commit=%d team=%d wi=%d wi_user=%d wi_facts=%d",
                 len(result.repo_metrics),
@@ -573,7 +590,7 @@ def run_daily_metrics_job(
             for s in sinks:
                 logger.debug("Writing derived metrics to sink=%s", type(s).__name__)
                 s.write_repo_metrics(result.repo_metrics)
-                s.write_user_metrics(result.user_metrics)
+                s.write_user_metrics(result.user_metrics) # Writes extended metrics
                 s.write_commit_metrics(result.commit_metrics)
                 s.write_file_metrics(all_file_metrics)
                 s.write_team_metrics(team_metrics)
@@ -585,6 +602,22 @@ def run_daily_metrics_job(
                 s.write_cicd_metrics(cicd_metrics)
                 s.write_deploy_metrics(deploy_metrics)
                 s.write_incident_metrics(incident_metrics)
+                
+                # Landscape rolling metrics
+                try:
+                    rolling_stats = s.get_rolling_30d_user_stats(
+                        as_of_day=d, repo_id=repo_id
+                    )
+                    landscape_recs = compute_ic_landscape_rolling(
+                        as_of_day=d,
+                        rolling_stats=rolling_stats,
+                        team_map=team_map,
+                    )
+                    s.write_ic_landscape_rolling(landscape_recs)
+                    logger.info("Computed and wrote %d landscape records", len(landscape_recs))
+                except Exception as e:
+                    logger.warning("Failed to compute/write landscape metrics: %s", e)
+
     finally:
         for s in sinks:
             try:

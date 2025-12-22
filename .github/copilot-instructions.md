@@ -8,6 +8,7 @@ This file orients AI coding agents to the dev-health-ops repository: key archite
 - GitHub sync: `python cli.py sync github --db "$DB_CONN_STRING" --owner <owner> --repo <repo>`
 - GitLab sync: `python cli.py sync gitlab --db "$DB_CONN_STRING" --project-id <id>`
 - Metrics: `python cli.py metrics daily --date YYYY-MM-DD --db "$DB_CONN_STRING" --provider all`
+- Fixtures: `python cli.py fixtures generate --db "$DB_CONN_STRING" --days 30`
 
 **Big-picture architecture**
 
@@ -16,6 +17,7 @@ This file orients AI coding agents to the dev-health-ops repository: key archite
 - `connectors/` wrap GitHub/GitLab API access with pagination + rate limits.
 - `storage.py` abstracts DB backends (Postgres/Mongo/SQLite/ClickHouse).
 - `utils.py` holds shared helpers (parsing, git iteration, file filtering).
+- `fixtures/` generates synthetic data for testing.
 
 **Project-specific conventions & patterns**
 

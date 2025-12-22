@@ -32,7 +32,18 @@ This inventory tracks the implementation status of all metrics defined in the `d
 | Defect Introduction Rate | [x] | [metrics/compute_work_items.py](file:///Users/chris/projects/dev-health-ops/metrics/compute_work_items.py) (bugs created vs items closed) |
 | Single Owner File Ratio | [x] | Computed in [quality.py](file:///Users/chris/projects/dev-health-ops/metrics/quality.py) and wired in [job_daily.py](file:///Users/chris/projects/dev-health-ops/metrics/job_daily.py) |
 
-## 3. Collaboration & Team Dynamics
+## 3. IC Metrics & Landscape (New)
+| Metric | Status | Source/Implementation |
+| :--- | :---: | :--- |
+| IC Throughput | [x] | `delivery_units` (PRs merged + Items completed) in [metrics/compute_ic.py](file:///Users/chris/projects/dev-health-ops/metrics/compute_ic.py). Relies on `identity_mapping.yaml`. |
+| IC Churn | [x] | `loc_touched` (Additions + Deletions) in [metrics/compute_ic.py](file:///Users/chris/projects/dev-health-ops/metrics/compute_ic.py) |
+| IC Cycle Time | [x] | `cycle_p50_hours` (PR median cycle time) in [metrics/compute_ic.py](file:///Users/chris/projects/dev-health-ops/metrics/compute_ic.py) |
+| IC Active WIP | [x] | `work_items_active` (Items in progress/review/blocked) in [metrics/compute_ic.py](file:///Users/chris/projects/dev-health-ops/metrics/compute_ic.py) |
+| Landscape: Churn vs Throughput | [x] | 2D map with team percentile normalization in [metrics/compute_ic.py](file:///Users/chris/projects/dev-health-ops/metrics/compute_ic.py) |
+| Landscape: Cycle vs Throughput | [x] | 2D map with team percentile normalization in [metrics/compute_ic.py](file:///Users/chris/projects/dev-health-ops/metrics/compute_ic.py) |
+| Landscape: WIP vs Throughput | [x] | 2D map with team percentile normalization in [metrics/compute_ic.py](file:///Users/chris/projects/dev-health-ops/metrics/compute_ic.py) |
+
+## 4. Collaboration & Team Dynamics
 | Metric | Status | Source/Implementation |
 | :--- | :---: | :--- |
 | Review Responsiveness | [x] | `pr_pickup_time_p50_hours` in [compute.py](file:///Users/chris/projects/dev-health-ops/metrics/compute.py) |
@@ -41,7 +52,7 @@ This inventory tracks the implementation status of all metrics defined in the `d
 | Bus Factor | [ ] | Requires aggregation of `FileMetricsRecord.contributors` |
 | Knowledge Distribution | [ ] | Requires ownership mapping visualization |
 
-## 4. Developer Well-being & Cognitive Load
+## 5. Developer Well-being & Cognitive Load
 | Metric | Status | Source/Implementation |
 | :--- | :---: | :--- |
 | Late-night Activity | [x] | [metrics/compute_wellbeing.py](file:///Users/chris/projects/dev-health-ops/metrics/compute_wellbeing.py) |
@@ -50,7 +61,7 @@ This inventory tracks the implementation status of all metrics defined in the `d
 | Flow Score | [ ] | Requires IDE telemetry |
 | Cognitive Load | [ ] | Requires IDE telemetry |
 
-## 5. Systemic & Process Health
+## 6. Systemic & Process Health
 | Metric | Status | Source/Implementation |
 | :--- | :---: | :--- |
 | Bottleneck Index | [x] | [metrics/compute_work_item_state_durations.py](file:///Users/chris/projects/dev-health-ops/metrics/compute_work_item_state_durations.py) |

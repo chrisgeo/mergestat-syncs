@@ -80,7 +80,13 @@
           "rawQuery": true,
           "rawSql": "SELECT day AS time, provider AS metric, sum(items_completed_latest) AS value FROM ( SELECT day, provider, ifNull(nullIf(team_id, ''), 'unassigned') AS team_id, work_scope_id, argMax(items_completed, computed_at) AS items_completed_latest FROM stats.work_item_metrics_daily WHERE match(provider, '${provider:regex}') AND match(ifNull(nullIf(team_id, ''), 'unassigned'), '${team_id:regex}') AND match(work_scope_id, '${work_scope_id:regex}') AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day, provider, team_id, work_scope_id ) GROUP BY day, provider ORDER BY day"
         }
-      ]
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "displayName": "${__field.labels.metric}"
+        },
+        "overrides": []
+      }
     },
     {
       "id": 2,
@@ -102,12 +108,18 @@
           "rawQuery": true,
           "rawSql": "SELECT day AS time, provider AS metric, sum(wip_latest) AS value FROM ( SELECT day, provider, ifNull(nullIf(team_id, ''), 'unassigned') AS team_id, work_scope_id, argMax(wip_count_end_of_day, computed_at) AS wip_latest FROM stats.work_item_metrics_daily WHERE match(provider, '${provider:regex}') AND match(ifNull(nullIf(team_id, ''), 'unassigned'), '${team_id:regex}') AND match(work_scope_id, '${work_scope_id:regex}') AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day, provider, team_id, work_scope_id ) GROUP BY day, provider ORDER BY day"
         }
-      ]
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "displayName": "${__field.labels.metric}"
+        },
+        "overrides": []
+      }
     },
     {
       "id": 3,
       "type": "timeseries",
-      "title": "Work Item Cycle Time p50 — hours",
+      "title": "Work Item Cycle Time p50 \u2014 hours",
       "description": "Computed from per-item cycle times (requires started_at and completed_at).",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
@@ -125,12 +137,18 @@
           "rawQuery": true,
           "rawSql": "SELECT day AS time, provider AS metric, quantileTDigest(0.50)(cycle_time_hours) AS value FROM stats.work_item_cycle_times WHERE match(provider, '${provider:regex}') AND match(ifNull(nullIf(team_id, ''), 'unassigned'), '${team_id:regex}') AND match(work_scope_id, '${work_scope_id:regex}') AND cycle_time_hours IS NOT NULL AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day, provider ORDER BY day"
         }
-      ]
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "displayName": "${__field.labels.metric}"
+        },
+        "overrides": []
+      }
     },
     {
       "id": 4,
       "type": "timeseries",
-      "title": "Work Item Cycle Time p90 — hours",
+      "title": "Work Item Cycle Time p90 \u2014 hours",
       "description": "Computed from per-item cycle times (requires started_at and completed_at).",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
@@ -148,7 +166,13 @@
           "rawQuery": true,
           "rawSql": "SELECT day AS time, provider AS metric, quantileTDigest(0.90)(cycle_time_hours) AS value FROM stats.work_item_cycle_times WHERE match(provider, '${provider:regex}') AND match(ifNull(nullIf(team_id, ''), 'unassigned'), '${team_id:regex}') AND match(work_scope_id, '${work_scope_id:regex}') AND cycle_time_hours IS NOT NULL AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day, provider ORDER BY day"
         }
-      ]
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "displayName": "${__field.labels.metric}"
+        },
+        "overrides": []
+      }
     },
     {
       "id": 5,
@@ -172,7 +196,8 @@
               "mode": "normal",
               "group": "A"
             }
-          }
+          },
+          "displayName": "${__field.labels.metric}"
         },
         "overrides": []
       },
@@ -205,7 +230,13 @@
           "rawQuery": true,
           "rawSql": "SELECT day AS time, provider AS metric, sum(done_unassigned_latest) AS value FROM ( SELECT day, provider, work_scope_id, ifNull(nullIf(team_id, ''), 'unassigned') AS team_id, argMax(items_completed_unassigned, computed_at) AS done_unassigned_latest FROM stats.work_item_metrics_daily WHERE match(provider, '${provider:regex}') AND match(ifNull(nullIf(team_id, ''), 'unassigned'), '${team_id:regex}') AND match(work_scope_id, '${work_scope_id:regex}') AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day, provider, work_scope_id, team_id ) GROUP BY day, provider ORDER BY day"
         }
-      ]
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "displayName": "${__field.labels.metric}"
+        },
+        "overrides": []
+      }
     }
   ]
 }

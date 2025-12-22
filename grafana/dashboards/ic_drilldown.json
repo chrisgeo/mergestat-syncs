@@ -1,0 +1,120 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "panels": [
+    {
+      "title": "Delivery Units Daily",
+      "type": "barchart",
+      "datasource": "ClickHouse",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT day AS time, 'Delivery Units' AS metric, delivery_units AS value FROM stats.user_metrics_daily WHERE identity_id = '$identity_id' AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) ORDER BY day",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "displayName": "${__field.labels.metric}"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "title": "LOC Touched",
+      "type": "timeseries",
+      "datasource": "ClickHouse",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT day AS time, 'LOC Touched' AS metric, loc_touched AS value FROM stats.user_metrics_daily WHERE identity_id = '$identity_id' AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) ORDER BY day",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "displayName": "${__field.labels.metric}"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Cycle Time P50 (Hours)",
+      "type": "timeseries",
+      "datasource": "ClickHouse",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT day AS time, 'Cycle Time P50 (Hours)' AS metric, cycle_p50_hours AS value FROM stats.user_metrics_daily WHERE identity_id = '$identity_id' AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) ORDER BY day",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "displayName": "${__field.labels.metric}"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "title": "WIP Active",
+      "type": "timeseries",
+      "datasource": "ClickHouse",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT day AS time, 'WIP Active' AS metric, work_items_active AS value FROM stats.user_metrics_daily WHERE identity_id = '$identity_id' AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) ORDER BY day",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "displayName": "${__field.labels.metric}"
+        },
+        "overrides": []
+      }
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "text": "All",
+          "value": "All"
+        },
+        "datasource": "ClickHouse",
+        "definition": "SELECT DISTINCT identity_id FROM stats.user_metrics_daily ORDER BY 1",
+        "hide": 0,
+        "includeAll": false,
+        "name": "identity_id",
+        "query": "SELECT DISTINCT identity_id FROM stats.user_metrics_daily ORDER BY 1",
+        "type": "query"
+      }
+    ]
+  },
+  "title": "IC Drilldown",
+  "uid": "ic-drilldown",
+  "version": 1
+}

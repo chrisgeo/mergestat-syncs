@@ -454,6 +454,30 @@ class SyntheticDataGenerator:
             )
         return items
 
+    def generate_teams_config(self) -> Dict[str, Any]:
+        """
+        Generate a team mapping configuration for the synthetic users.
+        """
+        # Split authors into two teams
+        mid = len(self.authors) // 2
+        team_alpha = self.authors[:mid]
+        team_beta = self.authors[mid:]
+        
+        return {
+            "teams": [
+                {
+                    "team_id": "team-alpha",
+                    "team_name": "Team Alpha",
+                    "members": [email for _, email in team_alpha]
+                },
+                {
+                    "team_id": "team-beta",
+                    "team_name": "Team Beta",
+                    "members": [email for _, email in team_beta]
+                }
+            ]
+        }
+
     def generate_work_item_transitions(
         self, items: List[WorkItem]
     ) -> List[WorkItemStatusTransition]:

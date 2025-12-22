@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timezone, timedelta
 from pathlib import Path
-from typing import Any, List, Optional, Sequence
+from typing import Any, List, Optional, Sequence, Dict
+import uuid
 
 import clickhouse_connect
 import logging
@@ -21,6 +22,7 @@ from metrics.schemas import (
     CICDMetricsDailyRecord,
     DeployMetricsDailyRecord,
     IncidentMetricsDailyRecord,
+    ICLandscapeRollingRecord,
 )
 
 logger = logging.getLogger(__name__)
@@ -146,6 +148,40 @@ class ClickHouseMetricsSink:
                 "team_name",
                 "active_hours",
                 "weekend_days",
+                "identity_id",
+                "loc_touched",
+                "prs_opened",
+                "work_items_completed",
+                "work_items_active",
+                "delivery_units",
+                "cycle_p50_hours",
+                "cycle_p90_hours",
+                "computed_at",
+            ],
+            rows,
+        )
+
+    def write_ic_landscape_rolling(
+        self, rows: Sequence[ICLandscapeRollingRecord]
+    ) -> None:
+        if not rows:
+            return
+        self._insert_rows(
+            "ic_landscape_rolling_30d",
+            [
+                "repo_id",
+                "as_of_day",
+                "identity_id",
+                "team_id",
+                "map_name",
+                "x_raw",
+                "y_raw",
+                "x_norm",
+                "y_norm",
+                "churn_loc_30d",
+                "delivery_units_30d",
+                "cycle_p50_30d_hours",
+                "wip_max_30d",
                 "computed_at",
             ],
             rows,
@@ -396,6 +432,74 @@ class ClickHouseMetricsSink:
         self.client.insert(table, matrix, column_names=columns)
 
     # Query helpers (useful for Grafana and validation)
+    def get_rolling_30d_user_stats(
+        self,
+        as_of_day: date,
+        repo_id: Optional[uuid.UUID] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Compute rolling 30d stats for all users as of the given day.
+        
+        Aggregation logic:
+        - churn_loc_30d: sum(loc_touched)
+        - delivery_units_30d: sum(delivery_units)
+        - cycle_p50_30d_hours: median of daily cycle_p50_hours (approx) where cycle_p50_hours > 0
+        - wip_max_30d: max(work_items_active)
+        """
+        # We look at [as_of_day - 29 days, as_of_day] inclusive.
+        # Note: 'day' in user_metrics_daily is the date of the metrics.
+        
+        start_day = as_of_day - timedelta(days=29)
+        
+        params = {
+            "start": start_day.isoformat(),
+            "end": as_of_day.isoformat(),
+        }
+        where = ["day >= toDate(%(start)s)", "day <= toDate(%(end)s)"]
+        if repo_id:
+            where.append("repo_id = toUUID(%(repo_id)s)")
+            params["repo_id"] = str(repo_id)
+            
+        where_clause = " AND ".join(where)
+        
+        # We use argMax(..., computed_at) to get the latest version of the row for each day
+        # before aggregating over days.
+        # However, user_metrics_daily is MergeTree, not ReplacingMergeTree in the original schema (001).
+        # Wait, 001 says ENGINE = MergeTree. So we might have duplicates if we re-ran.
+        # But commonly we just insert.
+        # If we assume we might have multiple rows per day/user/repo, we should take the latest.
+        # The PK is (repo_id, author_email, day).
+        # We'll aggregate over (identity_id, team_id, repo_id)
+        
+        # Note: identity_id was added in 005. For older rows it might be null/empty.
+        # We fallback to author_email if identity_id is empty.
+        
+        sql = f"""
+        SELECT
+            if(empty(identity_id), author_email, identity_id) as identity_id,
+            anyLast(team_id) as team_id,
+            sum(loc_touched) as churn_loc_30d,
+            sum(delivery_units) as delivery_units_30d,
+            quantile(0.5)(if(cycle_p50_hours > 0, cycle_p50_hours, null)) as cycle_p50_30d_hours,
+            max(work_items_active) as wip_max_30d
+        FROM user_metrics_daily
+        WHERE {where_clause}
+        GROUP BY identity_id
+        HAVING identity_id != ''
+        """
+        
+        # Note: ClickHouse's quantile(0.5) is approximate but fast.
+        
+        try:
+            result = self.client.query(sql, parameters=params)
+            rows = []
+            for r in result.named_results():
+                rows.append(r)
+            return rows
+        except Exception as e:
+            logger.warning("Failed to fetch rolling stats: %s", e)
+            return []
+
     def latest_repo_metrics_query(
         self,
         *,

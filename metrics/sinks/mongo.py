@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from datetime import date, datetime, timezone
-from typing import List, Optional, Sequence
+from datetime import date, datetime, timezone, timedelta
+from typing import List, Optional, Sequence, Dict, Any
 
 from pymongo import MongoClient, ReplaceOne
 
@@ -20,6 +20,7 @@ from metrics.schemas import (
     CICDMetricsDailyRecord,
     DeployMetricsDailyRecord,
     IncidentMetricsDailyRecord,
+    ICLandscapeRollingRecord,
 )
 import logging
 
@@ -121,6 +122,12 @@ class MongoMetricsSink:
         self.db["cicd_metrics_daily"].create_index([("repo_id", 1), ("day", 1)])
         self.db["deploy_metrics_daily"].create_index([("repo_id", 1), ("day", 1)])
         self.db["incident_metrics_daily"].create_index([("repo_id", 1), ("day", 1)])
+        self.db["ic_landscape_rolling_30d"].create_index([
+            ("repo_id", 1),
+            ("map_name", 1),
+            ("as_of_day", 1),
+            ("identity_id", 1)
+        ], unique=True)
 
     def write_repo_metrics(self, rows: Sequence[RepoMetricsDailyRecord]) -> None:
         if not rows:
@@ -309,3 +316,103 @@ class MongoMetricsSink:
             doc["computed_at"] = _dt_to_mongo_datetime(row.computed_at)
             ops.append(ReplaceOne({"_id": doc["_id"]}, doc, upsert=True))
         self.db["incident_metrics_daily"].bulk_write(ops, ordered=False)
+
+    def write_ic_landscape_rolling(
+        self, rows: Sequence[ICLandscapeRollingRecord]
+    ) -> None:
+        if not rows:
+            return
+        ops: List[ReplaceOne] = []
+        for row in rows:
+            doc = asdict(row)
+            # key: repo_id:map_name:as_of_day:identity_id
+            doc["_id"] = f"{row.repo_id}:{row.map_name}:{row.as_of_day.isoformat()}:{row.identity_id}"
+            doc["repo_id"] = str(row.repo_id)
+            doc["as_of_day"] = _day_to_mongo_datetime(row.as_of_day)
+            doc["computed_at"] = _dt_to_mongo_datetime(row.computed_at)
+            ops.append(ReplaceOne({"_id": doc["_id"]}, doc, upsert=True))
+        self.db["ic_landscape_rolling_30d"].bulk_write(ops, ordered=False)
+
+    def get_rolling_30d_user_stats(
+        self,
+        as_of_day: date,
+        repo_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Compute rolling 30d stats by aggregating daily docs in Python.
+        """
+        start_day = as_of_day - timedelta(days=29)
+        # Mongo stores dates as datetime objects (midnight UTC for days)
+        start_dt = _day_to_mongo_datetime(start_day)
+        end_dt = _day_to_mongo_datetime(as_of_day)
+        
+        query = {
+            "day": {"$gte": start_dt, "$lte": end_dt}
+        }
+        if repo_id:
+            query["repo_id"] = str(repo_id)
+            
+        projection = {
+            "identity_id": 1,
+            "author_email": 1,
+            "team_id": 1,
+            "loc_touched": 1,
+            "delivery_units": 1,
+            "cycle_p50_hours": 1,
+            "work_items_active": 1,
+        }
+        
+        docs = list(self.db["user_metrics_daily"].find(query, projection))
+        
+        # Aggregate in Python
+        aggs: Dict[str, Dict[str, Any]] = {}
+        
+        for doc in docs:
+            # Fallback for identity_id
+            identity_id = doc.get("identity_id") or doc.get("author_email")
+            if not identity_id:
+                continue
+                
+            team_id = doc.get("team_id")
+            loc_touched = doc.get("loc_touched") or 0
+            delivery_units = doc.get("delivery_units") or 0
+            cycle_p50 = doc.get("cycle_p50_hours") or 0.0
+            wip = doc.get("work_items_active") or 0
+            
+            if identity_id not in aggs:
+                aggs[identity_id] = {
+                    "identity_id": identity_id,
+                    "team_id": team_id,
+                    "churn_loc_30d": 0,
+                    "delivery_units_30d": 0,
+                    "wip_max_30d": 0,
+                    "cycle_p50_values": []
+                }
+            
+            entry = aggs[identity_id]
+            entry["churn_loc_30d"] += loc_touched
+            entry["delivery_units_30d"] += delivery_units
+            entry["wip_max_30d"] = max(entry["wip_max_30d"], wip)
+            if cycle_p50 > 0:
+                entry["cycle_p50_values"].append(cycle_p50)
+            
+            if not entry["team_id"] and team_id:
+                entry["team_id"] = team_id
+
+        # Finalize
+        results = []
+        for identity, data in aggs.items():
+            cycle_vals = data.pop("cycle_p50_values")
+            median_cycle = 0.0
+            if cycle_vals:
+                cycle_vals.sort()
+                mid = len(cycle_vals) // 2
+                if len(cycle_vals) % 2 == 1:
+                    median_cycle = cycle_vals[mid]
+                else:
+                    median_cycle = (cycle_vals[mid-1] + cycle_vals[mid]) / 2.0
+            
+            data["cycle_p50_30d_hours"] = median_cycle
+            results.append(data)
+            
+        return results

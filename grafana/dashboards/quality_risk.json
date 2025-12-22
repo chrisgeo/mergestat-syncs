@@ -48,7 +48,8 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "percentunit"
+          "unit": "percentunit",
+          "displayName": "${__field.labels.metric}"
         },
         "overrides": []
       },
@@ -76,7 +77,8 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "percentunit"
+          "unit": "percentunit",
+          "displayName": "${__field.labels.metric}"
         },
         "overrides": []
       },
@@ -91,7 +93,7 @@
     {
       "id": 3,
       "type": "timeseries",
-      "title": "PR Size (p50 / p90) — LOC",
+      "title": "PR Size (p50 / p90) \u2014 LOC",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "clickhouse"
@@ -113,7 +115,13 @@
           "rawQuery": true,
           "rawSql": "SELECT m.day AS time, concat(r.repo, ' p90') AS metric, argMax(m.pr_size_p90_loc, m.computed_at) AS value FROM repo_metrics_daily AS m INNER JOIN repos AS r ON r.id = m.repo_id WHERE match(r.repo, '${repo_id:regex}') AND m.day >= toDate(toDateTime(intDiv($__from, 1000))) AND m.day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY m.day, metric ORDER BY m.day"
         }
-      ]
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "displayName": "${__field.labels.metric}"
+        },
+        "overrides": []
+      }
     },
     {
       "id": 4,
@@ -135,7 +143,13 @@
           "rawQuery": true,
           "rawSql": "SELECT m.day AS time, r.repo AS metric, argMax(m.pr_comments_per_100_loc, m.computed_at) AS value FROM repo_metrics_daily AS m INNER JOIN repos AS r ON r.id = m.repo_id WHERE match(r.repo, '${repo_id:regex}') AND m.day >= toDate(toDateTime(intDiv($__from, 1000))) AND m.day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY m.day, metric ORDER BY m.day"
         }
-      ]
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "displayName": "${__field.labels.metric}"
+        },
+        "overrides": []
+      }
     },
     {
       "id": 5,
@@ -157,7 +171,13 @@
           "rawQuery": true,
           "rawSql": "SELECT m.day AS time, r.repo AS metric, argMax(m.pr_reviews_per_100_loc, m.computed_at) AS value FROM repo_metrics_daily AS m INNER JOIN repos AS r ON r.id = m.repo_id WHERE match(r.repo, '${repo_id:regex}') AND m.day >= toDate(toDateTime(intDiv($__from, 1000))) AND m.day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY m.day, metric ORDER BY m.day"
         }
-      ]
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "displayName": "${__field.labels.metric}"
+        },
+        "overrides": []
+      }
     },
     {
       "id": 6,
@@ -175,7 +195,8 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "percentunit"
+          "unit": "percentunit",
+          "displayName": "${__field.labels.metric}"
         },
         "overrides": []
       },
@@ -203,7 +224,8 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "percentunit"
+          "unit": "percentunit",
+          "displayName": "${__field.labels.metric}"
         },
         "overrides": []
       },

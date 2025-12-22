@@ -52,7 +52,13 @@
           "rawQuery": true,
           "rawSql": "SELECT m.day AS time, r.repo AS metric, argMax(m.commits_count, m.computed_at) AS value FROM repo_metrics_daily AS m INNER JOIN repos AS r ON r.id = m.repo_id WHERE match(r.repo, '${repo_id:regex}') AND m.day >= toDate(toDateTime(intDiv($__from, 1000))) AND m.day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY m.day, metric ORDER BY m.day"
         }
-      ]
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "displayName": "${__field.labels.metric}"
+        },
+        "overrides": []
+      }
     },
     {
       "id": 2,
@@ -74,12 +80,18 @@
           "rawQuery": true,
           "rawSql": "SELECT m.day AS time, r.repo AS metric, argMax(m.prs_merged, m.computed_at) AS value FROM repo_metrics_daily AS m INNER JOIN repos AS r ON r.id = m.repo_id WHERE match(r.repo, '${repo_id:regex}') AND m.day >= toDate(toDateTime(intDiv($__from, 1000))) AND m.day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY m.day, metric ORDER BY m.day"
         }
-      ]
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "displayName": "${__field.labels.metric}"
+        },
+        "overrides": []
+      }
     },
     {
       "id": 3,
       "type": "timeseries",
-      "title": "PR Cycle Time (p50 / p90) — hours",
+      "title": "PR Cycle Time (p50 / p90) \u2014 hours",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "clickhouse"
@@ -101,7 +113,13 @@
           "rawQuery": true,
           "rawSql": "SELECT m.day AS time, concat(r.repo, ' p90') AS metric, argMax(m.pr_cycle_p90_hours, m.computed_at) AS value FROM repo_metrics_daily AS m INNER JOIN repos AS r ON r.id = m.repo_id WHERE match(r.repo, '${repo_id:regex}') AND m.day >= toDate(toDateTime(intDiv($__from, 1000))) AND m.day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY m.day, metric ORDER BY m.day"
         }
-      ]
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "displayName": "${__field.labels.metric}"
+        },
+        "overrides": []
+      }
     },
     {
       "id": 4,
@@ -120,7 +138,8 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "percentunit"
+          "unit": "percentunit",
+          "displayName": "${__field.labels.metric}"
         },
         "overrides": []
       },
@@ -140,7 +159,7 @@
     {
       "id": 5,
       "type": "timeseries",
-      "title": "MTTR (DORA) — hours",
+      "title": "MTTR (DORA) \u2014 hours",
       "description": "Mean Time To Recovery. Time from first revert commit/PR to subsequent successful merge.",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
@@ -158,7 +177,13 @@
           "rawQuery": true,
           "rawSql": "SELECT m.day AS time, r.repo AS metric, argMax(m.mttr_hours, m.computed_at) AS value FROM repo_metrics_daily AS m INNER JOIN repos AS r ON r.id = m.repo_id WHERE match(r.repo, '${repo_id:regex}') AND m.day >= toDate(toDateTime(intDiv($__from, 1000))) AND m.day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY m.day, metric ORDER BY m.day"
         }
-      ]
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "displayName": "${__field.labels.metric}"
+        },
+        "overrides": []
+      }
     },
     {
       "id": 6,
@@ -177,7 +202,8 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "percentunit"
+          "unit": "percentunit",
+          "displayName": "${__field.labels.metric}"
         },
         "overrides": []
       },
@@ -206,7 +232,8 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "percentunit"
+          "unit": "percentunit",
+          "displayName": "${__field.labels.metric}"
         },
         "overrides": []
       },
