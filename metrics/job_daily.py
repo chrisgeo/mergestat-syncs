@@ -5,7 +5,10 @@ import logging
 import os
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 from metrics.compute import compute_daily_metrics
 from metrics.compute_cicd import compute_cicd_metrics_daily
@@ -622,10 +625,9 @@ def run_daily_metrics_job(
                 # Use team resolver logic or fallback
                 # We can reuse the team_id from computed work_item_metrics if we had it mapped,
                 # but let's re-resolve quickly or use 'unknown'
-                assignee = wi.assignee_email or wi.assignee_name
-                if assignee:
-                     t = team_resolver.resolve(assignee)
-                     if t: return t.team_id
+                if wi.assignees:
+                     t_id, _ = team_resolver.resolve(wi.assignees[0])
+                     if t_id: return t_id
                 return "unknown"
 
             for item in work_items:
@@ -729,7 +731,7 @@ def run_daily_metrics_job(
                         artifact_id=item.work_item_id,
                         provider=item.provider,
                         investment_area=cls.investment_area,
-                        project_stream=cls.project_stream,
+                        project_stream=cls.project_stream or "",
                         confidence=cls.confidence,
                         rule_id=cls.rule_id,
                         computed_at=computed_at
@@ -740,7 +742,7 @@ def run_daily_metrics_job(
                         completed = _to_utc(item.completed_at)
                         if start_dt <= completed < end_dt:
                             team_id = _get_team(item)
-                            key = (r_id, team_id, cls.investment_area, cls.project_stream)
+                            key = (r_id, team_id, cls.investment_area, cls.project_stream or "")
                             if key not in inv_metrics_map:
                                 inv_metrics_map[key] = {"units": 0, "completed": 0, "churn": 0, "cycles": []}
                             
@@ -757,7 +759,7 @@ def run_daily_metrics_job(
 
             # 2. Classify PRs (merged today)
             for pr in pr_rows:
-                if pr["merged_at"] and start <= _naive_utc(pr["merged_at"]) < end:
+                if pr["merged_at"] and start <= _to_utc(pr["merged_at"]) < end:
                      # We need PR labels or files to classify accurately.
                      # We only have schemas.PullRequestRow which is limited.
                      # We assume we might have extended info or fetch it?
@@ -781,10 +783,10 @@ def run_daily_metrics_job(
                 # We don't emit a classification record per commit (too many), but we aggregate metrics
                 # We need author team
                 author_email = c["author_email"] or ""
-                t = team_resolver.resolve(author_email)
-                team_id = t.team_id if t else "unknown"
+                t_id, _ = team_resolver.resolve(author_email)
+                team_id = t_id if t_id else "unknown"
                 
-                key = (r_id, team_id, cls.investment_area, cls.project_stream)
+                key = (r_id, team_id, cls.investment_area, cls.project_stream or "")
                 if key not in inv_metrics_map:
                     inv_metrics_map[key] = {"units": 0, "completed": 0, "churn": 0, "cycles": []}
                 

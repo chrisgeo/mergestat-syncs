@@ -408,51 +408,147 @@ class SyntheticDataGenerator:
             )
         return records
 
-    def generate_work_items(self, days: int = 30) -> List[WorkItem]:
+    def generate_work_items(
+        self,
+        days: int = 30,
+        projects: Optional[List[str]] = None,
+        investment_weights: Optional[Dict[str, float]] = None,
+    ) -> List[WorkItem]:
         items = []
         end_date = datetime.now(timezone.utc)
+        
+        # Defaults
+        if not projects:
+            projects = [self.repo_name]
+        
+        if not investment_weights:
+            investment_weights = {
+                "product": 0.6,
+                "security": 0.1,
+                "infra": 0.1,
+                "quality": 0.1,
+                "docs": 0.1,
+            }
 
-        # Focus on bugs for MTTR
-        for i in range(days * 2):
+        # Normalize weights
+        total_weight = sum(investment_weights.values())
+        normalized_weights = {k: v / total_weight for k, v in investment_weights.items()}
+        categories = list(normalized_weights.keys())
+        weights = list(normalized_weights.values())
+
+        # Generate Epics per project (Long running)
+        project_epics = {}
+        for proj in projects:
+            project_epics[proj] = []
+            # Create 1-3 active epics per project
+            for i in range(random.randint(1, 3)):
+                epic_created_at = end_date - timedelta(days=random.randint(days, days + 60))
+                epic_id = f"{proj}-EPIC-{i+1}"
+                category = random.choices(categories, weights=weights, k=1)[0]
+                
+                # Create the Epic item
+                epic = WorkItem(
+                    work_item_id=epic_id,
+                    provider=self.provider,
+                    title=f"Epic: {category.title()} Initiative {i+1}",
+                    type="epic",
+                    status="in_progress",  # Epics often stay open
+                    status_raw="In Progress",
+                    repo_id=self.repo_id,
+                    project_id=proj,
+                    created_at=epic_created_at,
+                    started_at=epic_created_at + timedelta(days=1),
+                    completed_at=None,
+                    closed_at=None,
+                    reporter=random.choice(self.authors)[1],
+                    assignees=[random.choice(self.authors)[1]],
+                    labels=[category, "strategic"],
+                    story_points=None,
+                )
+                items.append(epic)
+                project_epics[proj].append(epic)
+
+        # Generate standard work items
+        # Roughly 2 items per day per project
+        total_items = days * 2 * len(projects)
+        
+        for i in range(total_items):
+            project = random.choice(projects)
             author_name, author_email = random.choice(self.authors)
+            
+            # Random date within range
             created_at = end_date - timedelta(
                 days=random.randint(0, days), hours=random.randint(0, 23)
             )
 
-            # Simulated lifecycle
-            is_bug = random.random() > 0.5
-            item_type: WorkItemType = (
-                "bug" if is_bug else random.choice(["story", "task"])
-            )
+            # Determine Investment Category & Parent
+            category = random.choices(categories, weights=weights, k=1)[0]
+            labels = [category]
+            
+            # Link to an Epic if available (50% chance)
+            parent_epic_id = None
+            if project_epics.get(project) and random.random() > 0.5:
+                parent_epic = random.choice(project_epics[project])
+                # Inherit category from Epic if linked, or keep random? 
+                # Usually child items relate to Epic. Let's align them often.
+                if random.random() > 0.3:
+                    labels = list(parent_epic.labels)
+                    category = parent_epic.labels[0] # primary category
+                parent_epic_id = parent_epic.work_item_id
 
-            is_done = random.random() > 0.2
+            # Determine Type
+            is_bug = random.random() > 0.7 if category == "quality" else random.random() > 0.85
+            item_type: WorkItemType = "bug" if is_bug else random.choice(["story", "task"])
+            
+            # For bugs, add 'bug' label
+            if is_bug:
+                labels.append("bug")
+
+            # Lifecycle
+            is_done = random.random() > 0.3
             started_at = None
             completed_at = None
             status = "done" if is_done else "in_progress"
 
             if is_done or random.random() > 0.5:
-                started_at = created_at + timedelta(hours=random.randint(1, 48))
-                if is_done:
-                    completed_at = started_at + timedelta(hours=random.randint(24, 168))
+                # Started 1-5 days after creation
+                started_at = created_at + timedelta(hours=random.randint(1, 120))
+                if started_at > end_date:
+                    started_at = end_date - timedelta(hours=1)
 
+                if is_done:
+                    # Completed 1-7 days after start
+                    completed_at = started_at + timedelta(hours=random.randint(4, 168))
+                    if completed_at > end_date:
+                        completed_at = end_date
+                        status = "in_progress" # Can't be done if date is future
+                    
             items.append(
                 WorkItem(
-                    work_item_id=f"synth:{self.repo_name}#{i}",
+                    work_item_id=f"{project}-{i+100}",
                     provider=self.provider,
-                    title=f"Synthetic {item_type} {i}",
+                    title=f"[{project}] {category.title()} {item_type} {i}",
                     type=item_type,
                     status=status,
                     status_raw=status,
                     repo_id=self.repo_id,
-                    project_id=self.repo_name,
+                    project_id=project,
+                    project_key=project, # Jira style
                     created_at=created_at,
                     started_at=started_at,
                     completed_at=completed_at,
                     closed_at=completed_at,
                     reporter=author_email,
                     assignees=[author_email] if random.random() > 0.3 else [],
+                    labels=labels,
+                    epic_id=parent_epic_id,
+                    parent_id=parent_epic_id, # Simplified: parent is epic
+                    story_points=random.choice([1, 2, 3, 5, 8]) if item_type == "story" else None,
                 )
             )
+            
+        # Sort by created_at for realism
+        items.sort(key=lambda x: x.created_at)
         return items
 
     def generate_teams_config(self) -> Dict[str, Any]:
