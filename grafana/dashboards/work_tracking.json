@@ -237,6 +237,38 @@
         },
         "overrides": []
       }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Predictability Score (Completion Rate)",
+      "description": "Ratio of Completed items to Total Load (Completed + WIP) at end of day. Higher is better (clearing the plate).",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 34
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "displayName": "${__field.labels.metric}",
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawQuery": true,
+          "rawSql": "SELECT day AS time, provider AS metric, avg(predictability_latest) AS value FROM ( SELECT day, provider, work_scope_id, ifNull(nullIf(team_id, ''), 'unassigned') AS team_id, argMax(predictability_score, computed_at) AS predictability_latest FROM stats.work_item_metrics_daily WHERE match(provider, '${provider:regex}') AND match(ifNull(nullIf(team_id, ''), 'unassigned'), '${team_id:regex}') AND match(work_scope_id, '${work_scope_id:regex}') AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY day, provider, work_scope_id, team_id ) GROUP BY day, provider ORDER BY day"
+        }
+      ]
     }
   ]
 }
