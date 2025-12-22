@@ -224,6 +224,13 @@ class SQLAlchemyStore:
     async def __aexit__(self, exc_type, exc, tb) -> None:
         if self.session is not None:
             await self.session.close()
+            self.session = None
+
+    async def ensure_tables(self) -> None:
+        from models.git import Base
+
+        async with self.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
 
     async def insert_repo(self, repo: Repo) -> None:
         assert self.session is not None

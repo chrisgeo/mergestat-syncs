@@ -4,10 +4,11 @@ import logging
 import os
 import time
 import uuid
-from datetime import datetime, timedelta, timezone, date
+from datetime import datetime, timedelta, timezone, date, time as dt_time
 from unittest.mock import MagicMock
 
 import pytest
+from sqlalchemy import text
 
 from fixtures.generator import SyntheticDataGenerator
 from metrics.job_daily import _normalize_sqlite_url
@@ -181,17 +182,27 @@ async def test_synthetic_data_performance(tmp_path):
     
     for i in range(DAYS):
         day = start_day + timedelta(days=i)
-        start_dt = datetime.combine(day, time.min, tzinfo=timezone.utc)
+        start_dt = datetime.combine(day, dt_time.min, tzinfo=timezone.utc)
         end_dt = start_dt + timedelta(days=1)
         
         # Filter data for this day (Simulation of DB query)
         day_commits = [c for c in commit_stat_rows if start_dt <= c["committer_when"] < end_dt]
-        window_start = datetime.combine(day - timedelta(days=29), time.min, tzinfo=timezone.utc)
+        window_start = datetime.combine(
+            day - timedelta(days=29), dt_time.min, tzinfo=timezone.utc
+        )
         window_commits = [c for c in commit_stat_rows if window_start <= c["committer_when"] < end_dt]
         
         # Compute Helpers
-        rework_ratio = {repo.id: compute_rework_churn_ratio(str(repo.id), window_commits)}
-        single_owner = {repo.id: compute_single_owner_file_ratio(str(repo.id), window_commits)}
+        rework_ratio = {
+            repo.id: compute_rework_churn_ratio(
+                repo_id=str(repo.id), window_stats=window_commits
+            )
+        }
+        single_owner = {
+            repo.id: compute_single_owner_file_ratio(
+                repo_id=str(repo.id), window_stats=window_commits
+            )
+        }
         mttr_by_repo = {} # Simplified for benchmark
         
         # Core Metrics
@@ -248,13 +259,8 @@ async def test_synthetic_data_performance(tmp_path):
     # Assertions
     assert processed_days == DAYS
     assert compute_duration < 60.0, f"Computation took too long: {compute_duration:.2f}s"
-    
+
     # Check that data was written
     with sink.engine.connect() as conn:
-        count = conn.execute(sink.RepoMetricsDaily.__table__.select()).scalar() # type: ignore
-        # Some DBs might return row object or iterator, sqlalchemy 1.4+ scalar() works for count(*)
-        # But here we are selecting all, so scalar might be first col of first row?
-        # Actually standard SQL count(*) is better.
-        # But let's just check the method call worked (no exception)
-        pass
-
+        count = conn.execute(text("SELECT COUNT(1) FROM repo_metrics_daily")).scalar()
+    assert count and count > 0
