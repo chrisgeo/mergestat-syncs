@@ -22,6 +22,7 @@ from metrics.compute_ic import (
 )
 from metrics.identity import load_team_map
 from metrics.hotspots import compute_file_hotspots
+from metrics.knowledge import compute_bus_factor, compute_code_ownership_gini
 from metrics.quality import compute_rework_churn_ratio, compute_single_owner_file_ratio
 from metrics.reviews import compute_review_edges_daily
 from metrics.schemas import (
@@ -484,6 +485,8 @@ def run_daily_metrics_job(
             active_repos: Set[uuid.UUID] = {r["repo_id"] for r in commit_rows}
             rework_ratio_by_repo: Dict[uuid.UUID, float] = {}
             single_owner_ratio_by_repo: Dict[uuid.UUID, float] = {}
+            bus_factor_by_repo: Dict[uuid.UUID, int] = {}
+            gini_by_repo: Dict[uuid.UUID, float] = {}
             all_file_metrics = []
             for r_id in sorted(active_repos, key=str):
                 all_file_metrics.extend(
@@ -502,6 +505,14 @@ def run_daily_metrics_job(
                     repo_id=str(r_id),
                     window_stats=h_commit_rows,
                 )
+                bus_factor_by_repo[r_id] = compute_bus_factor(
+                    repo_id=str(r_id),
+                    window_stats=h_commit_rows,
+                )
+                gini_by_repo[r_id] = compute_code_ownership_gini(
+                    repo_id=str(r_id),
+                    window_stats=h_commit_rows,
+                )
 
             result = compute_daily_metrics(
                 day=d,
@@ -515,6 +526,8 @@ def run_daily_metrics_job(
                 mttr_by_repo=mttr_by_repo,
                 rework_churn_ratio_by_repo=rework_ratio_by_repo,
                 single_owner_file_ratio_by_repo=single_owner_ratio_by_repo,
+                bus_factor_by_repo=bus_factor_by_repo,
+                code_ownership_gini_by_repo=gini_by_repo,
             )
 
             team_metrics = compute_team_wellbeing_metrics_daily(

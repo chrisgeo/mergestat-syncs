@@ -223,28 +223,47 @@ def _fetch_github_prs_sync(connector, owner, repo_name, repo_id, max_prs):
 def _fetch_github_workflow_runs_sync(gh_repo, repo_id, max_runs, since):
     runs = []
     if not hasattr(gh_repo, "get_workflow_runs"):
-        return runs
+        if not hasattr(gh_repo, "get_workflows"):
+            return runs
+    def _coerce_datetime(value):
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, str):
+            try:
+                return datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except Exception:
+                return None
+        return None
     try:
-        raw_runs = list(gh_repo.get_workflow_runs()[:max_runs])
+        if hasattr(gh_repo, "get_workflow_runs"):
+            raw_runs = list(gh_repo.get_workflow_runs()[:max_runs])
+        else:
+            raw_runs = []
+            for workflow in gh_repo.get_workflows():
+                for run in workflow.get_runs():
+                    raw_runs.append(run)
+                    if len(raw_runs) >= max_runs:
+                        break
+                if len(raw_runs) >= max_runs:
+                    break
     except Exception as exc:
         logging.debug("Failed to fetch workflow runs: %s", exc)
         return runs
 
     for run in raw_runs:
-        started_at = getattr(run, "run_started_at", None) or getattr(
-            run, "created_at", None
-        )
-        if not isinstance(started_at, datetime):
+        queued_at = _coerce_datetime(getattr(run, "created_at", None))
+        started_at = _coerce_datetime(getattr(run, "run_started_at", None)) or queued_at
+        if started_at is None:
             continue
         if since is not None and started_at.astimezone(timezone.utc) < since:
             continue
-        finished_at = getattr(run, "updated_at", None)
+        finished_at = _coerce_datetime(getattr(run, "updated_at", None))
         runs.append(
             CiPipelineRun(
                 repo_id=repo_id,
                 run_id=str(getattr(run, "id", "")),
                 status=getattr(run, "conclusion", None) or getattr(run, "status", None),
-                queued_at=None,
+                queued_at=queued_at,
                 started_at=started_at,
                 finished_at=finished_at,
             )

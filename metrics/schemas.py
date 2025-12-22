@@ -194,6 +194,10 @@ class RepoMetricsDailyRecord:
     rework_churn_ratio_30d: float = 0.0
     single_owner_file_ratio_30d: float = 0.0
     review_load_top_reviewer_ratio: float = 0.0
+    
+    # Knowledge / Risk signals
+    bus_factor: int = 0
+    code_ownership_gini: float = 0.0
 
     # DORA proxies.
     mttr_hours: Optional[float] = None
@@ -274,6 +278,7 @@ class WorkItemMetricsDailyRecord:
     new_items_count: int = 0
     defect_intro_rate: float = 0.0
     wip_congestion_ratio: float = 0.0
+    predictability_score: float = 0.0
 
 
 @dataclass(frozen=True)

@@ -303,6 +303,15 @@ def _sync_gitlab_mrs_to_store(
 def _fetch_gitlab_pipelines_sync(gl_project, repo_id, max_pipelines, since):
     """Sync helper to fetch GitLab CI/CD pipelines."""
     pipelines = []
+    def _coerce_datetime(value):
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, str):
+            try:
+                return datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except Exception:
+                return None
+        return None
     try:
         list_params = {"per_page": 100, "order_by": "updated_at", "sort": "desc"}
         if max_pipelines > 100:
@@ -318,14 +327,7 @@ def _fetch_gitlab_pipelines_sync(gl_project, repo_id, max_pipelines, since):
         if count >= max_pipelines:
             break
 
-        created_at = None
-        if hasattr(pipeline, "created_at") and pipeline.created_at:
-            try:
-                created_at = datetime.fromisoformat(
-                    pipeline.created_at.replace("Z", "+00:00")
-                )
-            except Exception:
-                continue
+        created_at = _coerce_datetime(getattr(pipeline, "created_at", None))
 
         if created_at is None:
             continue
@@ -334,22 +336,9 @@ def _fetch_gitlab_pipelines_sync(gl_project, repo_id, max_pipelines, since):
             break
 
         started_at = created_at
-        if hasattr(pipeline, "started_at") and pipeline.started_at:
-            try:
-                started_at = datetime.fromisoformat(
-                    pipeline.started_at.replace("Z", "+00:00")
-                )
-            except Exception:
-                pass
+        started_at = _coerce_datetime(getattr(pipeline, "started_at", None)) or created_at
 
-        finished_at = None
-        if hasattr(pipeline, "finished_at") and pipeline.finished_at:
-            try:
-                finished_at = datetime.fromisoformat(
-                    pipeline.finished_at.replace("Z", "+00:00")
-                )
-            except Exception:
-                pass
+        finished_at = _coerce_datetime(getattr(pipeline, "finished_at", None))
 
         pipelines.append(
             CiPipelineRun(

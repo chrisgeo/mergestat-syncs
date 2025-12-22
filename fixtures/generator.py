@@ -361,6 +361,7 @@ class SyntheticDataGenerator:
                     new_items_count=random.randint(3, 10),
                     defect_intro_rate=random.uniform(0.0, 0.3),
                     wip_congestion_ratio=random.uniform(0.5, 2.0),
+                    predictability_score=random.uniform(0.5, 1.0),
                     computed_at=datetime.now(timezone.utc),
                 )
             )

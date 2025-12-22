@@ -20,6 +20,20 @@ Git facts must already exist in the backend you point the job at:
 Work tracking facts are fetched live from provider APIs during metrics computation when `--provider` is not `none`.
 See `docs/task_trackers.md` for configuration.
 
+CI/CD pipeline facts are synced from GitHub/GitLab during the `sync` command when `--sync-cicd` is enabled:
+
+```bash
+python cli.py sync github --db "<DB_CONN>" --auth "$GITHUB_TOKEN" --owner "<org>" --repo "<repo>" --sync-cicd
+python cli.py sync gitlab --db "<DB_CONN>" --auth "$GITLAB_TOKEN" --gitlab-url "<URL>" --project-id <ID> --sync-cicd
+```
+
+Deployments and incident facts are synced during the `sync` command when their flags are enabled:
+
+```bash
+python cli.py sync github --db "<DB_CONN>" --auth "$GITHUB_TOKEN" --owner "<org>" --repo "<repo>" --sync-deployments --sync-incidents
+python cli.py sync gitlab --db "<DB_CONN>" --auth "$GITLAB_TOKEN" --gitlab-url "<URL>" --project-id <ID> --sync-deployments --sync-incidents
+```
+
 ## Derived Tables / Collections
 
 ### Git / Repo / User
@@ -75,6 +89,9 @@ Keyed by `(repo_id, day)`.
 - Commits: count, LOC touched, avg size, large commit ratio
 - PRs: merged count, p50/p75/p90 PR cycle hours
 - Quality (best-effort): `large_pr_ratio`, `pr_rework_ratio` (requires PR size and review facts)
+- Knowledge:
+  - `bus_factor`: smallest number of developers accounting for ≥ 50% of code churn
+  - `code_ownership_gini`: Gini coefficient of code contribution inequality (0..1)
 
 ### Optional per-commit metrics (`commit_metrics`)
 Keyed by `(repo_id, day, author_email, commit_hash)`.
@@ -107,6 +124,7 @@ Keyed by `(day, provider, team_id, work_scope_id)`.
 - WIP age distributions (nullable if no WIP samples): p50/p90
 - `bug_completed_ratio`: completed bugs / total completed
 - `story_points_completed`: sum of story points completed (Jira only, when configured)
+- `predictability_score`: Completion Rate = `items_completed / (items_completed + wip_count_end_of_day)`
 
 ### Work item facts (`work_item_cycle_times`)
 Keyed by `(provider, work_item_id)`; stored as ClickHouse `ReplacingMergeTree` by `computed_at` and as Mongo upserts.

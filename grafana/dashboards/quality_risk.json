@@ -236,6 +236,69 @@
           "rawSql": "SELECT m.day AS time, r.repo AS metric, argMax(m.pr_rework_ratio, m.computed_at) AS value FROM repo_metrics_daily AS m INNER JOIN repos AS r ON r.id = m.repo_id WHERE match(r.repo, '${repo_id:regex}') AND m.day >= toDate(toDateTime(intDiv($__from, 1000))) AND m.day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY m.day, metric ORDER BY m.day"
         }
       ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Bus Factor (Truck Factor)",
+      "description": "The smallest number of developers that account for >= 50% of the total code churn.",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 32
+      },
+      "fieldConfig": {
+        "defaults": {
+          "displayName": "${__field.labels.metric}",
+          "min": 0,
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawQuery": true,
+          "rawSql": "SELECT m.day AS time, r.repo AS metric, argMax(m.bus_factor, m.computed_at) AS value FROM repo_metrics_daily AS m INNER JOIN repos AS r ON r.id = m.repo_id WHERE match(r.repo, '${repo_id:regex}') AND m.day >= toDate(toDateTime(intDiv($__from, 1000))) AND m.day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY m.day, metric ORDER BY m.day"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Code Ownership Gini Coefficient",
+      "description": "Measure of knowledge distribution inequality. 0.0 = perfect equality, 1.0 = one person owns everything.",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 32
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "displayName": "${__field.labels.metric}",
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawQuery": true,
+          "rawSql": "SELECT m.day AS time, r.repo AS metric, argMax(m.code_ownership_gini, m.computed_at) AS value FROM repo_metrics_daily AS m INNER JOIN repos AS r ON r.id = m.repo_id WHERE match(r.repo, '${repo_id:regex}') AND m.day >= toDate(toDateTime(intDiv($__from, 1000))) AND m.day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY m.day, metric ORDER BY m.day"
+        }
+      ]
     }
   ]
 }

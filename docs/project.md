@@ -680,19 +680,12 @@ ReciprocityScore = 100 - normalized_variance(team_balance)
 
 #### 1.4.3 Knowledge distribution / Bus factor
 
-For each file f and user u:
+- **Bus Factor (Truck Factor)**: The smallest number of developers that account for >= 50% of the total code churn in the window.
+- **Code Ownership Gini**: Gini coefficient of code contribution (churn) distribution. 0.0 = perfect equality, 1.0 = perfect inequality.
 
 ```text
-ownership(u,f) = commits_by_u_on_f / total_commits_on_f
-```
-
-Count:
-
-```text
-single_owner_files = count(f where max_u ownership(u,f) > 0.75)
-total_files_team   = count(f in team)
-bus_factor_raw     = single_owner_files / total_files_team
-BusFactorScore     = (1 - normalized(bus_factor_raw)) * 100
+bus_factor = number_of_devs_contributing_50_percent_churn
+gini = (2 * sum(i * y_i) / (n * sum(y_i))) - (n + 1) / n
 ```
 
 #### 1.4.4 Dynamics Dimension Score
@@ -817,10 +810,10 @@ CongestionScore = (1 - normalized(congestion_raw)) * 100
 
 #### 1.6.3 Predictability
 
+Defined as **Completion Rate** (how well the team clears its plate).
+
 ```text
-estimate_error = |estimate - actual| / estimate
-predictability_raw = variance(cycle_time) + mean(estimate_error)
-PredictabilityScore = (1 - normalized(predictability_raw)) * 100
+predictability_score = items_completed / (items_completed + wip_count_end_of_day)
 ```
 
 #### 1.6.4 System Health Dimension Score

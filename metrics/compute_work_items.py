@@ -149,6 +149,7 @@ class GroupBucket(TypedDict):
     new_bugs: int
     new_items: int
     weekly_throughput: int
+    predictability_score: float
 
 
 class UserBucket(TypedDict):
@@ -244,6 +245,7 @@ def compute_work_item_metrics_daily(
                 "new_bugs": 0,
                 "new_items": 0,
                 "weekly_throughput": 0,
+                "predictability_score": 0.0,
             }
             by_group[group_key] = bucket
 
@@ -394,6 +396,11 @@ def compute_work_item_metrics_daily(
         denominator = max(1.0, float(throughput_7d))
         wip_congestion = float(wip_val) / denominator
 
+        # Predictability Proxy: Completion Rate (Completed / (Completed + Remaining))
+        # This indicates how effectively the team clears its plate.
+        total_load = float(items_completed + wip_val)
+        predictability = (float(items_completed) / total_load) if total_load > 0 else 0.0
+        
         group_records.append(
             WorkItemMetricsDailyRecord(
                 day=day,
@@ -420,6 +427,7 @@ def compute_work_item_metrics_daily(
                 new_items_count=new_items,
                 defect_intro_rate=defect_rate,
                 wip_congestion_ratio=wip_congestion,
+                predictability_score=predictability,
                 computed_at=computed_at_utc,
             )
         )
