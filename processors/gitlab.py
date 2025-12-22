@@ -345,7 +345,7 @@ def _fetch_gitlab_pipelines_sync(gl_project, repo_id, max_pipelines, since):
                 repo_id=repo_id,
                 run_id=str(getattr(pipeline, "id", "")),
                 status=getattr(pipeline, "status", None),
-                queued_at=None,  # GitLab API doesn't provide queue time
+                queued_at=created_at,
                 started_at=started_at,
                 finished_at=finished_at,
             )

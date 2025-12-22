@@ -1,0 +1,10 @@
+include_globs:
+  - "**/*.py"
+exclude_globs:
+  - "**/migrations/**"
+  - "**/tests/**"
+  - "**/venv/**"
+  - "**/.venv/**"
+  - "**/__init__.py"
+high_complexity_threshold: 15
+very_high_threshold: 25

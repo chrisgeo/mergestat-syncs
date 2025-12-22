@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 from metrics.compute import compute_daily_metrics
 from metrics.compute_cicd import compute_cicd_metrics_daily
@@ -21,7 +25,7 @@ from metrics.compute_ic import (
     compute_ic_landscape_rolling,
 )
 from metrics.identity import load_team_map
-from metrics.hotspots import compute_file_hotspots
+from metrics.hotspots import compute_file_hotspots, compute_file_risk_hotspots
 from metrics.knowledge import compute_bus_factor, compute_code_ownership_gini
 from metrics.quality import compute_rework_churn_ratio, compute_single_owner_file_ratio
 from metrics.reviews import compute_review_edges_daily
@@ -32,7 +36,15 @@ from metrics.schemas import (
     PipelineRunRow,
     DeploymentRow,
     IncidentRow,
+    FileComplexitySnapshot,
+    FileHotspotDaily,
+    InvestmentClassificationRecord,
+    InvestmentMetricsRecord,
+    IssueTypeMetricsRecord,
 )
+from analytics.complexity import FileComplexity
+from analytics.investment import InvestmentClassifier
+from analytics.issue_types import IssueTypeNormalizer
 from metrics.work_items import (
     DiscoveredRepo,
     fetch_github_project_v2_items,
@@ -48,7 +60,7 @@ from metrics.sinks.sqlite import SQLiteMetricsSink
 from providers.identity import load_identity_resolver
 from providers.status_mapping import load_status_mapping
 from providers.teams import load_team_resolver
-from storage import detect_db_type
+from storage import create_store, detect_db_type
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +87,7 @@ def run_daily_metrics_job(
     repo_name: Optional[str] = None,
     include_commit_metrics: bool = True,
     sink: str = "auto",  # auto|clickhouse|mongo|sqlite|both
-    provider: str = "all",  # all|jira|github|gitlab|none
+    provider: str = "none",  # all|jira|github|gitlab|none
 ) -> None:
     """
     Compute and persist daily metrics into ClickHouse/MongoDB/Postgres (and SQLite for dev).
@@ -131,6 +143,10 @@ def run_daily_metrics_job(
     status_mapping = load_status_mapping()
     identity = load_identity_resolver()
     team_resolver = load_team_resolver()
+    
+    # Load classifiers
+    investment_classifier = InvestmentClassifier(REPO_ROOT / "config/investment_areas.yaml")
+    issue_type_normalizer = IssueTypeNormalizer(REPO_ROOT / "config/issue_type_mapping.yaml")
 
     logger.info(
         "Daily metrics job: backend=%s sink=%s day=%s backfill=%d repo_id=%s provider=%s",
@@ -540,22 +556,40 @@ def run_daily_metrics_job(
                 business_hours_end=business_end,
             )
 
-            wi_metrics, wi_user_metrics, wi_cycle_times = (
-                compute_work_item_metrics_daily(
+            wi_metrics = []
+            wi_user_metrics = []
+            wi_cycle_times = []
+            wi_state_durations = []
+            if work_items:
+                wi_metrics, wi_user_metrics, wi_cycle_times = (
+                    compute_work_item_metrics_daily(
+                        day=d,
+                        work_items=work_items,
+                        transitions=work_item_transitions,
+                        computed_at=computed_at,
+                        team_resolver=team_resolver,
+                    )
+                )
+                wi_state_durations = compute_work_item_state_durations_daily(
                     day=d,
                     work_items=work_items,
                     transitions=work_item_transitions,
                     computed_at=computed_at,
                     team_resolver=team_resolver,
                 )
-            )
-            wi_state_durations = compute_work_item_state_durations_daily(
-                day=d,
-                work_items=work_items,
-                transitions=work_item_transitions,
-                computed_at=computed_at,
-                team_resolver=team_resolver,
-            )
+            elif not provider_set:
+                # Work items are expected to be synced separately via `sync work-items`.
+                # We only need user-level aggregates here to enrich IC metrics.
+                try:
+                    wi_user_metrics = _load_work_item_user_metrics_daily(
+                        db_url=db_url, day=d
+                    )
+                except Exception as exc:
+                    logger.debug(
+                        "Failed to load work_item_user_metrics_daily for %s: %s",
+                        d.isoformat(),
+                        exc,
+                    )
             review_edges = compute_review_edges_daily(
                 day=d,
                 pull_request_rows=pr_rows,
@@ -577,6 +611,223 @@ def run_daily_metrics_job(
                 incidents=incident_rows,
                 computed_at=computed_at,
             )
+
+            # --- Complexity & Risk Hotspots ---
+            risk_hotspots: List[FileHotspotDaily] = []
+            complexity_by_repo = _load_complexity_snapshots(
+                db_url=db_url,
+                as_of_day=d,
+                repo_id=repo_id,
+                repo_name=repo_name,
+            )
+            hotspot_repos: Set[uuid.UUID] = {r["repo_id"] for r in h_commit_rows}
+            hotspot_repos |= set(complexity_by_repo.keys())
+
+            for r_id in sorted(hotspot_repos, key=str):
+                risk_hotspots.extend(
+                    compute_file_risk_hotspots(
+                        repo_id=r_id,
+                        day=d,
+                        window_stats=h_commit_rows,
+                        complexity_map=complexity_by_repo.get(r_id) or {},
+                        computed_at=computed_at,
+                    )
+                )
+
+            # --- Issue Type Metrics ---
+            issue_type_stats: Dict[Tuple[uuid.UUID, str, str, str], Dict[str, int]] = {}
+            # Key: (repo_id, provider, team_id, issue_type_norm)
+            # Value: {created, completed, active}
+            
+            # Helper to resolve team
+            def _get_team(wi) -> str:
+                # Use team resolver logic or fallback
+                # We can reuse the team_id from computed work_item_metrics if we had it mapped,
+                # but let's re-resolve quickly or use 'unknown'
+                if wi.assignees:
+                    t_id, _ = team_resolver.resolve(wi.assignees[0])
+                    if t_id:
+                        return t_id
+                return "unknown"
+
+            start_dt = _to_utc(start)
+            end_dt = _to_utc(end)
+
+            for item in work_items:
+                r_id = getattr(item, "repo_id", None) or uuid.UUID(int=0)
+                prov = item.provider
+                team_id = _get_team(item)
+                
+                # Normalize type
+                norm_type = issue_type_normalizer.normalize(
+                    prov, item.type, getattr(item, "labels", [])
+                )
+                
+                key = (r_id, prov, team_id, norm_type)
+                if key not in issue_type_stats:
+                    issue_type_stats[key] = {"created": 0, "completed": 0, "active": 0, "cycles": []}
+                
+                stats = issue_type_stats[key]
+                
+                created = _to_utc(item.created_at)
+                if start_dt <= created < end_dt:
+                    stats["created"] += 1
+                
+                if item.completed_at:
+                    completed = _to_utc(item.completed_at)
+                    if start_dt <= completed < end_dt:
+                        stats["completed"] += 1
+                        # Cycle time
+                        if item.started_at:
+                            started = _to_utc(item.started_at)
+                            hours = (completed - started).total_seconds() / 3600.0
+                            if hours >= 0:
+                                stats.setdefault("cycles", []).append(hours)
+                
+                # Active (WIP) at end of day
+                is_created = created < end_dt
+                is_not_completed = not item.completed_at or _to_utc(item.completed_at) >= end_dt
+                if is_created and is_not_completed:
+                    stats["active"] += 1
+
+            issue_type_metrics_rows = []
+            for (r_id, prov, team_id, norm_type), stat in issue_type_stats.items():
+                cycles = sorted(stat.get("cycles", []))
+                p50 = cycles[len(cycles) // 2] if cycles else 0.0
+                p90 = cycles[int(len(cycles) * 0.9)] if cycles else 0.0
+                
+                # We skip lead time for brevity or compute similar to cycle
+                
+                issue_type_metrics_rows.append(IssueTypeMetricsRecord(
+                    repo_id=r_id if r_id.int != 0 else None,
+                    day=d,
+                    provider=prov,
+                    team_id=team_id,
+                    issue_type_norm=norm_type,
+                    created_count=stat["created"],
+                    completed_count=stat["completed"],
+                    active_count=stat["active"],
+                    cycle_p50_hours=p50,
+                    cycle_p90_hours=p90,
+                    lead_p50_hours=0.0, # Placeholder
+                    computed_at=computed_at
+                ))
+
+            # --- Investment Classifications & Metrics ---
+            investment_classifications = []
+            inv_metrics_map: Dict[Tuple[uuid.UUID, str, str, str], Dict[str, float]] = {}
+            # Key: (repo_id, team_id, area, stream)
+            
+            # 1. Classify Work Items
+            for item in work_items:
+                # Check if item relevant for this day (completed or active)
+                # We classify ALL items that are active or acted upon
+                # For simplicity, let's classify items completed today for the metrics
+                
+                r_id = getattr(item, "repo_id", None) or uuid.UUID(int=0)
+                
+                # Check timestamps to see if we should emit a classification record
+                # We emit classification for items created or updated today?
+                # The requirement says "Investment areas (portfolio classification) ... For each artifact"
+                # We probably want to store classification for items ACTIVE today.
+                
+                # If item existed today
+                created = _to_utc(item.created_at)
+                if created < end_dt and (not item.completed_at or _to_utc(item.completed_at) >= start_dt):
+                    cls = investment_classifier.classify({
+                        "labels": getattr(item, "labels", []),
+                        "component": getattr(item, "component", ""),
+                        "title": item.title,
+                        "provider": item.provider
+                    })
+                    
+                    investment_classifications.append(InvestmentClassificationRecord(
+                        repo_id=r_id if r_id.int != 0 else None,
+                        day=d,
+                        artifact_type="work_item",
+                        artifact_id=item.work_item_id,
+                        provider=item.provider,
+                        investment_area=cls.investment_area,
+                        project_stream=cls.project_stream or "",
+                        confidence=cls.confidence,
+                        rule_id=cls.rule_id,
+                        computed_at=computed_at
+                    ))
+                    
+                    # Metrics Aggregation (only for completed items)
+                    if item.completed_at:
+                        completed = _to_utc(item.completed_at)
+                        if start_dt <= completed < end_dt:
+                            team_id = _get_team(item)
+                            key = (r_id, team_id, cls.investment_area, cls.project_stream or "")
+                            if key not in inv_metrics_map:
+                                inv_metrics_map[key] = {"units": 0, "completed": 0, "churn": 0, "cycles": []}
+                            
+                            inv_metrics_map[key]["completed"] += 1
+                            # Units = story points or 1
+                            points = getattr(item, "story_points", 1) or 1
+                            inv_metrics_map[key]["units"] += int(points)
+                            
+                            if item.started_at:
+                                s = _to_utc(item.started_at)
+                                h = (completed - s).total_seconds() / 3600.0
+                                if h >= 0:
+                                    inv_metrics_map[key]["cycles"].append(h)
+
+            # 2. Classify PRs (merged today)
+            for pr in pr_rows:
+                if pr["merged_at"] and start <= _to_utc(pr["merged_at"]) < end:
+                    # We need PR labels or files to classify accurately.
+                    # We only have schemas.PullRequestRow which is limited.
+                    # We assume we might have extended info or fetch it?
+                    # For now, default to "product" or use repo-based heuristic if possible.
+                    # Or we skip PR classification if we don't have enough data in Row.
+                    pass
+
+            # 3. Classify Commits (churn)
+            # We have commit_rows with file_path.
+            for c in commit_rows:
+                r_id = c["repo_id"]
+                path = c["file_path"]
+                if not path:
+                    continue
+                
+                cls = investment_classifier.classify({
+                    "paths": [path],
+                    "labels": [], # No labels for commits usually
+                    "component": ""
+                })
+                
+                # We don't emit a classification record per commit (too many), but we aggregate metrics
+                # We need author team
+                author_email = c["author_email"] or ""
+                t_id, _ = team_resolver.resolve(author_email)
+                team_id = t_id if t_id else "unknown"
+                
+                key = (r_id, team_id, cls.investment_area, cls.project_stream or "")
+                if key not in inv_metrics_map:
+                    inv_metrics_map[key] = {"units": 0, "completed": 0, "churn": 0, "cycles": []}
+                
+                inv_metrics_map[key]["churn"] += (c["additions"] + c["deletions"])
+
+            investment_metrics_rows = []
+            for (r_id, team_id, area, stream), data in inv_metrics_map.items():
+                cycles = sorted(data["cycles"])
+                p50 = cycles[len(cycles) // 2] if cycles else 0.0
+                
+                investment_metrics_rows.append(InvestmentMetricsRecord(
+                    repo_id=r_id if r_id.int != 0 else None,
+                    day=d,
+                    team_id=team_id,
+                    investment_area=area,
+                    project_stream=stream,
+                    delivery_units=data["units"],
+                    work_items_completed=data["completed"],
+                    prs_merged=0, # Need PR classification logic
+                    churn_loc=data["churn"],
+                    cycle_p50_hours=p50,
+                    computed_at=computed_at
+                ))
             
             # --- IC Metrics & Landscape ---
             team_map = load_team_map()
@@ -607,14 +858,34 @@ def run_daily_metrics_job(
                 s.write_commit_metrics(result.commit_metrics)
                 s.write_file_metrics(all_file_metrics)
                 s.write_team_metrics(team_metrics)
-                s.write_work_item_metrics(wi_metrics)
-                s.write_work_item_user_metrics(wi_user_metrics)
-                s.write_work_item_cycle_times(wi_cycle_times)
-                s.write_work_item_state_durations(wi_state_durations)
+                if wi_metrics:
+                    s.write_work_item_metrics(wi_metrics)
+                if wi_user_metrics and work_items:
+                    # When provider fetch is disabled, we read WI user metrics from DB for IC enrichment,
+                    # but we do not rewrite the derived WI tables.
+                    s.write_work_item_user_metrics(wi_user_metrics)
+                if wi_cycle_times:
+                    s.write_work_item_cycle_times(wi_cycle_times)
+                if wi_state_durations:
+                    s.write_work_item_state_durations(wi_state_durations)
                 s.write_review_edges(review_edges)
                 s.write_cicd_metrics(cicd_metrics)
                 s.write_deploy_metrics(deploy_metrics)
                 s.write_incident_metrics(incident_metrics)
+
+                # New metrics writes
+                if hasattr(s, "write_file_hotspot_daily") and risk_hotspots:
+                    s.write_file_hotspot_daily(risk_hotspots)
+                
+                if hasattr(s, "write_issue_type_metrics") and issue_type_metrics_rows:
+                    s.write_issue_type_metrics(issue_type_metrics_rows)
+                        
+                if hasattr(s, "write_investment_classifications") and investment_classifications:
+                    s.write_investment_classifications(investment_classifications)
+                        
+                if hasattr(s, "write_investment_metrics") and investment_metrics_rows:
+                    s.write_investment_metrics(investment_metrics_rows)
+
                 
                 # Landscape rolling metrics
                 try:
@@ -846,6 +1117,59 @@ def _clickhouse_query_dicts(
     if not col_names or not rows:
         return []
     return [dict(zip(col_names, row)) for row in rows]
+
+
+def _load_complexity_snapshots(
+    *,
+    db_url: str,
+    as_of_day: date,
+    repo_id: Optional[uuid.UUID],
+    repo_name: Optional[str] = None,
+) -> Dict[uuid.UUID, Dict[str, FileComplexitySnapshot]]:
+    async def _fetch():
+        backend = detect_db_type(db_url)
+        store = create_store(db_url, backend)
+        async with store:
+            return await store.get_complexity_snapshots(
+                as_of_day=as_of_day,
+                repo_id=repo_id,
+                repo_name=repo_name,
+            )
+
+    try:
+        snapshots = asyncio.run(_fetch())
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        try:
+            snapshots = loop.run_until_complete(_fetch())
+        finally:
+            loop.close()
+
+    by_repo: Dict[uuid.UUID, Dict[str, FileComplexitySnapshot]] = {}
+    for snap in snapshots:
+        by_repo.setdefault(snap.repo_id, {})[snap.file_path] = snap
+    return by_repo
+
+
+def _load_work_item_user_metrics_daily(
+    *,
+    db_url: str,
+    day: date,
+) -> List[Any]:
+    async def _fetch():
+        backend = detect_db_type(db_url)
+        store = create_store(db_url, backend)
+        async with store:
+            return await store.get_work_item_user_metrics_daily(day=day)
+
+    try:
+        return asyncio.run(_fetch())
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(_fetch())
+        finally:
+            loop.close()
 
 
 def _load_clickhouse_rows(

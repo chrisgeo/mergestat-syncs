@@ -17,8 +17,8 @@ Git facts must already exist in the backend you point the job at:
 - `git_commit_stats`
 - `git_pull_requests`
 
-Work tracking facts are fetched live from provider APIs during metrics computation when `--provider` is not `none`.
-See `docs/task_trackers.md` for configuration.
+Work tracking facts should be synced from provider APIs via `python cli.py sync work-items ...`.
+See `docs/task_trackers.md` for configuration. (`metrics daily --provider ...` still exists as a convenience/backward-compatible path.)
 
 CI/CD pipeline facts are synced from GitHub/GitLab during the `sync` command when `--sync-cicd` is enabled:
 
@@ -235,7 +235,8 @@ It also supports SQLite, reading the same tables and writing metrics tables into
 - Filter to one repository:
   - `python cli.py metrics daily --date 2025-02-01 --repo-id <uuid> --db clickhouse://localhost:8123/default`
 - Compute git + work item metrics (requires provider credentials; see `docs/task_trackers.md`):
-  - `python cli.py metrics daily --date 2025-02-01 --db clickhouse://localhost:8123/default --provider all`
+  - `python cli.py sync work-items --provider all --date 2025-02-01 --backfill 30 --db clickhouse://localhost:8123/default`
+  - `python cli.py metrics daily --date 2025-02-01 --backfill 30 --db clickhouse://localhost:8123/default`
 
 ## Dependencies
 
@@ -278,3 +279,29 @@ Stored in ClickHouse table `ic_landscape_rolling_30d`.
 - **Y**: `delivery_units_30d`
 
 Each coordinate (`x_raw`, `y_raw`) is normalized per team into (`x_norm`, `y_norm`) representing the percentile rank within the team.
+
+## Code Complexity (`repo_complexity_daily`)
+
+Complexity metrics are computed by scanning local git clones at specific historical references using `radon`.
+
+- **Cyclomatic Complexity (CC)**: Measures the number of linearly independent paths through a program's source code.
+- **Metric fields**:
+  - `cyclomatic_total`: Sum of CC for all functions/classes in the repo.
+  - `cyclomatic_avg`: Mean CC per function.
+  - `high_complexity_functions`: Count of functions with CC > 15 (configurable).
+  - `very_high_complexity_functions`: Count of functions with CC > 25.
+- **Backfilling**: Uses `git checkout` (via `GitPython`) to analyze historical state.
+
+## Investment Metrics (`investment_metrics_daily`)
+
+Categorizes engineering effort into investment areas (e.g., "New Value", "Security", "Infrastructure") using a rule-based classifier.
+
+- **Artifacts Classified**:
+  - **Work Items**: Based on labels, components, and title keywords.
+  - **Commits (Churn)**: Based on file path patterns (e.g., `infra/` or `tests/`).
+- **Metric fields**:
+  - `investment_area`: The assigned category.
+  - `project_stream`: A secondary grouping (e.g., "Project Phoenix").
+  - `delivery_units`: Story points or count of work items completed.
+  - `churn_loc`: Sum of additions + deletions associated with the area.
+- **Configuration**: `config/investment_areas.yaml` defines the matching rules and priorities.

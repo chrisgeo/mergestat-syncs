@@ -113,6 +113,7 @@ def test_fetch_gitlab_pipelines_sync():
     assert len(pipelines) == 1
     assert pipelines[0].run_id == "1"
     assert pipelines[0].status == "success"
+    assert pipelines[0].queued_at == datetime(2023, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
     assert pipelines[0].started_at == datetime(2023, 1, 1, 0, 1, 0, tzinfo=timezone.utc)
 
 def test_fetch_gitlab_deployments_sync():

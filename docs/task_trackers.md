@@ -21,6 +21,7 @@ Optional Jira field mappings (instance-specific):
 
 ### GitHub
 - `GITHUB_TOKEN`
+  - Optional CLI override: `python cli.py sync work-items --provider github --auth "$GITHUB_TOKEN" ...`
 
 Optional Projects v2 ingestion:
 - `GITHUB_PROJECTS_V2` as comma-separated `org_login:project_number` entries, e.g.:
@@ -29,6 +30,7 @@ Optional Projects v2 ingestion:
 ### GitLab
 - `GITLAB_TOKEN`
 - `GITLAB_URL` (optional, default: `https://gitlab.com`)
+  - Optional CLI override: `python cli.py sync work-items --provider gitlab --auth "$GITLAB_TOKEN" ...`
 
 ## Status & Type Normalization
 
@@ -71,10 +73,16 @@ Schema:
 
 ## Running Jira work metrics
 
-Jira work items are fetched during metrics compute:
+Jira work items are fetched via the work item sync job:
 
 ```bash
-python cli.py metrics daily --date 2025-02-01 --backfill 30 --db "clickhouse://localhost:8123/default" --provider jira
+python cli.py sync work-items --provider jira --date 2025-02-01 --backfill 30 --db "clickhouse://localhost:8123/default"
+```
+
+Use `-s`/`--search` to filter repos by name (glob pattern), e.g.:
+
+```bash
+python cli.py sync work-items --provider github -s "org/*" --date 2025-02-01 --backfill 30 --db "clickhouse://localhost:8123/default"
 ```
 
 ### Quick Jira API smoke test (curl)

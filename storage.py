@@ -3,15 +3,14 @@ import json
 import uuid
 from collections.abc import Iterable
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union, TYPE_CHECKING
 
-import clickhouse_connect
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import UpdateOne
 from pymongo.errors import ConfigurationError
-from sqlalchemy import func, select
+from sqlalchemy import Column, Float, Integer, MetaData, String, Table, and_, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
@@ -30,6 +29,35 @@ from models.git import (
     Incident,
     Repo,
 )
+
+if TYPE_CHECKING:
+    from metrics.schemas import FileComplexitySnapshot
+    from metrics.schemas import WorkItemUserMetricsDailyRecord
+
+
+def _parse_date_value(value: Any) -> Optional[date]:
+    if value is None:
+        return None
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value
+    if isinstance(value, datetime):
+        return value.date()
+    try:
+        return date.fromisoformat(str(value))
+    except Exception:
+        return None
+
+
+def _parse_datetime_value(value: Any) -> Optional[datetime]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    except Exception:
+        return None
 
 
 def detect_db_type(conn_string: str) -> str:
@@ -196,6 +224,13 @@ class SQLAlchemyStore:
     async def __aexit__(self, exc_type, exc, tb) -> None:
         if self.session is not None:
             await self.session.close()
+            self.session = None
+
+    async def ensure_tables(self) -> None:
+        from models.git import Base
+
+        async with self.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
 
     async def insert_repo(self, repo: Repo) -> None:
         assert self.session is not None
@@ -203,6 +238,202 @@ class SQLAlchemyStore:
         if not existing_repo:
             self.session.add(repo)
             await self.session.commit()
+
+    async def get_all_repos(self) -> List[Repo]:
+        assert self.session is not None
+        result = await self.session.execute(select(Repo))
+        return list(result.scalars().all())
+
+    async def get_complexity_snapshots(
+        self,
+        *,
+        as_of_day: date,
+        repo_id: Optional[uuid.UUID] = None,
+        repo_name: Optional[str] = None,
+    ) -> List["FileComplexitySnapshot"]:
+        """
+        Return the latest file complexity snapshot rows per repo <= as_of_day.
+
+        When repo_id/repo_name is provided, returns snapshots for that single repo.
+        """
+        assert self.session is not None
+        from metrics.schemas import FileComplexitySnapshot
+
+        resolved_repo_id = repo_id
+        if resolved_repo_id is None and repo_name:
+            repo_res = await self.session.execute(
+                select(Repo.id).where(Repo.repo == repo_name).limit(1)
+            )
+            repo_row = repo_res.first()
+            if not repo_row or not repo_row[0]:
+                return []
+            resolved_repo_id = uuid.UUID(str(repo_row[0]))
+
+        # Table is created by metrics sinks; we define a lightweight Core table for queries.
+        snapshots = Table(
+            "file_complexity_snapshots",
+            MetaData(),
+            Column("repo_id", String),
+            Column("as_of_day", String),
+            Column("ref", String),
+            Column("file_path", String),
+            Column("language", String),
+            Column("loc", Integer),
+            Column("functions_count", Integer),
+            Column("cyclomatic_total", Integer),
+            Column("cyclomatic_avg", Float),
+            Column("high_complexity_functions", Integer),
+            Column("very_high_complexity_functions", Integer),
+            Column("computed_at", String),
+        )
+
+        day_value = as_of_day.isoformat()
+        where_clause = snapshots.c.as_of_day <= day_value
+        if resolved_repo_id is not None:
+            where_clause = and_(where_clause, snapshots.c.repo_id == str(resolved_repo_id))
+
+        latest = (
+            select(
+                snapshots.c.repo_id,
+                func.max(snapshots.c.as_of_day).label("max_day"),
+            )
+            .where(where_clause)
+            .group_by(snapshots.c.repo_id)
+            .subquery("latest")
+        )
+
+        query = (
+            select(
+                snapshots.c.repo_id,
+                snapshots.c.as_of_day,
+                snapshots.c.ref,
+                snapshots.c.file_path,
+                snapshots.c.language,
+                snapshots.c.loc,
+                snapshots.c.functions_count,
+                snapshots.c.cyclomatic_total,
+                snapshots.c.cyclomatic_avg,
+                snapshots.c.high_complexity_functions,
+                snapshots.c.very_high_complexity_functions,
+                snapshots.c.computed_at,
+            )
+            .select_from(
+                snapshots.join(
+                    latest,
+                    and_(
+                        snapshots.c.repo_id == latest.c.repo_id,
+                        snapshots.c.as_of_day == latest.c.max_day,
+                    ),
+                )
+            )
+        )
+
+        res = await self.session.execute(query)
+        rows = res.fetchall()
+
+        snapshots: List[FileComplexitySnapshot] = []
+        for r in rows:
+            r_id = uuid.UUID(str(r[0]))
+            as_of_day_val = _parse_date_value(r[1])
+            if as_of_day_val is None:
+                continue
+            file_path = str(r[3] or "")
+            if not file_path:
+                continue
+            computed_at_val = _parse_datetime_value(r[11]) or datetime.now(timezone.utc)
+            snapshots.append(
+                FileComplexitySnapshot(
+                    repo_id=r_id,
+                    as_of_day=as_of_day_val,
+                    ref=str(r[2] or ""),
+                    file_path=file_path,
+                    language=str(r[4] or ""),
+                    loc=int(r[5] or 0),
+                    functions_count=int(r[6] or 0),
+                    cyclomatic_total=int(r[7] or 0),
+                    cyclomatic_avg=float(r[8] or 0.0),
+                    high_complexity_functions=int(r[9] or 0),
+                    very_high_complexity_functions=int(r[10] or 0),
+                    computed_at=computed_at_val,
+                )
+            )
+
+        return snapshots
+
+    async def get_work_item_user_metrics_daily(
+        self,
+        *,
+        day: date,
+        provider: Optional[str] = None,
+    ) -> List["WorkItemUserMetricsDailyRecord"]:
+        assert self.session is not None
+        from metrics.schemas import WorkItemUserMetricsDailyRecord
+
+        table = Table(
+            "work_item_user_metrics_daily",
+            MetaData(),
+            Column("day", String),
+            Column("provider", String),
+            Column("work_scope_id", String),
+            Column("user_identity", String),
+            Column("team_id", String),
+            Column("team_name", String),
+            Column("items_started", Integer),
+            Column("items_completed", Integer),
+            Column("wip_count_end_of_day", Integer),
+            Column("cycle_time_p50_hours", Float),
+            Column("cycle_time_p90_hours", Float),
+            Column("computed_at", String),
+        )
+
+        where_clause = table.c.day == day.isoformat()
+        if provider:
+            where_clause = and_(where_clause, table.c.provider == provider)
+
+        query = select(
+            table.c.day,
+            table.c.provider,
+            table.c.work_scope_id,
+            table.c.user_identity,
+            table.c.team_id,
+            table.c.team_name,
+            table.c.items_started,
+            table.c.items_completed,
+            table.c.wip_count_end_of_day,
+            table.c.cycle_time_p50_hours,
+            table.c.cycle_time_p90_hours,
+            table.c.computed_at,
+        ).where(where_clause)
+
+        res = await self.session.execute(query)
+        rows = res.fetchall()
+
+        out: List[WorkItemUserMetricsDailyRecord] = []
+        for r in rows:
+            day_val = _parse_date_value(r[0])
+            if day_val is None:
+                continue
+            user_identity = str(r[3] or "")
+            if not user_identity:
+                continue
+            computed_at_val = _parse_datetime_value(r[11]) or datetime.now(timezone.utc)
+            out.append(
+                WorkItemUserMetricsDailyRecord(
+                    day=day_val,
+                    provider=str(r[1] or ""),
+                    work_scope_id=str(r[2] or ""),
+                    user_identity=user_identity,
+                    team_id=str(r[4]) if r[4] is not None else None,
+                    team_name=str(r[5]) if r[5] is not None else None,
+                    items_started=int(r[6] or 0),
+                    items_completed=int(r[7] or 0),
+                    wip_count_end_of_day=int(r[8] or 0),
+                    cycle_time_p50_hours=float(r[9]) if r[9] is not None else None,
+                    cycle_time_p90_hours=float(r[10]) if r[10] is not None else None,
+                    computed_at=computed_at_val,
+                )
+            )
+        return out
 
     async def has_any_git_files(self, repo_id) -> bool:
         assert self.session is not None
@@ -717,6 +948,153 @@ class MongoStore:
             {"_id": doc["_id"]}, {"$set": doc}, upsert=True
         )
 
+    async def get_all_repos(self) -> List[Repo]:
+        cursor = self.db["repos"].find({})
+        repos = []
+        async for doc in cursor:
+            # Basic reconstruction
+            r_id = uuid.UUID(doc["_id"]) if isinstance(doc["_id"], str) else doc["_id"]
+            repos.append(Repo(id=r_id, repo=doc.get("repo", "")))
+        return repos
+
+    async def get_complexity_snapshots(
+        self,
+        *,
+        as_of_day: date,
+        repo_id: Optional[uuid.UUID] = None,
+        repo_name: Optional[str] = None,
+    ) -> List["FileComplexitySnapshot"]:
+        from metrics.schemas import FileComplexitySnapshot
+
+        as_of_dt = datetime(
+            as_of_day.year, as_of_day.month, as_of_day.day, tzinfo=timezone.utc
+        )
+        query: Dict[str, Any] = {"as_of_day": {"$lte": as_of_dt}}
+
+        resolved_repo_id = repo_id
+        if resolved_repo_id is None and repo_name:
+            repo_doc = await self.db["repos"].find_one(
+                {"repo": repo_name}, {"id": 1, "_id": 1}
+            )
+            if not repo_doc:
+                return []
+            resolved_repo_id = uuid.UUID(str(repo_doc.get("id") or repo_doc.get("_id")))
+
+        if resolved_repo_id is not None:
+            query["repo_id"] = str(resolved_repo_id)
+
+        if resolved_repo_id is not None:
+            max_doc = await self.db["file_complexity_snapshots"].find_one(
+                query,
+                sort=[("as_of_day", -1)],
+                projection={"as_of_day": 1},
+            )
+            if not max_doc:
+                return []
+            query["as_of_day"] = max_doc["as_of_day"]
+            cursor = self.db["file_complexity_snapshots"].find(query)
+        else:
+            pipeline = [
+                {"$match": {"as_of_day": {"$lte": as_of_dt}}},
+                {"$group": {"_id": "$repo_id", "max_day": {"$max": "$as_of_day"}}},
+            ]
+            latest_days = [
+                d
+                async for d in self.db["file_complexity_snapshots"].aggregate(pipeline)
+            ]
+            if not latest_days:
+                return []
+            or_clauses = [
+                {"repo_id": d["_id"], "as_of_day": d["max_day"]} for d in latest_days
+            ]
+            cursor = self.db["file_complexity_snapshots"].find({"$or": or_clauses})
+
+        docs = [doc async for doc in cursor]
+        snapshots: List[FileComplexitySnapshot] = []
+        for doc in docs:
+            file_path = doc.get("file_path")
+            if not file_path:
+                continue
+            repo_id_raw = doc.get("repo_id")
+            if not repo_id_raw:
+                continue
+            r_id = uuid.UUID(str(repo_id_raw))
+            as_of_day_val = _parse_date_value(doc.get("as_of_day"))
+            if as_of_day_val is None:
+                continue
+            computed_at_val = _parse_datetime_value(doc.get("computed_at")) or datetime.now(
+                timezone.utc
+            )
+            snapshots.append(
+                FileComplexitySnapshot(
+                    repo_id=r_id,
+                    as_of_day=as_of_day_val,
+                    ref=str(doc.get("ref") or ""),
+                    file_path=str(file_path),
+                    language=str(doc.get("language") or ""),
+                    loc=int(doc.get("loc") or 0),
+                    functions_count=int(doc.get("functions_count") or 0),
+                    cyclomatic_total=int(doc.get("cyclomatic_total") or 0),
+                    cyclomatic_avg=float(doc.get("cyclomatic_avg") or 0.0),
+                    high_complexity_functions=int(doc.get("high_complexity_functions") or 0),
+                    very_high_complexity_functions=int(
+                        doc.get("very_high_complexity_functions") or 0
+                    ),
+                    computed_at=computed_at_val,
+                )
+            )
+        return snapshots
+
+    async def get_work_item_user_metrics_daily(
+        self,
+        *,
+        day: date,
+        provider: Optional[str] = None,
+    ) -> List["WorkItemUserMetricsDailyRecord"]:
+        assert self.db is not None
+        from metrics.schemas import WorkItemUserMetricsDailyRecord
+
+        # Mongo sink stores day as naive UTC datetime at midnight.
+        day_dt = datetime(day.year, day.month, day.day)
+        query: Dict[str, Any] = {"day": day_dt}
+        if provider:
+            query["provider"] = provider
+
+        cursor = self.db["work_item_user_metrics_daily"].find(query)
+
+        out: List[WorkItemUserMetricsDailyRecord] = []
+        async for doc in cursor:
+            day_val = _parse_date_value(doc.get("day"))
+            if day_val is None:
+                continue
+            user_identity = str(doc.get("user_identity") or "")
+            if not user_identity:
+                continue
+            computed_at_val = _parse_datetime_value(doc.get("computed_at")) or datetime.now(
+                timezone.utc
+            )
+            out.append(
+                WorkItemUserMetricsDailyRecord(
+                    day=day_val,
+                    provider=str(doc.get("provider") or ""),
+                    work_scope_id=str(doc.get("work_scope_id") or ""),
+                    user_identity=user_identity,
+                    team_id=str(doc.get("team_id")) if doc.get("team_id") is not None else None,
+                    team_name=str(doc.get("team_name")) if doc.get("team_name") is not None else None,
+                    items_started=int(doc.get("items_started") or 0),
+                    items_completed=int(doc.get("items_completed") or 0),
+                    wip_count_end_of_day=int(doc.get("wip_count_end_of_day") or 0),
+                    cycle_time_p50_hours=float(doc.get("cycle_time_p50_hours"))
+                    if doc.get("cycle_time_p50_hours") is not None
+                    else None,
+                    cycle_time_p90_hours=float(doc.get("cycle_time_p90_hours"))
+                    if doc.get("cycle_time_p90_hours") is not None
+                    else None,
+                    computed_at=computed_at_val,
+                )
+            )
+        return out
+
     async def has_any_git_files(self, repo_id) -> bool:
         repo_id_val = _serialize_value(repo_id)
         count = await self.db["git_files"].count_documents(
@@ -951,6 +1329,8 @@ class ClickHouseStore:
         self._lock = asyncio.Lock()
 
     async def __aenter__(self) -> "ClickHouseStore":
+        import clickhouse_connect
+
         self.client = await asyncio.to_thread(
             clickhouse_connect.get_client, dsn=self.conn_string
         )
@@ -1062,6 +1442,168 @@ class ClickHouseStore:
             ],
             [row],
         )
+
+    async def get_all_repos(self) -> List[Repo]:
+        assert self.client is not None
+        query = "SELECT id, repo FROM repos"
+        async with self._lock:
+            result = await asyncio.to_thread(self.client.query, query)
+        
+        repos = []
+        if result.result_rows:
+            for row in result.result_rows:
+                r_id = uuid.UUID(str(row[0]))
+                r_name = row[1]
+                # We return minimal Repo objects
+                repos.append(Repo(id=r_id, repo=r_name))
+        return repos
+
+    async def get_complexity_snapshots(
+        self,
+        *,
+        as_of_day: date,
+        repo_id: Optional[uuid.UUID] = None,
+        repo_name: Optional[str] = None,
+    ) -> List["FileComplexitySnapshot"]:
+        assert self.client is not None
+        from metrics.schemas import FileComplexitySnapshot
+
+        params: Dict[str, Any] = {"day": as_of_day}
+        repo_filter = ""
+        if repo_id is not None:
+            params["repo_id"] = str(repo_id)
+            repo_filter = " AND repo_id = {repo_id:UUID}"
+        elif repo_name is not None:
+            params["repo_name"] = repo_name
+            repo_filter = " AND repo_id IN (SELECT id FROM repos WHERE repo = {repo_name:String})"
+
+        query = f"""
+        SELECT
+          f.repo_id, f.as_of_day, f.ref, f.file_path, f.language, f.loc,
+          f.functions_count, f.cyclomatic_total, f.cyclomatic_avg,
+          f.high_complexity_functions, f.very_high_complexity_functions, f.computed_at
+        FROM file_complexity_snapshots AS f
+        INNER JOIN (
+          SELECT repo_id, max(as_of_day) AS max_day
+          FROM file_complexity_snapshots
+          WHERE as_of_day <= {{day:Date}} {repo_filter}
+          GROUP BY repo_id
+        ) AS l
+          ON (f.repo_id = l.repo_id) AND (f.as_of_day = l.max_day)
+        """
+
+        async with self._lock:
+            result = await asyncio.to_thread(
+                self.client.query, query, parameters=params
+            )
+
+        col_names = list(getattr(result, "column_names", []) or [])
+        rows = list(getattr(result, "result_rows", []) or [])
+        if not col_names or not rows:
+            return []
+
+        snapshots: List[FileComplexitySnapshot] = []
+        for row in rows:
+            row_dict = dict(zip(col_names, row))
+            r_id = self._normalize_uuid(row_dict.get("repo_id"))
+            file_path = row_dict.get("file_path")
+            if not file_path:
+                continue
+            as_of_day_val = _parse_date_value(row_dict.get("as_of_day"))
+            if as_of_day_val is None:
+                continue
+            computed_at_val = _parse_datetime_value(row_dict.get("computed_at")) or datetime.now(
+                timezone.utc
+            )
+            snapshots.append(
+                FileComplexitySnapshot(
+                    repo_id=r_id,
+                    as_of_day=as_of_day_val,
+                    ref=str(row_dict.get("ref") or ""),
+                    file_path=str(file_path),
+                    language=str(row_dict.get("language") or ""),
+                    loc=int(row_dict.get("loc") or 0),
+                    functions_count=int(row_dict.get("functions_count") or 0),
+                    cyclomatic_total=int(row_dict.get("cyclomatic_total") or 0),
+                    cyclomatic_avg=float(row_dict.get("cyclomatic_avg") or 0.0),
+                    high_complexity_functions=int(
+                        row_dict.get("high_complexity_functions") or 0
+                    ),
+                    very_high_complexity_functions=int(
+                        row_dict.get("very_high_complexity_functions") or 0
+                    ),
+                    computed_at=computed_at_val,
+                )
+            )
+        return snapshots
+
+    async def get_work_item_user_metrics_daily(
+        self,
+        *,
+        day: date,
+        provider: Optional[str] = None,
+    ) -> List["WorkItemUserMetricsDailyRecord"]:
+        assert self.client is not None
+        from metrics.schemas import WorkItemUserMetricsDailyRecord
+
+        params: Dict[str, Any] = {"day": day}
+        where = "WHERE day = {day:Date}"
+        if provider:
+            params["provider"] = provider
+            where += " AND provider = {provider:String}"
+
+        query = f"""
+        SELECT
+          day, provider, work_scope_id, user_identity, team_id, team_name,
+          items_started, items_completed, wip_count_end_of_day,
+          cycle_time_p50_hours, cycle_time_p90_hours, computed_at
+        FROM work_item_user_metrics_daily
+        {where}
+        """
+
+        async with self._lock:
+            result = await asyncio.to_thread(
+                self.client.query, query, parameters=params
+            )
+
+        col_names = list(getattr(result, "column_names", []) or [])
+        rows = list(getattr(result, "result_rows", []) or [])
+        if not col_names or not rows:
+            return []
+
+        out: List[WorkItemUserMetricsDailyRecord] = []
+        for row in rows:
+            row_dict = dict(zip(col_names, row))
+            day_val = _parse_date_value(row_dict.get("day"))
+            if day_val is None:
+                continue
+            user_identity = str(row_dict.get("user_identity") or "")
+            if not user_identity:
+                continue
+            computed_at_val = _parse_datetime_value(row_dict.get("computed_at")) or datetime.now(
+                timezone.utc
+            )
+            out.append(
+                WorkItemUserMetricsDailyRecord(
+                    day=day_val,
+                    provider=str(row_dict.get("provider") or ""),
+                    work_scope_id=str(row_dict.get("work_scope_id") or ""),
+                    user_identity=user_identity,
+                    team_id=str(row_dict.get("team_id")) if row_dict.get("team_id") is not None else None,
+                    team_name=str(row_dict.get("team_name")) if row_dict.get("team_name") is not None else None,
+                    items_started=int(row_dict.get("items_started") or 0),
+                    items_completed=int(row_dict.get("items_completed") or 0),
+                    wip_count_end_of_day=int(row_dict.get("wip_count_end_of_day") or 0),
+                    cycle_time_p50_hours=float(row_dict.get("cycle_time_p50_hours"))
+                    if row_dict.get("cycle_time_p50_hours") is not None
+                    else None,
+                    cycle_time_p90_hours=float(row_dict.get("cycle_time_p90_hours"))
+                    if row_dict.get("cycle_time_p90_hours") is not None
+                    else None,
+                    computed_at=computed_at_val,
+                )
+            )
+        return out
 
     async def has_any_git_files(self, repo_id) -> bool:
         return await self._has_any("git_files", self._normalize_uuid(repo_id))

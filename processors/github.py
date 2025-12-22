@@ -54,10 +54,16 @@ def _fetch_github_commits_sync(
     since: Optional[datetime] = None,
 ):
     """Sync helper to fetch and parse GitHub commits."""
+    raw_commits = []
     if since is not None:
-        raw_commits = list(gh_repo.get_commits(since=since)[:max_commits])
+        commits_iter = gh_repo.get_commits(since=since)
     else:
-        raw_commits = list(gh_repo.get_commits()[:max_commits])
+        commits_iter = gh_repo.get_commits()
+
+    for commit in commits_iter:
+        raw_commits.append(commit)
+        if len(raw_commits) >= max_commits:
+            break
 
     commit_objects = []
     for commit in raw_commits:
@@ -236,7 +242,11 @@ def _fetch_github_workflow_runs_sync(gh_repo, repo_id, max_runs, since):
         return None
     try:
         if hasattr(gh_repo, "get_workflow_runs"):
-            raw_runs = list(gh_repo.get_workflow_runs()[:max_runs])
+            raw_runs = []
+            for run in gh_repo.get_workflow_runs():
+                raw_runs.append(run)
+                if len(raw_runs) >= max_runs:
+                    break
         else:
             raw_runs = []
             for workflow in gh_repo.get_workflows():
@@ -1055,6 +1065,7 @@ async def process_github_repos_batch(
                 "Failed to fetch commits for GitHub repo %s: %s",
                 repo_info.full_name,
                 e,
+                exc_info=True,
             )
 
         # Fetch ALL PRs for batch-processed repos, storing in batches.

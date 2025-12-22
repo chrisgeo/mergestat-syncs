@@ -7,7 +7,10 @@ This file orients AI coding agents to the dev-health-ops repository: key archite
 - Local sync: `python cli.py sync local --db "$DB_CONN_STRING" --repo-path .`
 - GitHub sync: `python cli.py sync github --db "$DB_CONN_STRING" --owner <owner> --repo <repo>`
 - GitLab sync: `python cli.py sync gitlab --db "$DB_CONN_STRING" --project-id <id>`
-- Metrics: `python cli.py metrics daily --date YYYY-MM-DD --db "$DB_CONN_STRING" --provider all`
+- Work items sync: `python cli.py sync work-items --provider jira|github|gitlab|synthetic|all -s "org/*" --date YYYY-MM-DD --db "$DB_CONN_STRING"` (use `--auth` for GitHub/GitLab token override)
+- Planned: repo filtering for `sync work-items` by tags/settings (beyond name glob).
+- Metrics: `python cli.py metrics daily --date YYYY-MM-DD --db "$DB_CONN_STRING"` (uses already-synced work items; `--provider` remains for backward-compatible fetch+compute)
+- Complexity: `python cli.py metrics complexity -s "*" --backfill 30`
 - Fixtures: `python cli.py fixtures generate --db "$DB_CONN_STRING" --days 30`
 
 **Big-picture architecture**
@@ -15,9 +18,10 @@ This file orients AI coding agents to the dev-health-ops repository: key archite
 - `cli.py` dispatches sync/metrics flows and calls processors directly.
 - `processors/` implement data pipelines; `processors/local.py` orchestrates local sync.
 - `connectors/` wrap GitHub/GitLab API access with pagination + rate limits.
-- `storage.py` abstracts DB backends (Postgres/Mongo/SQLite/ClickHouse).
+- `storage.py` abstracts DB backends (Postgres/Mongo/SQLite/ClickHouse), including unified reads like `get_complexity_snapshots`.
 - `utils.py` holds shared helpers (parsing, git iteration, file filtering).
 - `fixtures/` generates synthetic data for testing.
+- Investment Areas dashboard uses regex team filters in ClickHouse queries.
 
 **Project-specific conventions & patterns**
 
@@ -128,3 +132,6 @@ pytest tests/test_github_connector.py -q
 - GitHub / GitLab APIs: tokens required (`GITHUB_TOKEN`, `GITLAB_TOKEN`). Tokens require repository scopes listed in README.
 - Databases: supports `postgres`, `mongo`, `sqlite`, `clickhouse` (auto-detected from URL). Use `alembic` for Postgres migrations.
 - Local git: uses `gitpython` for local-mode iteration.
+
+---
+**Note for AI Agents**: Always update this document, along with `GEMINI.md`, `AGENTS.md`, `docs/roadmap.md`, `docs/project.md`, and `docs/metrics-inventory.md` whenever a task is completed or a feature is modified to maintain an accurate system context.

@@ -128,11 +128,14 @@ python cli.py sync gitlab --db "clickhouse://localhost:8123/default" --project-i
 1) Compute derived metrics (Git + Work Items):
 
 ```bash
-# One day
-python cli.py metrics daily --date 2025-02-01 --db "clickhouse://localhost:8123/default" --provider all
+# (Optional) Sync work items from provider APIs (recommended)
+python cli.py sync work-items --provider all --date 2025-02-01 --backfill 30 --db "clickhouse://localhost:8123/default"
+
+# One day (derived Git metrics; enriches IC metrics from already-synced work items when available)
+python cli.py metrics daily --date 2025-02-01 --db "clickhouse://localhost:8123/default"
 
 # Backfill last 30 days ending at date
-python cli.py metrics daily --date 2025-02-01 --backfill 30 --db "clickhouse://localhost:8123/default" --provider all
+python cli.py metrics daily --date 2025-02-01 --backfill 30 --db "clickhouse://localhost:8123/default"
 ```
 
 1) Open Grafana:
@@ -142,11 +145,11 @@ python cli.py metrics daily --date 2025-02-01 --backfill 30 --db "clickhouse://l
 
 ### “Download” work tracking data (Jira/GitHub/GitLab)
 
-Work items are fetched from provider APIs during metrics computation (no separate sync command yet). This is separate from PR ingestion:
+Work items are fetched from provider APIs via a dedicated sync command. This is separate from PR ingestion:
 
 - Configure credentials + mapping (see `docs/task_trackers.md`)
-- Run metrics job with `--provider jira|github|gitlab|all` (e.g. `python cli.py metrics daily ... --provider jira`)
-- To skip work tracking calls entirely: `--provider none`
+- Sync work items: `python cli.py sync work-items --provider jira|github|gitlab|all ...` (use `-s` to filter repos; `--auth` for GitHub/GitLab token override)
+- `metrics daily` does not need `--provider` unless you want backward-compatible "sync-then-compute" behavior in one step.
 
 `cli.py` automatically loads a local `.env` file from the repo root (without overriding already-set environment variables). Disable with `DISABLE_DOTENV=1`.
 

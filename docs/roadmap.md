@@ -12,25 +12,36 @@ This checklist tracks what is complete and what remains to finalize `dev-health-
 - [x] **Connectors + Pipelines**: GitHub/GitLab CI/CD + deployments + incidents ingestion; async batch helpers.
 - [x] **Storage + Schema**: ClickHouse migrations and sink support for new metrics tables/columns.
 - [x] **CLI Controls**: Flags for `--sync-cicd`, `--sync-deployments`, `--sync-incidents`.
+- [x] **Complexity Metrics (Batch)**: Radon-based cyclomatic complexity scanning with DB-driven batch mode (`-s "*"`).
+- [x] **Unified Complexity Snapshot Loading**: `metrics daily` loads complexity snapshots via storage abstraction (`get_complexity_snapshots`).
+- [x] **Investment Area Classification**: Automated work item and churn classification based on configurable rules.
+- [x] **Work Item Sync Command**: Dedicated `sync work-items` flow to fetch provider work items separately from `metrics daily`.
+- [x] **Work Item Auth Override**: `sync work-items --auth` can override GitHub/GitLab tokens for provider sync.
 - [x] **Synthetic fixtures**: CI/CD + deployments + incidents with metrics rollups for ClickHouse.
 - [x] **IC Metrics + Landscape**: Identity resolution, unified UserMetricsDailyRecord, and landscape rolling stats (Churn/Cycle/WIP vs Throughput).
 
 ## Remaining
 
 ### Data + Fixtures
+
 - [ ] **Fixtures validation**: Ensure synthetic work items + commits generate non-zero Phase 2 metrics.
 
 ### Dashboards
+
 - [x] **Dashboards for CI/CD, deployments, incidents** (panels for success rate, duration, deploy counts, MTTR).
+- [x] **Investment Areas team filter**: use regex `match(...)` filters for the team variable in ClickHouse queries.
 - [ ] **Work tracking dashboards audit**: Validate filters and table joins for synthetic + real providers.
 - [ ] **Fix dashboard templating filters**: Ensure variable regex and `match(...)` filters do not return empty results.
 
 ### Metrics Enhancements
+
 - [x] **Bus factor (true)**: Top contributors accounting for >50% of churn (Bus Factor) and Gini coefficient (Knowledge Distribution).
 - [x] **Predictability index**: Completion Rate (items completed / (completed + wip)).
 - [ ] **Capacity planning**: Forecast completion using historical throughput.
 - [ ] **Identity Linking**: Reliable mapping of Work Items (Jira/LinearB) to Git commits (e.g. via commit messages or smart matching).
+- [ ] **Work Item Repo Filtering by Tags/Settings**: Allow `sync work-items` to filter repos using `repos.tags` or `repos.settings` (beyond name glob).
 
 ### Testing + Docs
+
 - [x] **Tests for new sinks columns** (ClickHouse + SQLite write paths for Phase 2 + wellbeing).
 - [x] **Docs refresh**: Usage examples for new CLI flags and fixture generation steps.

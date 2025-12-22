@@ -12,6 +12,9 @@ Purpose: compact, actionable rules for an AI coding agent (Copilot-like) working
 - Local sync orchestration lives in `processors/local.py` (`process_local_repo`).
 - Connectors live in `connectors/` and must handle pagination, rate-limits, and provide batch helpers.
 - Processors in `processors/` implement the pipeline: commits → PRs → commit-stats → files/blame.
+- Work item sync is separate (`sync work-items`); `metrics daily` expects work items already stored unless explicitly asked to fetch providers.
+- Planned: repo filtering for `sync work-items` by tags/settings (beyond name glob).
+- Grafana Investment Areas dashboard uses regex team filters in ClickHouse queries.
 - Fixtures in `fixtures/` generate synthetic data for testing/demos.
 - Implementation plans, metrics inventory, and requirement details live in `docs/project.md`, `docs/metrics-inventory.md`, and `docs/roadmap.md`.
 
@@ -27,6 +30,18 @@ python cli.py sync local --db "<DB_CONN>" --repo-path /path/to/repo
 
 ```bash
 python cli.py fixtures generate --db "<DB_CONN>" --days 30
+```
+
+- Sync work items (provider APIs → work item tables):
+
+```bash
+python cli.py sync work-items --provider github --auth "$GITHUB_TOKEN" -s "org/*" --db "<DB_CONN>" --date 2025-02-01 --backfill 30
+```
+
+- Compute complexity metrics (batch mode):
+
+```bash
+python cli.py metrics complexity --repo-path . -s "*"
 ```
 
 - Run tests: `pytest -q` or `pytest tests/test_github_connector.py -q`.
@@ -66,3 +81,6 @@ await process_github_repos_batch(store, token="$GITHUB_TOKEN", org_name="myorg",
 
 - If a test fails intermittently, check network-dependent tests and toggle `CONNECTORS_AVAILABLE` or mock connector clients to isolate logic.
 - For rate-limit issues, inspect logs for `Retry-After` or `X-RateLimit-Reset` and ensure code uses `RateLimitGate`/`RateLimitConfig` to backoff.
+
+---
+**Note for AI Agents**: Always update this document, along with `GEMINI.md`, `.github/copilot-instructions.md`, `docs/roadmap.md`, `docs/project.md`, and `docs/metrics-inventory.md` whenever a task is completed or a feature is modified to maintain an accurate system context.

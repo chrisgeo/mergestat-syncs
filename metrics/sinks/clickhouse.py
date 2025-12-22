@@ -23,6 +23,12 @@ from metrics.schemas import (
     DeployMetricsDailyRecord,
     IncidentMetricsDailyRecord,
     ICLandscapeRollingRecord,
+    FileComplexitySnapshot,
+    RepoComplexityDaily,
+    FileHotspotDaily,
+    InvestmentClassificationRecord,
+    InvestmentMetricsRecord,
+    IssueTypeMetricsRecord,
 )
 
 logger = logging.getLogger(__name__)
@@ -416,6 +422,139 @@ class ClickHouseMetricsSink:
                 "incidents_count",
                 "mttr_p50_hours",
                 "mttr_p90_hours",
+                "computed_at",
+            ],
+            rows,
+        )
+
+    def write_file_complexity_snapshots(
+        self, rows: Sequence[FileComplexitySnapshot]
+    ) -> None:
+        if not rows:
+            return
+        self._insert_rows(
+            "file_complexity_snapshots",
+            [
+                "repo_id",
+                "as_of_day",
+                "ref",
+                "file_path",
+                "language",
+                "loc",
+                "functions_count",
+                "cyclomatic_total",
+                "cyclomatic_avg",
+                "high_complexity_functions",
+                "very_high_complexity_functions",
+                "computed_at",
+            ],
+            rows,
+        )
+
+    def write_repo_complexity_daily(
+        self, rows: Sequence[RepoComplexityDaily]
+    ) -> None:
+        if not rows:
+            return
+        self._insert_rows(
+            "repo_complexity_daily",
+            [
+                "repo_id",
+                "day",
+                "loc_total",
+                "cyclomatic_total",
+                "cyclomatic_per_kloc",
+                "high_complexity_functions",
+                "very_high_complexity_functions",
+                "computed_at",
+            ],
+            rows,
+        )
+
+    def write_file_hotspot_daily(self, rows: Sequence[FileHotspotDaily]) -> None:
+        if not rows:
+            return
+        self._insert_rows(
+            "file_hotspot_daily",
+            [
+                "repo_id",
+                "day",
+                "file_path",
+                "churn_loc_30d",
+                "churn_commits_30d",
+                "cyclomatic_total",
+                "cyclomatic_avg",
+                "blame_concentration",
+                "risk_score",
+                "computed_at",
+            ],
+            rows,
+        )
+
+    def write_investment_classifications(
+        self, rows: Sequence[InvestmentClassificationRecord]
+    ) -> None:
+        if not rows:
+            return
+        self._insert_rows(
+            "investment_classifications_daily",
+            [
+                "repo_id",
+                "day",
+                "artifact_type",
+                "artifact_id",
+                "provider",
+                "investment_area",
+                "project_stream",
+                "confidence",
+                "rule_id",
+                "computed_at",
+            ],
+            rows,
+        )
+
+    def write_investment_metrics(
+        self, rows: Sequence[InvestmentMetricsRecord]
+    ) -> None:
+        if not rows:
+            return
+        self._insert_rows(
+            "investment_metrics_daily",
+            [
+                "repo_id",
+                "day",
+                "team_id",
+                "investment_area",
+                "project_stream",
+                "delivery_units",
+                "work_items_completed",
+                "prs_merged",
+                "churn_loc",
+                "cycle_p50_hours",
+                "computed_at",
+            ],
+            rows,
+        )
+
+    def write_issue_type_metrics(
+        self, rows: Sequence[IssueTypeMetricsRecord]
+    ) -> None:
+        if not rows:
+            return
+        self._insert_rows(
+            "issue_type_metrics_daily",
+            [
+                "repo_id",
+                "day",
+                "provider",
+                "team_id",
+                "issue_type_norm",
+                "created_count",
+                "completed_count",
+                "active_count",
+                "cycle_p50_hours",
+                "cycle_p90_hours",
+                "lead_p50_hours",
                 "computed_at",
             ],
             rows,

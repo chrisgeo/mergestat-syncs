@@ -1,0 +1,42 @@
+rules:
+  - id: "security_label"
+    priority: 10
+    match:
+      label: ["security", "sec", "vulnerability"]
+    output:
+      investment_area: "security"
+
+  - id: "infra_path"
+    priority: 20
+    match:
+      path_prefix: ["infra/", "terraform/", "deploy/", "k8s/", "docker/", ".github/workflows/"]
+    output:
+      investment_area: "infra"
+
+  - id: "docs_path"
+    priority: 30
+    match:
+      path_prefix: ["docs/", "README.md", "CONTRIBUTING.md"]
+    output:
+      investment_area: "docs"
+
+  - id: "test_path"
+    priority: 35
+    match:
+      path_prefix: ["tests/", "testing/"]
+    output:
+      investment_area: "quality"
+
+  - id: "data_component"
+    priority: 40
+    match:
+      component: ["Data Platform", "Analytics"]
+    output:
+      investment_area: "data"
+
+  - id: "product_default"
+    priority: 999
+    match:
+      always: true
+    output:
+      investment_area: "product"

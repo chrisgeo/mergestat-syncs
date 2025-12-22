@@ -21,6 +21,12 @@ from metrics.schemas import (
     DeployMetricsDailyRecord,
     IncidentMetricsDailyRecord,
     ICLandscapeRollingRecord,
+    FileComplexitySnapshot,
+    RepoComplexityDaily,
+    FileHotspotDaily,
+    InvestmentClassificationRecord,
+    InvestmentMetricsRecord,
+    IssueTypeMetricsRecord,
 )
 import logging
 
@@ -128,6 +134,12 @@ class MongoMetricsSink:
             ("as_of_day", 1),
             ("identity_id", 1)
         ], unique=True)
+        self.db["file_complexity_snapshots"].create_index([("repo_id", 1), ("as_of_day", 1)])
+        self.db["repo_complexity_daily"].create_index([("repo_id", 1), ("day", 1)])
+        self.db["file_hotspot_daily"].create_index([("repo_id", 1), ("day", 1)])
+        self.db["investment_classifications_daily"].create_index([("repo_id", 1), ("day", 1)])
+        self.db["investment_metrics_daily"].create_index([("repo_id", 1), ("day", 1)])
+        self.db["issue_type_metrics_daily"].create_index([("repo_id", 1), ("day", 1)])
 
     def write_repo_metrics(self, rows: Sequence[RepoMetricsDailyRecord]) -> None:
         if not rows:
@@ -416,3 +428,96 @@ class MongoMetricsSink:
             results.append(data)
             
         return results
+
+    def write_file_complexity_snapshots(
+        self, rows: Sequence[FileComplexitySnapshot]
+    ) -> None:
+        if not rows:
+            return
+        ops: List[ReplaceOne] = []
+        for row in rows:
+            doc = asdict(row)
+            doc["_id"] = f"{row.repo_id}:{row.as_of_day.isoformat()}:{row.file_path}"
+            doc["repo_id"] = str(row.repo_id)
+            doc["as_of_day"] = _day_to_mongo_datetime(row.as_of_day)
+            doc["computed_at"] = _dt_to_mongo_datetime(row.computed_at)
+            ops.append(ReplaceOne({"_id": doc["_id"]}, doc, upsert=True))
+        self.db["file_complexity_snapshots"].bulk_write(ops, ordered=False)
+
+    def write_repo_complexity_daily(
+        self, rows: Sequence[RepoComplexityDaily]
+    ) -> None:
+        if not rows:
+            return
+        ops: List[ReplaceOne] = []
+        for row in rows:
+            doc = asdict(row)
+            doc["_id"] = f"{row.repo_id}:{row.day.isoformat()}"
+            doc["repo_id"] = str(row.repo_id)
+            doc["day"] = _day_to_mongo_datetime(row.day)
+            doc["computed_at"] = _dt_to_mongo_datetime(row.computed_at)
+            ops.append(ReplaceOne({"_id": doc["_id"]}, doc, upsert=True))
+        self.db["repo_complexity_daily"].bulk_write(ops, ordered=False)
+
+    def write_file_hotspot_daily(self, rows: Sequence[FileHotspotDaily]) -> None:
+        if not rows:
+            return
+        ops: List[ReplaceOne] = []
+        for row in rows:
+            doc = asdict(row)
+            doc["_id"] = f"{row.repo_id}:{row.day.isoformat()}:{row.file_path}"
+            doc["repo_id"] = str(row.repo_id)
+            doc["day"] = _day_to_mongo_datetime(row.day)
+            doc["computed_at"] = _dt_to_mongo_datetime(row.computed_at)
+            ops.append(ReplaceOne({"_id": doc["_id"]}, doc, upsert=True))
+        self.db["file_hotspot_daily"].bulk_write(ops, ordered=False)
+
+    def write_investment_classifications(
+        self, rows: Sequence[InvestmentClassificationRecord]
+    ) -> None:
+        if not rows:
+            return
+        ops: List[ReplaceOne] = []
+        for row in rows:
+            doc = asdict(row)
+            doc["_id"] = f"{row.provider}:{row.artifact_type}:{row.artifact_id}:{row.day.isoformat()}"
+            if row.repo_id:
+                doc["repo_id"] = str(row.repo_id)
+            doc["day"] = _day_to_mongo_datetime(row.day)
+            doc["computed_at"] = _dt_to_mongo_datetime(row.computed_at)
+            ops.append(ReplaceOne({"_id": doc["_id"]}, doc, upsert=True))
+        self.db["investment_classifications_daily"].bulk_write(ops, ordered=False)
+
+    def write_investment_metrics(
+        self, rows: Sequence[InvestmentMetricsRecord]
+    ) -> None:
+        if not rows:
+            return
+        ops: List[ReplaceOne] = []
+        for row in rows:
+            doc = asdict(row)
+            repo_part = str(row.repo_id) if row.repo_id else "global"
+            doc["_id"] = f"{repo_part}:{row.team_id}:{row.investment_area}:{row.project_stream}:{row.day.isoformat()}"
+            if row.repo_id:
+                doc["repo_id"] = str(row.repo_id)
+            doc["day"] = _day_to_mongo_datetime(row.day)
+            doc["computed_at"] = _dt_to_mongo_datetime(row.computed_at)
+            ops.append(ReplaceOne({"_id": doc["_id"]}, doc, upsert=True))
+        self.db["investment_metrics_daily"].bulk_write(ops, ordered=False)
+
+    def write_issue_type_metrics(
+        self, rows: Sequence[IssueTypeMetricsRecord]
+    ) -> None:
+        if not rows:
+            return
+        ops: List[ReplaceOne] = []
+        for row in rows:
+            doc = asdict(row)
+            repo_part = str(row.repo_id) if row.repo_id else "global"
+            doc["_id"] = f"{repo_part}:{row.provider}:{row.team_id}:{row.issue_type_norm}:{row.day.isoformat()}"
+            if row.repo_id:
+                doc["repo_id"] = str(row.repo_id)
+            doc["day"] = _day_to_mongo_datetime(row.day)
+            doc["computed_at"] = _dt_to_mongo_datetime(row.computed_at)
+            ops.append(ReplaceOne({"_id": doc["_id"]}, doc, upsert=True))
+        self.db["issue_type_metrics_daily"].bulk_write(ops, ordered=False)
