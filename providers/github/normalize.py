@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence, Tuple
+import logging
 
 from models.work_items import WorkItem, WorkItemStatusTransition
 from providers.identity import IdentityResolver
@@ -225,7 +226,9 @@ def github_project_v2_item_to_work_item(
                 try:
                     estimate = float(fv.get("number") or 0)
                 except (ValueError, TypeError):
-                    pass
+                    logging.getLogger(__name__).debug(
+                        "Failed to parse numeric estimate from value %r", fv.get("number")
+                    )
 
     if typename == "Issue":
         repo_full_name = ((content.get("repository") or {}).get("nameWithOwner")) or ""
