@@ -91,7 +91,7 @@
       "targets": [
         {
           "datasource": "ClickHouse",
-          "format": "time_series",
+          "format": 0,
           "group": [],
           "metricType": "any",
           "orderByKey": "time",
@@ -190,7 +190,7 @@
       "targets": [
         {
           "datasource": "ClickHouse",
-          "format": "time_series",
+          "format": 0,
           "group": [],
           "metricType": "any",
           "orderByKey": "time",
