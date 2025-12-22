@@ -9,7 +9,7 @@ This inventory tracks the implementation status of all metrics defined in the `d
 | Coding Time | [x] | [metrics/compute.py](file:///Users/chris/projects/dev-health-ops/metrics/compute.py) |
 | Review Time | [x] | [metrics/compute.py](file:///Users/chris/projects/dev-health-ops/metrics/compute.py) |
 | Pickup Time | [x] | [metrics/compute.py](file:///Users/chris/projects/dev-health-ops/metrics/compute.py) |
-| Deploy Time | [x] | GitHub: Synced via `sync github --sync-deployments`. Computed in [compute_deployments.py](file:///Users/chris/projects/dev-health-ops/metrics/compute_deployments.py) |
+| Deploy Time | [x] | GitHub/GitLab: Synced via `sync github --sync-deployments` or `sync gitlab --sync-deployments`. Computed in [compute_deployments.py](file:///Users/chris/projects/dev-health-ops/metrics/compute_deployments.py) |
 | Deployment Frequency | [x] | Derived from [deployments](file:///Users/chris/projects/dev-health-ops/storage.py#959-965) table + fallback to `prs_merged` |
 | Lead Time for Changes | [x] | DORA metric in [compute.py](file:///Users/chris/projects/dev-health-ops/metrics/compute.py) |
 | MTTR | [x] | Calculated from Bug work items + Incident records |
@@ -18,8 +18,8 @@ This inventory tracks the implementation status of all metrics defined in the `d
 | Work Item Lead Time | [x] | [metrics/compute_work_items.py](file:///Users/chris/projects/dev-health-ops/metrics/compute_work_items.py) |
 | WIP Count/Age | [x] | [metrics/compute_work_items.py](file:///Users/chris/projects/dev-health-ops/metrics/compute_work_items.py) |
 | Flow Efficiency | [x] | [metrics/compute_work_items.py](file:///Users/chris/projects/dev-health-ops/metrics/compute_work_items.py) |
-| CI/CD Pipeline Metrics | [x] | GitHub: Synced via `sync github --sync-cicd`. Computed in [compute_cicd.py](file:///Users/chris/projects/dev-health-ops/metrics/compute_cicd.py) |
-| Incident MTTR | [x] | GitHub: Issues labeled 'incident'. Computed in [compute_incidents.py](file:///Users/chris/projects/dev-health-ops/metrics/compute_incidents.py) |
+| CI/CD Pipeline Metrics | [x] | GitHub/GitLab: Synced via `sync github --sync-cicd` or `sync gitlab --sync-cicd`. Computed in [compute_cicd.py](file:///Users/chris/projects/dev-health-ops/metrics/compute_cicd.py) |
+| Incident MTTR | [x] | GitHub/GitLab: Issues labeled 'incident'. Computed in [compute_incidents.py](file:///Users/chris/projects/dev-health-ops/metrics/compute_incidents.py) |
 
 ## 2. Code Quality & Risk
 | Metric | Status | Source/Implementation |
@@ -68,4 +68,4 @@ This inventory tracks the implementation status of all metrics defined in the `d
 | WIP Congestion | [x] | [metrics/compute_work_items.py](file:///Users/chris/projects/dev-health-ops/metrics/compute_work_items.py) (WIP / Weekly Throughput) |
 | Predictability Index | [x] | [metrics/compute_work_items.py](file:///Users/chris/projects/dev-health-ops/metrics/compute_work_items.py) (Completion Rate: Completed / (Completed + WIP)) |
 | Pipeline Success Rate | [x] | [metrics/compute_cicd.py](file:///Users/chris/projects/dev-health-ops/metrics/compute_cicd.py) (GitHub only, GitLab pending) |
-| Deploy Success Rate | [x] | [metrics/compute_deployments.py](file:///Users/chris/projects/dev-health-ops/metrics/compute_deployments.py) (GitHub only, GitLab pending) |
+| Deploy Success Rate | [x] | [metrics/compute_deployments.py](file:///Users/chris/projects/dev-health-ops/metrics/compute_deployments.py) |

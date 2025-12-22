@@ -9,7 +9,7 @@ This checklist tracks what is complete and what remains to finalize `dev-health-
 - [x] **Quality + Risk Metrics**: Defect introduction rate, WIP congestion, rework churn ratio, single-owner file ratio proxy.
 - [x] **DORA Metrics**: MTTR, change failure rate, deployment/incident daily rollups.
 - [x] **Wellbeing Signals**: After-hours and weekend commit ratios; weekend active users (derived from user activity).
-- [x] **Connectors + Pipelines**: GitHub CI/CD + deployments + incidents ingestion; async batch helpers.
+- [x] **Connectors + Pipelines**: GitHub/GitLab CI/CD + deployments + incidents ingestion; async batch helpers.
 - [x] **Storage + Schema**: ClickHouse migrations and sink support for new metrics tables/columns.
 - [x] **CLI Controls**: Flags for `--sync-cicd`, `--sync-deployments`, `--sync-incidents`.
 - [x] **Synthetic fixtures**: CI/CD + deployments + incidents with metrics rollups for ClickHouse.
@@ -21,7 +21,7 @@ This checklist tracks what is complete and what remains to finalize `dev-health-
 - [ ] **Fixtures validation**: Ensure synthetic work items + commits generate non-zero Phase 2 metrics.
 
 ### Dashboards
-- [ ] **Dashboards for CI/CD, deployments, incidents** (panels for success rate, duration, deploy counts, MTTR).
+- [x] **Dashboards for CI/CD, deployments, incidents** (panels for success rate, duration, deploy counts, MTTR).
 - [ ] **Work tracking dashboards audit**: Validate filters and table joins for synthetic + real providers.
 - [ ] **Fix dashboard templating filters**: Ensure variable regex and `match(...)` filters do not return empty results.
 
@@ -32,5 +32,5 @@ This checklist tracks what is complete and what remains to finalize `dev-health-
 - [ ] **Identity Linking**: Reliable mapping of Work Items (Jira/LinearB) to Git commits (e.g. via commit messages or smart matching).
 
 ### Testing + Docs
-- [ ] **Tests for new sinks columns** (ClickHouse + SQLite write paths for Phase 2 + wellbeing).
-- [ ] **Docs refresh**: Usage examples for new CLI flags and fixture generation steps.
+- [x] **Tests for new sinks columns** (ClickHouse + SQLite write paths for Phase 2 + wellbeing).
+- [x] **Docs refresh**: Usage examples for new CLI flags and fixture generation steps.
