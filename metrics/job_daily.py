@@ -2111,28 +2111,46 @@ def _load_clickhouse_complexity_snapshots(
         params["repo_name"] = repo_name
         repo_filter = " AND repo_id IN (SELECT id FROM repos WHERE repo = {repo_name:String})"
         
-    date_query = f"""
-    SELECT max(as_of_day) as max_day 
-    FROM file_complexity_snapshots 
-    WHERE as_of_day <= {{day:Date}} {repo_filter}
-    """
-    try:
-        res = client.query(date_query, parameters=params)
-        max_day = res.first_row[0]
-        if not max_day or (isinstance(max_day, date) and max_day.year < 2000):
+    # If repo_id/name is None, we want the latest snapshot per repo_id.
+    # ClickHouse can do this efficiently with argMax or a JOIN.
+    if repo_id or repo_name:
+        date_query = f"""
+        SELECT max(as_of_day) as max_day 
+        FROM file_complexity_snapshots 
+        WHERE as_of_day <= {{day:Date}} {repo_filter}
+        """
+        try:
+            res = client.query(date_query, parameters=params)
+            max_day = res.first_row[0]
+            if not max_day or (isinstance(max_day, date) and max_day.year < 2000):
+                return {}
+            params["max_day"] = max_day
+        except Exception:
             return {}
-        params["max_day"] = max_day
-    except Exception:
-        return {}
 
-    query = f"""
-    SELECT
-        repo_id, as_of_day, ref, file_path, language, loc, functions_count,
-        cyclomatic_total, cyclomatic_avg, high_complexity_functions,
-        very_high_complexity_functions, computed_at
-    FROM file_complexity_snapshots
-    WHERE as_of_day = {{max_day:Date}} {repo_filter}
-    """
+        query = f"""
+        SELECT
+            repo_id, as_of_day, ref, file_path, language, loc, functions_count,
+            cyclomatic_total, cyclomatic_avg, high_complexity_functions,
+            very_high_complexity_functions, computed_at
+        FROM file_complexity_snapshots
+        WHERE as_of_day = {{max_day:Date}} {repo_filter}
+        """
+    else:
+        # Latest per repo
+        query = """
+        SELECT
+            repo_id, as_of_day, ref, file_path, language, loc, functions_count,
+            cyclomatic_total, cyclomatic_avg, high_complexity_functions,
+            very_high_complexity_functions, computed_at
+        FROM file_complexity_snapshots
+        WHERE (repo_id, as_of_day) IN (
+            SELECT repo_id, max(as_of_day)
+            FROM file_complexity_snapshots
+            WHERE as_of_day <= {day:Date}
+            GROUP BY repo_id
+        )
+        """
     
     rows = _clickhouse_query_dicts(client, query, params)
     result = {}
@@ -2168,76 +2186,96 @@ def _load_sqlite_complexity_snapshots(
 ) -> Dict[str, FileComplexitySnapshot]:
     from sqlalchemy import text
     
-    params: Dict[str, Any] = {"day": as_of_day}
-    date_query = "SELECT max(as_of_day) FROM file_complexity_snapshots WHERE as_of_day <= :day"
-    
-    if repo_id:
-        date_query += " AND repo_id = :repo_id"
-        params["repo_id"] = str(repo_id)
-    elif repo_name:
-        date_query += " AND repo_id IN (SELECT id FROM repos WHERE repo = :repo_name)"
-        params["repo_name"] = repo_name
+    if repo_id or repo_name:
+        date_query = "SELECT max(as_of_day) FROM file_complexity_snapshots WHERE as_of_day <= :day"
         
-    try:
-        with engine.connect() as conn:
-            res = conn.execute(text(date_query), params).fetchone()
-            if not res or not res[0]:
-                return {}
-            max_day_str = res[0]
-            # Ensure it is a string if not already (SQLite usually stores dates as strings)
-            if isinstance(max_day_str, date):
-                max_day = max_day_str
-            else:
-                max_day = date.fromisoformat(str(max_day_str))
+        if repo_id:
+            date_query += " AND repo_id = :repo_id"
+            params["repo_id"] = str(repo_id)
+        elif repo_name:
+            date_query += " AND repo_id IN (SELECT id FROM repos WHERE repo = :repo_name)"
+            params["repo_name"] = repo_name
             
-            params["max_day"] = max_day
-            
-            query = """
-            SELECT
-                repo_id, as_of_day, ref, file_path, language, loc, functions_count,
-                cyclomatic_total, cyclomatic_avg, high_complexity_functions,
-                very_high_complexity_functions, computed_at
-            FROM file_complexity_snapshots
-            WHERE as_of_day = :max_day
-            """
-            if repo_id:
-                query += " AND repo_id = :repo_id"
-            elif repo_name:
-                query += " AND repo_id IN (SELECT id FROM repos WHERE repo = :repo_name)"
-            
-            rows = conn.execute(text(query), params).fetchall()
-            result = {}
-            for r in rows:
-                r_id = uuid.UUID(str(r[0]))
-                f_path = str(r[3])
+        try:
+            with engine.connect() as conn:
+                res = conn.execute(text(date_query), params).fetchone()
+                if not res or not res[0]:
+                    return {}
+                max_day_str = res[0]
+                if isinstance(max_day_str, date):
+                    max_day = max_day_str
+                else:
+                    max_day = date.fromisoformat(str(max_day_str))
                 
-                as_of_day_val = r[1]
-                if isinstance(as_of_day_val, str):
-                    as_of_day_val = date.fromisoformat(as_of_day_val)
-                    
-                computed_at_val = r[11]
-                if isinstance(computed_at_val, str):
-                     computed_at_val = datetime.fromisoformat(computed_at_val.replace("Z", "+00:00"))
-
-                result[f_path] = FileComplexitySnapshot(
-                    repo_id=r_id,
-                    as_of_day=as_of_day_val,
-                    ref=str(r[2]),
-                    file_path=f_path,
-                    language=str(r[4] or ""),
-                    loc=int(r[5]),
-                    functions_count=int(r[6]),
-                    cyclomatic_total=int(r[7]),
-                    cyclomatic_avg=float(r[8]),
-                    high_complexity_functions=int(r[9]),
-                    very_high_complexity_functions=int(r[10]),
-                    computed_at=computed_at_val
-                )
-            return result
+                params["max_day"] = max_day
+                
+                query = """
+                SELECT
+                    repo_id, as_of_day, ref, file_path, language, loc, functions_count,
+                    cyclomatic_total, cyclomatic_avg, high_complexity_functions,
+                    very_high_complexity_functions, computed_at
+                FROM file_complexity_snapshots
+                WHERE as_of_day = :max_day
+                """
+                if repo_id:
+                    query += " AND repo_id = :repo_id"
+                elif repo_name:
+                    query += " AND repo_id IN (SELECT id FROM repos WHERE repo = :repo_name)"
+                
+                rows = conn.execute(text(query), params).fetchall()
+        except Exception as e:
+            logger.warning(f"Failed to load complexity snapshots from SQLite: {e}")
+            return {}
+    else:
+        # Latest per repo
+        query = """
+        SELECT
+            repo_id, as_of_day, ref, file_path, language, loc, functions_count,
+            cyclomatic_total, cyclomatic_avg, high_complexity_functions,
+            very_high_complexity_functions, computed_at
+        FROM file_complexity_snapshots
+        WHERE (repo_id || as_of_day) IN (
+            SELECT repo_id || max(as_of_day)
+            FROM file_complexity_snapshots
+            WHERE as_of_day <= :day
+            GROUP BY repo_id
+        )
+        """
+        try:
+            with engine.connect() as conn:
+                rows = conn.execute(text(query), params).fetchall()
+        except Exception as e:
+            logger.warning(f"Failed to load complexity snapshots from SQLite: {e}")
+            return {}
             
-    except Exception as e:
-        logger.warning(f"Failed to load complexity snapshots from SQLite: {e}")
-        return {}
+    result = {}
+    for r in rows:
+        r_id = uuid.UUID(str(r[0]))
+        f_path = str(r[3])
+        
+        as_of_day_val = r[1]
+        if isinstance(as_of_day_val, str):
+            as_of_day_val = date.fromisoformat(as_of_day_val)
+            
+        computed_at_val = r[11]
+        if isinstance(computed_at_val, str):
+                computed_at_val = datetime.fromisoformat(computed_at_val.replace("Z", "+00:00"))
+
+        result[f_path] = FileComplexitySnapshot(
+            repo_id=r_id,
+            as_of_day=as_of_day_val,
+            ref=str(r[2]),
+            file_path=f_path,
+            language=str(r[4] or ""),
+            loc=int(r[5]),
+            functions_count=int(r[6]),
+            cyclomatic_total=int(r[7]),
+            cyclomatic_avg=float(r[8]),
+            high_complexity_functions=int(r[9]),
+            very_high_complexity_functions=int(r[10]),
+            computed_at=computed_at_val
+        )
+    return result
 
 
 def _load_mongo_complexity_snapshots(
@@ -2251,29 +2289,43 @@ def _load_mongo_complexity_snapshots(
     
     as_of_dt = datetime(as_of_day.year, as_of_day.month, as_of_day.day)
     
-    query: Dict[str, Any] = {"as_of_day": {"$lte": as_of_dt}}
-    if repo_id:
-        query["repo_id"] = str(repo_id)
-    elif repo_name:
-         repo_doc = db["repos"].find_one({"repo": repo_name}, {"id": 1, "_id": 1})
-         if repo_doc:
-            query["repo_id"] = str(repo_doc.get("id") or repo_doc.get("_id"))
-         else:
-            return {}
+    if repo_id or repo_name:
+        query: Dict[str, Any] = {"as_of_day": {"$lte": as_of_dt}}
+        if repo_id:
+            query["repo_id"] = str(repo_id)
+        elif repo_name:
+             repo_doc = db["repos"].find_one({"repo": repo_name}, {"id": 1, "_id": 1})
+             if repo_doc:
+                query["repo_id"] = str(repo_doc.get("id") or repo_doc.get("_id"))
+             else:
+                return {}
 
-    # Find max day
-    max_day_doc = db["file_complexity_snapshots"].find_one(
-        query, 
-        sort=[("as_of_day", -1)],
-        projection={"as_of_day": 1}
-    )
-    if not max_day_doc:
-        return {}
+        # Find max day
+        max_day_doc = db["file_complexity_snapshots"].find_one(
+            query, 
+            sort=[("as_of_day", -1)],
+            projection={"as_of_day": 1}
+        )
+        if not max_day_doc:
+            return {}
+        
+        max_day_dt = max_day_doc["as_of_day"]
+        query["as_of_day"] = max_day_dt
+        docs = list(db["file_complexity_snapshots"].find(query))
+    else:
+        # Aggregate to find latest day per repo
+        pipeline = [
+            {"$match": {"as_of_day": {"$lte": as_of_dt}}},
+            {"$group": {"_id": "$repo_id", "max_day": {"$max": "$as_of_day"}}}
+        ]
+        latest_days = list(db["file_complexity_snapshots"].aggregate(pipeline))
+        if not latest_days:
+            return {}
+        
+        # Build OR query for (repo_id, max_day) pairs
+        or_clauses = [{"repo_id": d["_id"], "as_of_day": d["max_day"]} for d in latest_days]
+        docs = list(db["file_complexity_snapshots"].find({"$or": or_clauses}))
     
-    max_day_dt = max_day_doc["as_of_day"]
-    query["as_of_day"] = max_day_dt
-    
-    docs = list(db["file_complexity_snapshots"].find(query))
     result = {}
     for doc in docs:
         f_path = doc.get("file_path")

@@ -37,9 +37,10 @@ def run_complexity_scan_job(
     date: date,
     backfill_days: int = 1,
     ref: str = "HEAD",
+    sink: Optional[Any] = None,
 ) -> None:
-    if not db_url:
-        raise ValueError("DB connection string is required.")
+    if not db_url and not sink:
+        raise ValueError("DB connection string or sink is required.")
 
     if not repo_path.exists():
         raise FileNotFoundError(f"Repo path {repo_path} does not exist.")
@@ -52,21 +53,24 @@ def run_complexity_scan_job(
     start_date = date - timedelta(days=max(1, backfill_days) - 1)
     dates_to_process = [start_date + timedelta(days=i) for i in range(max(1, backfill_days))]
 
-    backend = detect_db_type(db_url)
-    sink: Any = None
-    if backend == "clickhouse":
-        sink = ClickHouseMetricsSink(db_url)
-    elif backend == "sqlite":
-        sink = SQLiteMetricsSink(_normalize_sqlite_url(db_url))
-    elif backend == "mongo":
-        sink = MongoMetricsSink(db_url)
-    elif backend == "postgres":
-        sink = SQLiteMetricsSink(_normalize_postgres_url(db_url))
-    else:
-        raise ValueError(f"Unsupported backend for complexity job: {backend}")
+    own_sink = False
+    if sink is None:
+        backend = detect_db_type(db_url)
+        own_sink = True
+        if backend == "clickhouse":
+            sink = ClickHouseMetricsSink(db_url)
+        elif backend == "sqlite":
+            sink = SQLiteMetricsSink(_normalize_sqlite_url(db_url))
+        elif backend == "mongo":
+            sink = MongoMetricsSink(db_url)
+        elif backend == "postgres":
+            sink = SQLiteMetricsSink(_normalize_postgres_url(db_url))
+        else:
+            raise ValueError(f"Unsupported backend for complexity job: {backend}")
 
     try:
-        sink.ensure_tables()
+        if own_sink:
+            sink.ensure_tables()
         
         for d in dates_to_process:
             logger.info(f"Processing date: {d}")
@@ -145,6 +149,7 @@ def run_complexity_scan_job(
             sink.write_repo_complexity_daily([repo_daily])
 
     finally:
-        sink.close()
+        if own_sink:
+            sink.close()
     
     logger.info("Complexity job done.")

@@ -245,7 +245,7 @@ def _cmd_metrics_daily(ns: argparse.Namespace) -> int:
 
 def _cmd_metrics_complexity(ns: argparse.Namespace) -> int:
     from metrics.job_complexity import run_complexity_scan_job
-    
+
     root_path = Path(ns.repo_path).resolve()
 
     if ns.repo_id:
@@ -280,49 +280,85 @@ def _cmd_metrics_complexity(ns: argparse.Namespace) -> int:
     # Filter by search pattern if provided
     if ns.search:
         import fnmatch
+
         original_count = len(repos)
         repos = [r for r in repos if fnmatch.fnmatch(r.repo, ns.search)]
         logging.info(f"Filtered repos by '{ns.search}': {len(repos)}/{original_count}")
 
-    logging.info(f"Found {len(repos)} repositories in DB. Checking local availability in {root_path}...")
-    
-    processed_count = 0
-    for repo in repos:
-        # Heuristics to find repo locally based on DB identifier (name/URL)
-        candidates = []
-        if repo.repo:
-            # 1. Exact match (e.g. 'owner/repo' or 'repo') relative to root
-            candidates.append(root_path / repo.repo)
-            # 2. Basename match (e.g. 'repo' from 'owner/repo') relative to root
-            candidates.append(root_path / Path(repo.repo).name)
-        
-        # 3. The root path itself might be the repo (if user pointed directly to it)
-        candidates.append(root_path)
+    logging.info(
+        f"Found {len(repos)} repositories in DB. Checking local availability in {root_path}..."
+    )
 
-        found_path = None
-        for cand in candidates:
-            if cand.is_dir() and (cand / ".git").exists():
-                # Simple check: assuming name match implies identity.
-                # (Could be improved by checking git remotes)
-                found_path = cand
-                break
-        
-        if found_path:
-            logging.info(f"Processing DB repo '{repo.repo}' ({repo.id}) at {found_path}")
-            try:
-                run_complexity_scan_job(
-                    repo_path=found_path,
-                    repo_id=repo.id,
-                    db_url=ns.db,
-                    date=ns.date,
-                    backfill_days=ns.backfill,
-                    ref=ns.ref,
+    # Initialize sink once for batch processing
+    db_type = _resolve_db_type(ns.db, None)
+    sink = None
+    if db_type == "clickhouse":
+        from metrics.sinks.clickhouse import ClickHouseMetricsSink
+
+        sink = ClickHouseMetricsSink(ns.db)
+    elif db_type == "sqlite":
+        from metrics.sinks.sqlite import SQLiteMetricsSink
+        from metrics.job_complexity import _normalize_sqlite_url
+
+        sink = SQLiteMetricsSink(_normalize_sqlite_url(ns.db))
+    elif db_type == "mongo":
+        from metrics.sinks.mongo import MongoMetricsSink
+
+        sink = MongoMetricsSink(ns.db)
+    elif db_type == "postgres":
+        from metrics.sinks.sqlite import SQLiteMetricsSink
+        from metrics.job_complexity import _normalize_postgres_url
+
+        sink = SQLiteMetricsSink(_normalize_postgres_url(ns.db))
+
+    if sink:
+        sink.ensure_tables()
+
+    processed_count = 0
+    try:
+        for repo in repos:
+            # Heuristics to find repo locally based on DB identifier (name/URL)
+            candidates = []
+            if repo.repo:
+                # 1. Check if root_path itself matches (by basename)
+                repo_basename = Path(
+                    repo.repo
+                ).name  # e.g., 'dev-health-ops' from 'chrisgeo/dev-health-ops'
+                if root_path.name == repo_basename and (root_path / ".git").exists():
+                    candidates.append(root_path)
+                # 2. Exact match (e.g. 'owner/repo' or 'repo') relative to root
+                candidates.append(root_path / repo.repo)
+                # 3. Basename match (e.g. 'repo' from 'owner/repo') relative to root
+                candidates.append(root_path / Path(repo.repo).name)
+
+            found_path = None
+            for cand in candidates:
+                if cand.is_dir() and (cand / ".git").exists():
+                    found_path = cand
+                    break
+
+            if found_path:
+                logging.info(
+                    f"Processing DB repo '{repo.repo}' ({repo.id}) at {found_path}"
                 )
-                processed_count += 1
-            except Exception as e:
-                logging.error(f"Failed to process {repo.repo}: {e}")
-        else:
-            logging.debug(f"Skipping DB repo '{repo.repo}': not found locally.")
+                try:
+                    run_complexity_scan_job(
+                        repo_path=found_path,
+                        repo_id=repo.id,
+                        db_url=ns.db,
+                        date=ns.date,
+                        backfill_days=ns.backfill,
+                        ref=ns.ref,
+                        sink=sink,  # Pass existing sink
+                    )
+                    processed_count += 1
+                except Exception as e:
+                    logging.error(f"Failed to process {repo.repo}: {e}")
+            else:
+                logging.debug(f"Skipping DB repo '{repo.repo}': not found locally.")
+    finally:
+        if sink:
+            sink.close()
 
     logging.info(f"Processed {processed_count} repositories.")
     return 0
@@ -568,23 +604,25 @@ def build_parser() -> argparse.ArgumentParser:
         "complexity", help="Scan and compute complexity metrics."
     )
     complexity.add_argument(
-        "--repo-path", default=".", help="Path to local git repo (or root dir for batch mode). Defaults to current dir."
+        "--repo-path",
+        default=".",
+        help="Path to local git repo (or root dir for batch mode). Defaults to current dir.",
     )
     complexity.add_argument(
-        "--repo-id", type=lambda s: __import__("uuid").UUID(s), help="Repo UUID. If omitted, scans dir for repos."
+        "--repo-id",
+        type=lambda s: __import__("uuid").UUID(s),
+        help="Repo UUID. If omitted, scans dir for repos.",
     )
     complexity.add_argument(
         "-s", "--search", help="Filter repos by name (glob pattern, e.g. 'org/*')."
     )
     complexity.add_argument(
-        "--date", 
-        type=_parse_date, 
+        "--date",
+        type=_parse_date,
         default=date.today().isoformat(),
-        help="Date of snapshot (YYYY-MM-DD)."
+        help="Date of snapshot (YYYY-MM-DD).",
     )
-    complexity.add_argument(
-        "--ref", default="HEAD", help="Git ref/branch analyzed."
-    )
+    complexity.add_argument("--ref", default="HEAD", help="Git ref/branch analyzed.")
     complexity.add_argument(
         "--backfill",
         type=int,
@@ -675,7 +713,9 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
         # 5. CI/CD + Deployments + Incidents
         pr_numbers = [pr.number for pr in prs]
         pipeline_runs = generator.generate_ci_pipeline_runs(days=ns.days)
-        deployments = generator.generate_deployments(days=ns.days, pr_numbers=pr_numbers)
+        deployments = generator.generate_deployments(
+            days=ns.days, pr_numbers=pr_numbers
+        )
         incidents = generator.generate_incidents(days=ns.days)
         await store.insert_ci_pipeline_runs(pipeline_runs)
         await store.insert_deployments(deployments)
@@ -735,92 +775,80 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
                     commit = commit_by_hash.get(stat.commit_hash)
                     if not commit:
                         continue
-                    commit_stat_rows.append(
-                        {
-                            "repo_id": stat.repo_id,
-                            "commit_hash": stat.commit_hash,
-                            "author_email": commit.author_email,
-                            "author_name": commit.author_name,
-                            "committer_when": commit.committer_when,
-                            "file_path": stat.file_path,
-                            "additions": stat.additions,
-                            "deletions": stat.deletions,
-                        }
-                    )
+                    commit_stat_rows.append({
+                        "repo_id": stat.repo_id,
+                        "commit_hash": stat.commit_hash,
+                        "author_email": commit.author_email,
+                        "author_name": commit.author_name,
+                        "committer_when": commit.committer_when,
+                        "file_path": stat.file_path,
+                        "additions": stat.additions,
+                        "deletions": stat.deletions,
+                    })
 
                 pull_request_rows = []
                 for pr in prs:
-                    pull_request_rows.append(
-                        {
-                            "repo_id": pr.repo_id,
-                            "number": pr.number,
-                            "author_email": pr.author_email,
-                            "author_name": pr.author_name,
-                            "created_at": pr.created_at,
-                            "merged_at": pr.merged_at,
-                            "first_review_at": pr.first_review_at,
-                            "first_comment_at": pr.first_comment_at,
-                            "reviews_count": pr.reviews_count,
-                            "comments_count": pr.comments_count,
-                            "changes_requested_count": pr.changes_requested_count,
-                            "additions": pr.additions,
-                            "deletions": pr.deletions,
-                            "changed_files": pr.changed_files,
-                        }
-                    )
+                    pull_request_rows.append({
+                        "repo_id": pr.repo_id,
+                        "number": pr.number,
+                        "author_email": pr.author_email,
+                        "author_name": pr.author_name,
+                        "created_at": pr.created_at,
+                        "merged_at": pr.merged_at,
+                        "first_review_at": pr.first_review_at,
+                        "first_comment_at": pr.first_comment_at,
+                        "reviews_count": pr.reviews_count,
+                        "comments_count": pr.comments_count,
+                        "changes_requested_count": pr.changes_requested_count,
+                        "additions": pr.additions,
+                        "deletions": pr.deletions,
+                        "changed_files": pr.changed_files,
+                    })
 
                 review_rows = []
                 for review in all_reviews:
-                    review_rows.append(
-                        {
-                            "repo_id": review.repo_id,
-                            "number": review.number,
-                            "reviewer": review.reviewer,
-                            "submitted_at": review.submitted_at,
-                            "state": review.state,
-                        }
-                    )
+                    review_rows.append({
+                        "repo_id": review.repo_id,
+                        "number": review.number,
+                        "reviewer": review.reviewer,
+                        "submitted_at": review.submitted_at,
+                        "state": review.state,
+                    })
 
                 pipeline_rows = []
                 for run in pipeline_runs:
-                    pipeline_rows.append(
-                        {
-                            "repo_id": run.repo_id,
-                            "run_id": run.run_id,
-                            "status": run.status,
-                            "queued_at": run.queued_at,
-                            "started_at": run.started_at,
-                            "finished_at": run.finished_at,
-                        }
-                    )
+                    pipeline_rows.append({
+                        "repo_id": run.repo_id,
+                        "run_id": run.run_id,
+                        "status": run.status,
+                        "queued_at": run.queued_at,
+                        "started_at": run.started_at,
+                        "finished_at": run.finished_at,
+                    })
 
                 deployment_rows = []
                 for deployment in deployments:
-                    deployment_rows.append(
-                        {
-                            "repo_id": deployment.repo_id,
-                            "deployment_id": deployment.deployment_id,
-                            "status": deployment.status,
-                            "environment": deployment.environment,
-                            "started_at": deployment.started_at,
-                            "finished_at": deployment.finished_at,
-                            "deployed_at": deployment.deployed_at,
-                            "merged_at": deployment.merged_at,
-                            "pull_request_number": deployment.pull_request_number,
-                        }
-                    )
+                    deployment_rows.append({
+                        "repo_id": deployment.repo_id,
+                        "deployment_id": deployment.deployment_id,
+                        "status": deployment.status,
+                        "environment": deployment.environment,
+                        "started_at": deployment.started_at,
+                        "finished_at": deployment.finished_at,
+                        "deployed_at": deployment.deployed_at,
+                        "merged_at": deployment.merged_at,
+                        "pull_request_number": deployment.pull_request_number,
+                    })
 
                 incident_rows = []
                 for incident in incidents:
-                    incident_rows.append(
-                        {
-                            "repo_id": incident.repo_id,
-                            "incident_id": incident.incident_id,
-                            "status": incident.status,
-                            "started_at": incident.started_at,
-                            "resolved_at": incident.resolved_at,
-                        }
-                    )
+                    incident_rows.append({
+                        "repo_id": incident.repo_id,
+                        "incident_id": incident.incident_id,
+                        "status": incident.status,
+                        "started_at": incident.started_at,
+                        "resolved_at": incident.resolved_at,
+                    })
 
                 work_items = generator.generate_work_items(days=ns.days)
                 transitions = generator.generate_work_item_transitions(work_items)
@@ -929,7 +957,7 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
                         computed_at=computed_at,
                         team_resolver=team_resolver,
                     )
-                    
+
                     # Enrich User Metrics with IC fields
                     # Convert TeamResolver map to simple identity->team_id map
                     team_map = {k: v[0] for k, v in member_to_team.items()}
@@ -1021,16 +1049,18 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
                     if incident_metrics:
                         sink.write_incident_metrics(incident_metrics)
                         total_incident += len(incident_metrics)
-                        
+
                     # Landscape rolling metrics
                     try:
-                        # For fixtures, we can't easily query the DB we just wrote to in the same transaction context/loop easily 
+                        # For fixtures, we can't easily query the DB we just wrote to in the same transaction context/loop easily
                         # if using batch inserts or if it's not committed.
                         # However, for ClickHouse sink, inserts are immediate.
                         # For SQLite/Postgres, it depends on the driver/transaction.
                         # But sink methods handle their own transactions usually.
                         # Let's try to compute it.
-                        if hasattr(sink, "get_rolling_30d_user_stats") and hasattr(sink, "write_ic_landscape_rolling"):
+                        if hasattr(sink, "get_rolling_30d_user_stats") and hasattr(
+                            sink, "write_ic_landscape_rolling"
+                        ):
                             rolling_stats = sink.get_rolling_30d_user_stats(
                                 as_of_day=day, repo_id=repo.id
                             )
@@ -1041,7 +1071,9 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
                             )
                             sink.write_ic_landscape_rolling(landscape_recs)
                     except Exception as e:
-                        logging.warning("Failed to compute/write fixture landscape metrics: %s", e)
+                        logging.warning(
+                            "Failed to compute/write fixture landscape metrics: %s", e
+                        )
 
                 logging.info(
                     "Generated fixtures metrics: repo=%d user=%d commit=%d team=%d file=%d review_edges=%d work_item_metrics=%d work_item_user_metrics=%d work_item_cycle_times=%d work_item_state_durations=%d cicd=%d deploy=%d incident=%d",
