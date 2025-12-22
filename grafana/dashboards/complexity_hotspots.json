@@ -1,0 +1,225 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "gnetId": null,
+  "graphTooltip": 0,
+  "links": [],
+  "panels": [
+    {
+      "datasource": "ClickHouse",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "id": 2,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "8.3.3",
+      "targets": [
+        {
+          "datasource": "ClickHouse",
+          "format": "time_series",
+          "group": [],
+          "metricType": "any",
+          "orderByKey": "time",
+          "rawQuery": "SELECT day, cyclomatic_total FROM repo_complexity_daily WHERE $timeFilter ORDER BY day",
+          "refId": "A",
+          "select": [
+            [
+              {
+                "params": [
+                  "cyclomatic_total"
+                ],
+                "type": "column"
+              }
+            ]
+          ],
+          "table": "repo_complexity_daily",
+          "timeColumn": "day",
+          "timeColumnType": "date",
+          "where": []
+        }
+      ],
+      "title": "Repo Complexity Trend",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "ClickHouse",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "displayMode": "auto"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "id": 4,
+      "options": {
+        "footer": {
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true
+      },
+      "pluginVersion": "8.3.3",
+      "targets": [
+        {
+          "datasource": "ClickHouse",
+          "format": "table",
+          "group": [],
+          "metricType": "any",
+          "orderByKey": "risk_score",
+          "rawQuery": "SELECT file_path, churn_loc_30d, cyclomatic_total, risk_score FROM file_hotspot_daily WHERE day = toDate(now()) ORDER BY risk_score DESC LIMIT 20",
+          "refId": "A",
+          "select": [
+            [
+              {
+                "params": [
+                  "file_path"
+                ],
+                "type": "column"
+              },
+              {
+                "params": [
+                  "churn_loc_30d"
+                ],
+                "type": "column"
+              },
+              {
+                "params": [
+                  "cyclomatic_total"
+                ],
+                "type": "column"
+              },
+              {
+                "params": [
+                  "risk_score"
+                ],
+                "type": "column"
+              }
+            ]
+          ],
+          "table": "file_hotspot_daily",
+          "timeColumn": "day",
+          "timeColumnType": "date",
+          "where": []
+        }
+      ],
+      "title": "Top Risky Hotspots (Today)",
+      "type": "table"
+    }
+  ],
+  "schemaVersion": 34,
+  "style": "dark",
+  "tags": [],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "",
+  "title": "Complexity & Hotspots",
+  "uid": "complexity_hotspots",
+  "version": 1,
+  "weekStart": ""
+}

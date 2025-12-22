@@ -355,6 +355,93 @@ class IncidentMetricsDailyRecord:
 
 
 @dataclass(frozen=True)
+class FileComplexitySnapshot:
+    repo_id: uuid.UUID
+    as_of_day: date
+    ref: str
+    file_path: str
+    language: str
+    loc: int
+    functions_count: int
+    cyclomatic_total: int
+    cyclomatic_avg: float
+    high_complexity_functions: int
+    very_high_complexity_functions: int
+    computed_at: datetime
+
+
+@dataclass(frozen=True)
+class RepoComplexityDaily:
+    repo_id: uuid.UUID
+    day: date
+    loc_total: int
+    cyclomatic_total: int
+    cyclomatic_per_kloc: float
+    high_complexity_functions: int
+    very_high_complexity_functions: int
+    computed_at: datetime
+
+
+@dataclass(frozen=True)
+class FileHotspotDaily:
+    repo_id: uuid.UUID
+    day: date
+    file_path: str
+    churn_loc_30d: int
+    churn_commits_30d: int
+    cyclomatic_total: int
+    cyclomatic_avg: float
+    blame_concentration: Optional[float]
+    risk_score: float
+    computed_at: datetime
+
+
+@dataclass(frozen=True)
+class InvestmentClassificationRecord:
+    repo_id: Optional[uuid.UUID]
+    day: date
+    artifact_type: str
+    artifact_id: str
+    provider: str
+    investment_area: str
+    project_stream: Optional[str]
+    confidence: float
+    rule_id: str
+    computed_at: datetime
+
+
+@dataclass(frozen=True)
+class InvestmentMetricsRecord:
+    repo_id: Optional[uuid.UUID]
+    day: date
+    team_id: str
+    investment_area: str
+    project_stream: Optional[str]
+    delivery_units: int
+    work_items_completed: int
+    prs_merged: int
+    churn_loc: int
+    cycle_p50_hours: float
+    computed_at: datetime
+
+
+@dataclass(frozen=True)
+class IssueTypeMetricsRecord:
+    repo_id: Optional[uuid.UUID]
+    day: date
+    provider: str
+    team_id: str
+    issue_type_norm: str
+    created_count: int
+    completed_count: int
+    active_count: int
+    cycle_p50_hours: float
+    cycle_p90_hours: float
+    lead_p50_hours: float
+    computed_at: datetime
+
+
+@dataclass(frozen=True)
 class DailyMetricsResult:
     day: date
     repo_metrics: List[RepoMetricsDailyRecord]

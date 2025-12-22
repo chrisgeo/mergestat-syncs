@@ -3,9 +3,14 @@ from __future__ import annotations
 import math
 import uuid
 from datetime import date, datetime
-from typing import Any, Dict, List, Sequence
+from typing import Any, Dict, List, Sequence, Optional
 
-from metrics.schemas import CommitStatRow, FileMetricsRecord
+from metrics.schemas import (
+    CommitStatRow, 
+    FileMetricsRecord, 
+    FileHotspotDaily,
+    FileComplexitySnapshot
+)
 
 
 def compute_file_hotspots(
@@ -80,3 +85,102 @@ def compute_file_hotspots(
 
     # Sort by hotspot score descending
     return sorted(records, key=lambda r: r.hotspot_score, reverse=True)
+
+
+def compute_file_risk_hotspots(
+    *,
+    repo_id: uuid.UUID,
+    day: date,
+    window_stats: Sequence[CommitStatRow],
+    complexity_map: Dict[str, FileComplexitySnapshot],
+    computed_at: datetime,
+) -> List[FileHotspotDaily]:
+    """
+    Compute risk score merging churn (30d) and complexity.
+    
+    risk_score = z(churn) + z(complexity)
+    
+    (Blame concentration is placeholder for now as it's computationally expensive 
+    to derive accurately without full blame data loaded).
+    """
+    # 1. Aggregate churn per file
+    churn_map: Dict[str, Dict[str, int]] = {}
+    for row in window_stats:
+        if row["repo_id"] != repo_id:
+            continue
+        path = row.get("file_path")
+        if not path:
+            continue
+        
+        if path not in churn_map:
+            churn_map[path] = {"churn": 0, "commits": 0}
+        
+        adds = max(0, int(row.get("additions") or 0))
+        dels = max(0, int(row.get("deletions") or 0))
+        churn_map[path]["churn"] += adds + dels
+        churn_map[path]["commits"] += 1
+
+    # 2. Merge keys (union of churned files and complex files)
+    all_files = set(churn_map.keys()) | set(complexity_map.keys())
+    
+    data = []
+    for f in all_files:
+        c_stats = churn_map.get(f, {"churn": 0, "commits": 0})
+        comp = complexity_map.get(f)
+        
+        churn_val = c_stats["churn"]
+        comp_val = comp.cyclomatic_total if comp else 0
+        
+        data.append({
+            "path": f,
+            "churn": churn_val,
+            "commits": c_stats["commits"],
+            "complexity": comp_val,
+            "comp_obj": comp
+        })
+
+    if not data:
+        return []
+
+    # 3. Compute Z-scores
+    # Helper to compute z-scores for a list of values
+    def get_z_scores(values: List[float]) -> List[float]:
+        if not values:
+            return []
+        n = len(values)
+        if n < 2:
+            return [0.0] * n
+        mean = sum(values) / n
+        variance = sum((x - mean) ** 2 for x in values) / (n - 1)
+        stdev = math.sqrt(variance)
+        if stdev == 0:
+            return [0.0] * n
+        return [(x - mean) / stdev for x in values]
+
+    churns = [float(d["churn"]) for d in data]
+    complexities = [float(d["complexity"]) for d in data]
+    
+    z_churn = get_z_scores(churns)
+    z_comp = get_z_scores(complexities)
+    
+    results = []
+    for i, d in enumerate(data):
+        risk = z_churn[i] + z_comp[i]
+        
+        comp_obj = d["comp_obj"]
+        
+        results.append(FileHotspotDaily(
+            repo_id=repo_id,
+            day=day,
+            file_path=d["path"],
+            churn_loc_30d=d["churn"],
+            churn_commits_30d=d["commits"],
+            cyclomatic_total=comp_obj.cyclomatic_total if comp_obj else 0,
+            cyclomatic_avg=comp_obj.cyclomatic_avg if comp_obj else 0.0,
+            blame_concentration=None,
+            risk_score=risk,
+            computed_at=computed_at
+        ))
+        
+    # Sort by risk descending
+    return sorted(results, key=lambda x: x.risk_score, reverse=True)
