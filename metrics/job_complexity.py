@@ -49,7 +49,7 @@ def run_complexity_scan_job(
             end_of_day_ts = datetime.combine(d, datetime.max.time()).replace(tzinfo=timezone.utc).isoformat()
             
             try:
-                commit_sha = repo.git.rev_list("-1", f"--before={d.isoformat()} 23:59:59", ref)
+                commit_sha = repo.git.rev_list("-1", f"--before={end_of_day_ts}", ref)
             except git.Exc as e:
                 logger.warning(f"Could not find commit for {d}: {e}")
                 continue
