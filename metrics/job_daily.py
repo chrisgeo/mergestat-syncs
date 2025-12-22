@@ -36,6 +36,7 @@ from metrics.schemas import (
     DeploymentRow,
     IncidentRow,
     FileComplexitySnapshot,
+    FileHotspotDaily,
     InvestmentClassificationRecord,
     InvestmentMetricsRecord,
     IssueTypeMetricsRecord,
