@@ -243,6 +243,21 @@ def _cmd_metrics_daily(ns: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_metrics_complexity(ns: argparse.Namespace) -> int:
+    from metrics.job_complexity import run_complexity_scan_job
+    
+    repo_path = Path(ns.repo_path).resolve()
+    
+    run_complexity_scan_job(
+        repo_path=repo_path,
+        repo_id=ns.repo_id,
+        db_url=ns.db,
+        date=ns.date,
+        ref=ns.ref,
+    )
+    return 0
+
+
 def _cmd_grafana_up(_ns: argparse.Namespace) -> int:
     cmd = [
         "docker",
@@ -478,6 +493,31 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip per-commit metrics output.",
     )
     daily.set_defaults(func=_cmd_metrics_daily)
+
+    complexity = metrics_sub.add_parser(
+        "complexity", help="Scan and compute complexity metrics."
+    )
+    complexity.add_argument(
+        "--repo-path", required=True, help="Path to local git repo."
+    )
+    complexity.add_argument(
+        "--repo-id", required=True, type=lambda s: __import__("uuid").UUID(s), help="Repo UUID."
+    )
+    complexity.add_argument(
+        "--date", 
+        type=_parse_date, 
+        default=date.today().isoformat(),
+        help="Date of snapshot (YYYY-MM-DD)."
+    )
+    complexity.add_argument(
+        "--ref", default="HEAD", help="Git ref/branch analyzed."
+    )
+    complexity.add_argument(
+        "--db",
+        default=os.getenv("CLICKHOUSE_DSN") or os.getenv("DB_CONN_STRING"),
+        help="ClickHouse DSN.",
+    )
+    complexity.set_defaults(func=_cmd_metrics_complexity)
 
     # ---- grafana ----
     graf = sub.add_parser(

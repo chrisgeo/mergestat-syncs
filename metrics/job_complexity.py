@@ -1,58 +1,35 @@
-#!/usr/bin/env python3
-import argparse
-import asyncio
 import logging
-import os
-import sys
 import uuid
 from datetime import date, datetime, timezone
 from pathlib import Path
+from typing import Optional
 
-from analytics.complexity import ComplexityScanner, FileComplexity
+from analytics.complexity import ComplexityScanner
 from metrics.schemas import FileComplexitySnapshot, RepoComplexityDaily
 from metrics.sinks.clickhouse import ClickHouseMetricsSink
-from storage import create_store, detect_db_type
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
-)
-logger = logging.getLogger("scan_complexity")
+logger = logging.getLogger(__name__)
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
-def parse_args():
-    parser = argparse.ArgumentParser(description="Scan repo complexity.")
-    parser.add_argument("--repo-path", required=True, help="Path to local git repo.")
-    parser.add_argument("--repo-id", required=True, type=uuid.UUID, help="Repo UUID.")
-    parser.add_argument("--ref", default="HEAD", help="Git ref/branch analyzed.")
-    parser.add_argument(
-        "--date", 
-        type=date.fromisoformat, 
-        default=date.today().isoformat(),
-        help="Date of snapshot (YYYY-MM-DD)."
-    )
-    parser.add_argument(
-        "--db", 
-        default=os.getenv("CLICKHOUSE_DSN"),
-        help="ClickHouse DSN for sinking metrics."
-    )
-    return parser.parse_args()
+def run_complexity_scan_job(
+    *,
+    repo_path: Path,
+    repo_id: uuid.UUID,
+    db_url: str,
+    date: date,
+    ref: str = "HEAD",
+) -> None:
+    if not db_url:
+        raise ValueError("ClickHouse DB connection string is required.")
 
-def main():
-    args = parse_args()
-    
-    if not args.db:
-        logger.error("ClickHouse DB connection string is required (--db or CLICKHOUSE_DSN).")
-        sys.exit(1)
-
-    repo_path = Path(args.repo_path)
     if not repo_path.exists():
-        logger.error(f"Repo path {repo_path} does not exist.")
-        sys.exit(1)
+        raise FileNotFoundError(f"Repo path {repo_path} does not exist.")
 
     # 1. Scan
-    scanner = ComplexityScanner(config_path=REPO_ROOT / "config/complexity.yaml")
-    logger.info(f"Scanning {repo_path} (ref={args.ref})...")
+    config_path = REPO_ROOT / "config/complexity.yaml"
+    scanner = ComplexityScanner(config_path=config_path)
+    logger.info(f"Scanning {repo_path} (ref={ref})...")
     file_results = scanner.scan_repo(repo_path)
     logger.info(f"Scanned {len(file_results)} files.")
 
@@ -71,9 +48,9 @@ def main():
     
     for f in file_results:
         snapshots.append(FileComplexitySnapshot(
-            repo_id=args.repo_id,
-            as_of_day=args.date,
-            ref=args.ref,
+            repo_id=repo_id,
+            as_of_day=date,
+            ref=ref,
             file_path=f.file_path,
             language=f.language,
             loc=f.loc,
@@ -93,8 +70,8 @@ def main():
     cc_per_kloc = (total_cc / (total_loc / 1000.0)) if total_loc > 0 else 0.0
     
     repo_daily = RepoComplexityDaily(
-        repo_id=args.repo_id,
-        day=args.date,
+        repo_id=repo_id,
+        day=date,
         loc_total=total_loc,
         cyclomatic_total=total_cc,
         cyclomatic_per_kloc=cc_per_kloc,
@@ -104,7 +81,7 @@ def main():
     )
 
     # 3. Sink
-    sink = ClickHouseMetricsSink(args.db)
+    sink = ClickHouseMetricsSink(db_url)
     try:
         sink.ensure_tables()
         logger.info(f"Writing {len(snapshots)} file snapshots...")
@@ -114,6 +91,3 @@ def main():
         logger.info("Done.")
     finally:
         sink.close()
-
-if __name__ == "__main__":
-    main()
