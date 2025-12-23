@@ -626,6 +626,12 @@ risk_raw = P80(hotspot_score_file_for_team)
 risk_score = 100 - risk_raw
 ```
 
+Ownership concentration (for hotspot drivers) is derived from git blame data:
+
+```text
+ownership_concentration = max(lines_by_author) / total_lines
+```
+
 #### 1.3.3 PR Size
 
 ```text

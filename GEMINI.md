@@ -16,6 +16,7 @@ The project follows a pipeline-like architecture:
     - Dashboard team filters normalize `team_id` with `ifNull(nullIf(team_id, ''), 'unassigned')` to include legacy NULL/empty values.
     - Investment metrics store NULL team_id for unassigned; the investment flow view casts with `toNullable(team_id)`.
     - Hotspot Explorer queries should use table format and order by day to satisfy Grafana time sorting.
+    - Hotspot ownership concentration uses `git_blame` max-lines share per file.
 
 ## Key Technologies
 - **Language**: Python 3.10+

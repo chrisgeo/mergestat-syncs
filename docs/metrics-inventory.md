@@ -6,6 +6,7 @@ Grafana Investment Areas dashboard filters team IDs with regex `match(...)` in C
 Dashboard team filters normalize `team_id` with `ifNull(nullIf(team_id, ''), 'unassigned')` to include legacy NULL/empty values.
 Investment metrics store NULL team IDs for unassigned; the investment flow view casts via `toNullable(team_id)`.
 Hotspot Explorer queries should use table format and order by day to satisfy Grafana time sorting.
+Hotspot ownership concentration uses `git_blame` max-lines share per file.
 Grafana panel plugin `grafana/plugins/dev-health-panels` visualizes landscape, hotspots, and investment flow metrics from ClickHouse query results, using `stats.v_ic_landscape_points`, `stats.v_file_hotspots_windowed`, and `stats.v_investment_flow_edges`.
 ClickHouse view definitions use `WITH ... AS` aliasing (avoid `WITH name = expr` syntax).
 

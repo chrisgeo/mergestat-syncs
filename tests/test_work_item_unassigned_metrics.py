@@ -59,7 +59,7 @@ def test_unassigned_completed_items_are_tracked() -> None:
 
     assert len(group_rows) == 1
     group = group_rows[0]
-    assert group.team_id == ""
+    assert group.team_id == "unassigned"
     assert group.items_completed == 2
     assert group.items_completed_unassigned == 1
 

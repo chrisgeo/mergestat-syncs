@@ -24,6 +24,7 @@ This checklist tracks what is complete and what remains to finalize `dev-health-
 - [x] **Dashboard team filter normalization**: Include legacy NULL/empty team IDs in Grafana ClickHouse queries via `ifNull(nullIf(team_id, ''), 'unassigned')`.
 - [x] **Investment metrics NULL team IDs**: `investment_metrics_daily.team_id` stores NULL for unassigned; investment flow view casts via `toNullable(team_id)`.
 - [x] **Hotspot Explorer formatting**: Use table format and order by day to keep Grafana sorting valid.
+- [x] **Hotspot ownership concentration**: Derive ownership concentration from git blame line shares.
 
 ## Remaining
 
