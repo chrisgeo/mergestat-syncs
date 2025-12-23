@@ -15,6 +15,7 @@ Purpose: compact, actionable rules for an AI coding agent (Copilot-like) working
 - Work item sync is separate (`sync work-items`); `metrics daily` expects work items already stored unless explicitly asked to fetch providers.
 - Planned: repo filtering for `sync work-items` by tags/settings (beyond name glob).
 - Grafana Investment Areas dashboard uses regex team filters in ClickHouse queries.
+- Grafana panel plugin lives in `grafana/plugins/dev-health-panels` with Developer Landscape, Hotspot Explorer, and Investment Flow panels.
 - Fixtures in `fixtures/` generate synthetic data for testing/demos.
 - Implementation plans, metrics inventory, and requirement details live in `docs/project.md`, `docs/metrics-inventory.md`, and `docs/roadmap.md`.
 

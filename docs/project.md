@@ -7,6 +7,7 @@
 - **Calculate**: run `metrics daily` using stored facts (no provider calls by default).
 - **Planned**: allow `sync work-items` filtering by repo tags/settings.
 - **Dashboards**: Investment Areas uses regex `match(...)` filtering for the team variable in ClickHouse queries.
+- **Panels**: `grafana/plugins/dev-health-panels` provides Developer Landscape, Hotspot Explorer, and Investment Flow visualizations.
 
 ## LinearB — Flow & Team Efficiency
 

@@ -35,6 +35,7 @@ The project follows a pipeline-like architecture:
 - `processors/`: Logic to bridge connectors and storage.
 - `providers/`: Mapping and identity management logic.
 - `grafana/`: Configuration for automated Grafana setup.
+- `grafana/plugins/dev-health-panels`: Panel plugin with Developer Landscape, Hotspot Explorer, and Investment Flow views.
 - `alembic/`: Database migration scripts for PostgreSQL.
 - `fixtures/`: Synthetic data generation for testing and demos.
 - `tests/`: Comprehensive test suite covering connectors, metrics, and storage.
