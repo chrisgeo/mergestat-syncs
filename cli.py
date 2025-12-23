@@ -12,7 +12,7 @@ from typing import List, Optional
 
 from processors.github import process_github_repo, process_github_repos_batch
 from processors.gitlab import process_gitlab_project, process_gitlab_projects_batch
-from processors.local import process_local_repo
+from processors.local import process_local_blame, process_local_repo
 from storage import create_store, detect_db_type
 from utils import _parse_since
 
@@ -90,6 +90,110 @@ async def _run_with_store(db_url: str, db_type: str, handler) -> None:
         await handler(store)
 
 
+def _cmd_sync_teams(ns: argparse.Namespace) -> int:
+    from models.teams import Team
+    
+    provider = (ns.provider or "config").lower()
+    teams_data: List[Team] = []
+
+    if provider == "config":
+        from providers.teams import DEFAULT_TEAM_MAPPING_PATH
+        import yaml
+
+        path = Path(ns.path) if ns.path else DEFAULT_TEAM_MAPPING_PATH
+        if not path.exists():
+            logging.error(f"Teams config file not found at {path}")
+            return 1
+
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                payload = yaml.safe_load(handle) or {}
+        except Exception as e:
+            logging.error(f"Failed to parse teams config: {e}")
+            return 1
+
+        for entry in payload.get("teams") or []:
+            team_id = str(entry.get("team_id") or "").strip()
+            team_name = str(entry.get("team_name") or team_id).strip()
+            description = entry.get("description")
+            members = entry.get("members") or []
+            if team_id:
+                teams_data.append(
+                    Team(
+                        id=team_id,
+                        name=team_name,
+                        description=str(description) if description else None,
+                        members=[str(m) for m in members],
+                    )
+                )
+
+    elif provider == "jira":
+        from providers.jira.client import JiraClient
+        
+        try:
+            client = JiraClient.from_env()
+        except ValueError as e:
+            logging.error(f"Jira configuration error: {e}")
+            return 1
+            
+        try:
+            logging.info("Fetching projects from Jira...")
+            projects = client.get_all_projects()
+            for p in projects:
+                # Use project Key as ID (stable), Name as Name
+                key = p.get("key")
+                name = p.get("name")
+                desc = p.get("description")
+                lead = p.get("lead", {})
+                
+                members = []
+                if lead and lead.get("accountId"):
+                    members.append(lead.get("accountId"))
+                    
+                if key and name:
+                    teams_data.append(
+                        Team(
+                            id=key,
+                            name=name,
+                            description=str(desc) if desc else f"Jira Project {key}",
+                            members=members
+                        )
+                    )
+            logging.info(f"Fetched {len(teams_data)} projects from Jira.")
+        except Exception as e:
+            logging.error(f"Failed to fetch Jira projects: {e}")
+            return 1
+        finally:
+            client.close()
+
+    elif provider == "synthetic":
+        from fixtures.generator import SyntheticDataGenerator
+        generator = SyntheticDataGenerator()
+        # Use 8 teams as requested for better visualization
+        teams_data = generator.generate_teams(count=8)
+        logging.info(f"Generated {len(teams_data)} synthetic teams.")
+
+    else:
+        logging.error(f"Unknown provider: {provider}")
+        return 1
+
+    if not teams_data:
+        logging.warning("No teams found/generated.")
+        return 0
+
+    db_type = _resolve_db_type(ns.db, ns.db_type)
+
+    async def _handler(store):
+        # Ensure table exists (for SQL stores)
+        if hasattr(store, "ensure_tables"):
+            await store.ensure_tables()
+        await store.insert_teams(teams_data)
+        logging.info(f"Synced {len(teams_data)} teams to DB.")
+
+    asyncio.run(_run_with_store(ns.db, db_type, _handler))
+    return 0
+
+
 def _cmd_sync_local(ns: argparse.Namespace) -> int:
     db_type = _resolve_db_type(ns.db, ns.db_type)
 
@@ -101,6 +205,13 @@ def _cmd_sync_local(ns: argparse.Namespace) -> int:
         since = _parse_since(ns.since)
 
     async def _handler(store):
+        if ns.blame_only:
+            await process_local_blame(
+                store=store,
+                repo_path=ns.repo_path,
+                since=since,
+            )
+            return
         await process_local_repo(
             store=store,
             repo_path=ns.repo_path,
@@ -121,33 +232,40 @@ def _cmd_sync_github(ns: argparse.Namespace) -> int:
 
     if ns.date is not None:
         since = _since_from_date_backfill(ns.date, ns.backfill)
+        max_commits = (
+            ns.max_commits_per_repo
+            if ns.max_commits_per_repo is not None
+            else None
+        )
     else:
         if int(ns.backfill) != 1:
             raise SystemExit("--backfill requires --date")
         since = None
+        max_commits = ns.max_commits_per_repo or 100
 
     async def _handler(store):
         if ns.search_pattern:
             org_name = ns.group
             user_name = ns.owner if not ns.group else None
-        await process_github_repos_batch(
-            store=store,
-            token=token,
-            org_name=org_name,
-            user_name=user_name,
-            pattern=ns.search_pattern,
-            batch_size=ns.batch_size,
-            max_concurrent=ns.max_concurrent,
-            rate_limit_delay=ns.rate_limit_delay,
-            max_commits_per_repo=ns.max_commits_per_repo,
-            max_repos=ns.max_repos,
-            use_async=ns.use_async,
-            sync_cicd=ns.sync_cicd,
-            sync_deployments=ns.sync_deployments,
-            sync_incidents=ns.sync_incidents,
-            since=since,
-        )
-        return
+            await process_github_repos_batch(
+                store=store,
+                token=token,
+                org_name=org_name,
+                user_name=user_name,
+                pattern=ns.search_pattern,
+                batch_size=ns.batch_size,
+                max_concurrent=ns.max_concurrent,
+                rate_limit_delay=ns.rate_limit_delay,
+                max_commits_per_repo=max_commits,
+                max_repos=ns.max_repos,
+                use_async=ns.use_async,
+                sync_cicd=ns.sync_cicd,
+                sync_deployments=ns.sync_deployments,
+                sync_incidents=ns.sync_incidents,
+                blame_only=ns.blame_only,
+                since=since,
+            )
+            return
 
         if not (ns.owner and ns.repo):
             raise SystemExit(
@@ -159,7 +277,8 @@ def _cmd_sync_github(ns: argparse.Namespace) -> int:
             ns.repo,
             token,
             fetch_blame=ns.fetch_blame,
-            max_commits=ns.max_commits_per_repo or 100,
+            blame_only=ns.blame_only,
+            max_commits=max_commits,
             sync_cicd=ns.sync_cicd,
             sync_deployments=ns.sync_deployments,
             sync_incidents=ns.sync_incidents,
@@ -179,10 +298,16 @@ def _cmd_sync_gitlab(ns: argparse.Namespace) -> int:
 
     if ns.date is not None:
         since = _since_from_date_backfill(ns.date, ns.backfill)
+        max_commits = (
+            ns.max_commits_per_repo
+            if ns.max_commits_per_repo is not None
+            else None
+        )
     else:
         if int(ns.backfill) != 1:
             raise SystemExit("--backfill requires --date")
         since = None
+        max_commits = ns.max_commits_per_repo or 100
 
     async def _handler(store):
         if ns.search_pattern:
@@ -195,12 +320,13 @@ def _cmd_sync_gitlab(ns: argparse.Namespace) -> int:
                 batch_size=ns.batch_size,
                 max_concurrent=ns.max_concurrent,
                 rate_limit_delay=ns.rate_limit_delay,
-                max_commits_per_project=ns.max_commits_per_repo,
+                max_commits_per_project=max_commits,
                 max_projects=ns.max_repos,
                 use_async=ns.use_async,
                 sync_cicd=ns.sync_cicd,
                 sync_deployments=ns.sync_deployments,
                 sync_incidents=ns.sync_incidents,
+                blame_only=ns.blame_only,
                 since=since,
             )
             return
@@ -215,7 +341,8 @@ def _cmd_sync_gitlab(ns: argparse.Namespace) -> int:
             token,
             ns.gitlab_url,
             fetch_blame=ns.fetch_blame,
-            max_commits=ns.max_commits_per_repo or 100,
+            blame_only=ns.blame_only,
+            max_commits=max_commits,
             sync_cicd=ns.sync_cicd,
             sync_deployments=ns.sync_deployments,
             sync_incidents=ns.sync_incidents,
@@ -400,7 +527,7 @@ def _cmd_grafana_up(_ns: argparse.Namespace) -> int:
         "docker",
         "compose",
         "-f",
-        str(REPO_ROOT / "grafana" / "docker-compose.yml"),
+        str(REPO_ROOT / "compose.yml"),
         "up",
         "-d",
     ]
@@ -412,7 +539,7 @@ def _cmd_grafana_down(_ns: argparse.Namespace) -> int:
         "docker",
         "compose",
         "-f",
-        str(REPO_ROOT / "grafana" / "docker-compose.yml"),
+        str(REPO_ROOT / "compose.yml"),
         "down",
     ]
     return subprocess.run(cmd, check=False).returncode
@@ -431,6 +558,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     # ---- sync ----
+    # TODO: add `cli.py sync <command> --provider` for unified provider routing.
+    # TODO: ship an installed binary (e.g. `dho sync ...`) instead of `python cli.py`.
     sync = sub.add_parser("sync", help="Sync git facts into a DB backend.")
     sync_sub = sync.add_subparsers(dest="source", required=True)
 
@@ -461,9 +590,28 @@ def build_parser() -> argparse.ArgumentParser:
         "--fetch-blame", action="store_true", help="Fetch blame data (slow)."
     )
     local.add_argument(
+        "--blame-only", action="store_true", help="Only sync blame data (skip commits/PRs)."
+    )
+    local.add_argument(
         "--max-commits-per-repo", type=int, help="Limit commits analyzed."
     )
     local.set_defaults(func=_cmd_sync_local)
+
+    teams = sync_sub.add_parser("teams", help="Sync teams from config/teams.yaml, Jira, or Synthetic.")
+    teams.add_argument("--db", required=True, help="Database connection string.")
+    teams.add_argument(
+        "--db-type",
+        choices=["postgres", "mongo", "sqlite", "clickhouse"],
+        help="Optional DB backend override.",
+    )
+    teams.add_argument(
+        "--provider",
+        choices=["config", "jira", "synthetic"],
+        default="config",
+        help="Source of team data (default: config).",
+    )
+    teams.add_argument("--path", help="Path to teams.yaml config (used if provider=config).")
+    teams.set_defaults(func=_cmd_sync_teams)
 
     gh = sync_sub.add_parser("github", help="Sync from GitHub (single repo or batch).")
     gh.add_argument("--db", required=True, help="Database connection string.")
@@ -483,6 +631,7 @@ def build_parser() -> argparse.ArgumentParser:
     gh.add_argument("--max-repos", type=int)
     gh.add_argument("--use-async", action="store_true")
     gh.add_argument("--fetch-blame", action="store_true")
+    gh.add_argument("--blame-only", action="store_true", help="Only sync blame data (skip commits/PRs).")
     gh.add_argument(
         "--sync-cicd",
         dest="sync_cicd",
@@ -544,6 +693,7 @@ def build_parser() -> argparse.ArgumentParser:
     gl.add_argument("--max-repos", type=int)
     gl.add_argument("--use-async", action="store_true")
     gl.add_argument("--fetch-blame", action="store_true")
+    gl.add_argument("--blame-only", action="store_true", help="Only sync blame data (skip commits/PRs).")
     gl.add_argument(
         "--sync-cicd",
         dest="sync_cicd",
@@ -801,9 +951,15 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
         await store.insert_deployments(deployments)
         await store.insert_incidents(incidents)
 
+        # 6. Blame Data (for Complexity)
+        blame_data = generator.generate_blame(commits)
+        if blame_data:
+            await store.insert_blame_data(blame_data)
+
         logging.info(f"Generated synthetic data for {ns.repo_name}")
         logging.info(f"- Repo ID: {repo.id}")
         logging.info(f"- Commits: {len(commits)}")
+        logging.info(f"- Blame lines: {len(blame_data)}")
         logging.info(f"- PRs: {len(prs)}")
         logging.info(f"- Reviews: {len(all_reviews)}")
         logging.info(f"- CI pipeline runs: {len(pipeline_runs)}")
@@ -934,15 +1090,20 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
                 transitions = generator.generate_work_item_transitions(work_items)
 
                 # Provide stable team IDs for dashboards without requiring config.
-                member_to_team = {}
-                for idx, (name, email) in enumerate(generator.authors):
-                    team_id = "alpha" if idx < 3 else "beta"
-                    team_name = "Alpha Team" if team_id == "alpha" else "Beta Team"
-                    member_to_team[str(email).strip().lower()] = (team_id, team_name)
-                    member_to_team[str(name).strip().lower()] = (team_id, team_name)
-                team_resolver = TeamResolver(member_to_team=member_to_team)
+                team_assignment = generator.get_team_assignment(count=8)
+                team_resolver = TeamResolver(member_to_team=team_assignment["member_map"])
 
                 computed_at = datetime.now(timezone.utc)
+
+                # Generate and write complexity metrics
+                if hasattr(sink, "write_file_complexity_snapshots"):
+                    comp_data = generator.generate_complexity_metrics(days=ns.days)
+                    if comp_data["snapshots"]:
+                        sink.write_file_complexity_snapshots(comp_data["snapshots"])
+                    if comp_data["dailies"]:
+                        sink.write_repo_complexity_daily(comp_data["dailies"])
+                    logging.info(f"- Complexity snapshots: {len(comp_data['snapshots'])}")
+
                 end_day = computed_at.date()
                 start_day = end_day - timedelta(days=max(1, int(ns.days)) - 1)
 
@@ -1040,7 +1201,7 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
 
                     # Enrich User Metrics with IC fields
                     # Convert TeamResolver map to simple identity->team_id map
-                    team_map = {k: v[0] for k, v in member_to_team.items()}
+                    team_map = {k: v[0] for k, v in team_assignment["member_map"].items()}
                     ic_metrics = compute_ic_metrics_daily(
                         git_metrics=repo_result.user_metrics,
                         wi_metrics=wi_user_rows,

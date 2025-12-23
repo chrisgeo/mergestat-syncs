@@ -49,7 +49,7 @@ def _fetch_github_repo_info_sync(connector, owner, repo_name):
 
 def _fetch_github_commits_sync(
     gh_repo,
-    max_commits,
+    max_commits: Optional[int],
     repo_id,
     since: Optional[datetime] = None,
 ):
@@ -62,7 +62,7 @@ def _fetch_github_commits_sync(
 
     for commit in commits_iter:
         raw_commits.append(commit)
-        if len(raw_commits) >= max_commits:
+        if max_commits is not None and len(raw_commits) >= max_commits:
             break
 
     commit_objects = []
@@ -605,6 +605,7 @@ async def _backfill_github_missing_data(
     repo_full_name: str,
     default_branch: str,
     max_commits: Optional[int],
+    blame_only: bool = False,
 ) -> None:
     # Logic matches the CLI sync orchestration.
     logging.info(
@@ -621,7 +622,7 @@ async def _backfill_github_missing_data(
         return
 
     needs_files = not await store.has_any_git_files(db_repo.id)
-    needs_commit_stats = not await store.has_any_git_commit_stats(db_repo.id)
+    needs_commit_stats = False if blame_only else not await store.has_any_git_commit_stats(db_repo.id)
     needs_blame = not await store.has_any_git_blame(db_repo.id)
 
     if not (needs_files or needs_commit_stats or needs_blame):
@@ -796,7 +797,8 @@ async def process_github_repo(
     repo_name: str,
     token: str,
     fetch_blame: bool = False,
-    max_commits: int = 100,
+    blame_only: bool = False,
+    max_commits: Optional[int] = None,
     sync_cicd: bool = True,
     sync_deployments: bool = True,
     sync_incidents: bool = True,
@@ -854,8 +856,28 @@ async def process_github_repo(
         await store.insert_repo(db_repo)
         logging.info(f"Repository stored: {db_repo.repo} ({db_repo.id})")
 
+        if blame_only:
+            await _backfill_github_missing_data(
+                store=store,
+                connector=connector,
+                db_repo=db_repo,
+                repo_full_name=db_repo.repo,
+                default_branch=repo_info.default_branch,
+                max_commits=max_commits,
+                blame_only=True,
+            )
+            logging.info(
+                "Completed blame-only sync for GitHub repository: %s/%s",
+                owner,
+                repo_name,
+            )
+            return
+
         # 2. Fetch Commits
-        logging.info(f"Fetching up to {max_commits} commits from GitHub...")
+        if max_commits is None:
+            logging.info("Fetching all commits from GitHub...")
+        else:
+            logging.info(f"Fetching up to {max_commits} commits from GitHub...")
         raw_commits, commit_objects = await loop.run_in_executor(
             None, _fetch_github_commits_sync, gh_repo, max_commits, db_repo.id, since
         )
@@ -866,7 +888,7 @@ async def process_github_repo(
 
         # 3. Fetch Stats
         logging.info("Fetching commit stats from GitHub...")
-        stats_limit = min(max_commits, 50)
+        stats_limit = 50 if max_commits is None else min(max_commits, 50)
         stats_objects = await loop.run_in_executor(
             None,
             _fetch_github_commit_stats_sync,
@@ -981,6 +1003,7 @@ async def process_github_repos_batch(
     sync_cicd: bool = True,
     sync_deployments: bool = True,
     sync_incidents: bool = True,
+    blame_only: bool = False,
     since: Optional[datetime] = None,
 ) -> None:
     """
@@ -1035,8 +1058,30 @@ async def process_github_repos_batch(
         stored_count += 1
         logging.debug(f"Stored repository ({stored_count}): {db_repo.repo}")
 
+        if blame_only:
+            try:
+                await _backfill_github_missing_data(
+                    store=store,
+                    connector=connector,
+                    db_repo=db_repo,
+                    repo_full_name=repo_info.full_name,
+                    default_branch=repo_info.default_branch,
+                    max_commits=max_commits_per_repo,
+                    blame_only=True,
+                )
+            except Exception as e:
+                logging.debug(
+                    "Blame-only backfill failed for GitHub repo %s: %s",
+                    repo_info.full_name,
+                    e,
+                )
+            return
+
         # Fetch commits and stats to populate git_commits/git_commit_stats.
-        commit_limit = max_commits_per_repo or 100
+        if max_commits_per_repo is None and since is None:
+            commit_limit = 100
+        else:
+            commit_limit = max_commits_per_repo
         try:
             gh_repo = connector.github.get_repo(repo_info.full_name)
             raw_commits, commit_objects = await loop.run_in_executor(
@@ -1055,7 +1100,7 @@ async def process_github_repos_batch(
                 _fetch_github_commit_stats_sync,
                 raw_commits,
                 db_repo.id,
-                min(commit_limit, 50),
+                50 if commit_limit is None else min(commit_limit, 50),
                 since,
             )
             if stats_objects:

@@ -35,7 +35,7 @@
         {
           "refId": "A",
           "rawQuery": true,
-          "rawSql": "SELECT source, target, sum(delivery_units) AS value FROM stats.v_investment_flow_edges WHERE team_id IN (${team_id:sqlstring}) AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY source, target ORDER BY value DESC"
+          "rawSql": "SELECT source, target, sum(delivery_units) AS value FROM stats.v_investment_flow_edges WHERE ifNull(nullIf(team_id, ''), 'unassigned') IN (${team_id:sqlstring}) AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY source, target ORDER BY value DESC"
         }
       ],
       "options": {
@@ -64,7 +64,7 @@
           "uid": "clickhouse"
         },
         "refresh": 1,
-        "query": "SELECT DISTINCT team_id AS __text, team_id AS __value FROM (SELECT team_id FROM stats.team_metrics_daily UNION ALL SELECT team_id FROM stats.investment_metrics_daily) ORDER BY team_id",
+        "query": "SELECT id AS __value, name AS __text FROM teams UNION ALL SELECT 'unassigned' AS __value, 'Unassigned' AS __text ORDER BY __text",
         "multi": true,
         "includeAll": true
       }

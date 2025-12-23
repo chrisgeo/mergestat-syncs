@@ -15,6 +15,7 @@ from models.git import (
     Incident,
 )
 from models.work_items import WorkItem, WorkItemStatusTransition, WorkItemType
+from models.teams import Team
 from metrics.schemas import (
     RepoMetricsDailyRecord,
     UserMetricsDailyRecord,
@@ -45,6 +46,17 @@ class SyntheticDataGenerator:
             ("Charlie Brown", "charlie@example.com"),
             ("David White", "david@example.com"),
             ("Eve Black", "eve@example.com"),
+            ("Frank Green", "frank@example.com"),
+            ("Grace Hall", "grace@example.com"),
+            ("Heidi Blue", "heidi@example.com"),
+            ("Ivan Red", "ivan@example.com"),
+            ("Judy Orange", "judy@example.com"),
+            ("Kevin Purple", "kevin@example.com"),
+            ("Liam Cyan", "liam@example.com"),
+            ("Mia Magenta", "mia@example.com"),
+            ("Noah Yellow", "noah@example.com"),
+            ("Olivia Gray", "olivia@example.com"),
+            ("Pat Lime", "pat@example.com"),
         ]
         self.files = [
             "src/main.py",
@@ -52,11 +64,90 @@ class SyntheticDataGenerator:
             "src/models.py",
             "src/api/routes.py",
             "src/api/auth.py",
+            "src/api/dependencies.py",
+            "src/api/health.py",
+            "src/api/errors.py",
+            "src/services/user_service.py",
+            "src/services/metrics_service.py",
+            "src/services/review_service.py",
+            "src/db/session.py",
+            "src/db/models/user.py",
+            "src/db/models/repo.py",
+            "src/db/models/work_item.py",
+            "src/workflows/ingest.py",
+            "src/workflows/compute.py",
+            "src/workflows/publish.py",
+            "src/utils/time.py",
+            "src/utils/metrics.py",
+            "src/utils/strings.py",
+            "src/config/settings.py",
+            "src/config/logging.py",
+            "src/clients/github.py",
+            "src/clients/gitlab.py",
+            "src/clients/jira.py",
             "tests/test_main.py",
+            "tests/test_api_routes.py",
+            "tests/test_metrics_daily.py",
+            "tests/test_hotspots.py",
+            "tests/test_blame_loader.py",
             "README.md",
+            "README_CONTRIBUTING.md",
+            "docs/architecture.md",
+            "docs/metrics.md",
+            "docs/workflows.md",
+            "docs/usage.md",
             "docker-compose.yml",
+            "Dockerfile",
             ".github/workflows/ci.yml",
+            ".github/workflows/release.yml",
         ]
+
+    def get_team_assignment(self, count: int = 2) -> Dict[str, Any]:
+        """
+        Returns a consistent assignment of authors to teams.
+        Output includes 'teams' (List[Team]) and 'member_map' (email -> (id, name)).
+        """
+        teams = []
+        member_map = {}
+        
+        # Ensure at least 1 author per team if possible, loop if more teams than authors
+        # For simplicity, just chunk authors.
+        chunk_size = max(1, len(self.authors) // count)
+        
+        for i in range(count):
+            start = i * chunk_size
+            # Last team gets the rest
+            end = (i + 1) * chunk_size if i < count - 1 else len(self.authors)
+            team_members = self.authors[start:end]
+            
+            # Stable IDs
+            if count == 2:
+                team_id = "alpha" if i == 0 else "beta"
+                team_name = "Alpha Team" if i == 0 else "Beta Team"
+            else:
+                team_id = f"team-{chr(97+i)}"
+                team_name = f"Team {chr(65+i)}"
+            
+            member_emails = [email for _, email in team_members]
+            
+            teams.append(Team(
+                id=team_id,
+                name=team_name,
+                description=f"Synthetic {team_name}",
+                members=member_emails
+            ))
+            
+            for name, email in team_members:
+                member_map[str(email).strip().lower()] = (team_id, team_name)
+                member_map[str(name).strip().lower()] = (team_id, team_name)
+                
+        return {"teams": teams, "member_map": member_map}
+
+    def generate_teams(self, count: int = 2) -> List[Team]:
+        """
+        Generate synthetic teams with members distributed among them.
+        """
+        return self.get_team_assignment(count)["teams"]
 
     def generate_repo(self) -> Repo:
         return Repo(
@@ -323,10 +414,109 @@ class SyntheticDataGenerator:
             )
         return reviews
 
+    def generate_complexity_metrics(
+        self, days: int = 30
+    ) -> Dict[str, List[Any]]:
+        from metrics.schemas import FileComplexitySnapshot, RepoComplexityDaily
+        
+        snapshots = []
+        dailies = []
+        end_date = datetime.now(timezone.utc)
+        
+        for i in range(days):
+            day = (end_date - timedelta(days=i)).date()
+            computed_at = datetime.now(timezone.utc)
+            
+            total_loc = 0
+            total_cc = 0
+            total_high = 0
+            total_very_high = 0
+            
+            for file_path in self.files:
+                # Synthetic complexity values
+                loc = random.randint(50, 500)
+                funcs = random.randint(5, 50)
+                cc_total = random.randint(funcs, funcs * 5)
+                cc_avg = cc_total / funcs
+                
+                high = 0
+                very_high = 0
+                if cc_avg > 10:
+                    high = random.randint(1, funcs // 3)
+                if cc_avg > 20:
+                    very_high = random.randint(0, high // 2)
+
+                snapshots.append(FileComplexitySnapshot(
+                    repo_id=self.repo_id,
+                    as_of_day=day,
+                    ref="HEAD",
+                    file_path=file_path,
+                    language="python",
+                    loc=loc,
+                    functions_count=funcs,
+                    cyclomatic_total=cc_total,
+                    cyclomatic_avg=cc_avg,
+                    high_complexity_functions=high,
+                    very_high_complexity_functions=very_high,
+                    computed_at=computed_at
+                ))
+                
+                total_loc += loc
+                total_cc += cc_total
+                total_high += high
+                total_very_high += very_high
+            
+            cc_per_kloc = (total_cc / (total_loc / 1000.0)) if total_loc > 0 else 0.0
+            
+            dailies.append(RepoComplexityDaily(
+                repo_id=self.repo_id,
+                day=day,
+                loc_total=total_loc,
+                cyclomatic_total=total_cc,
+                cyclomatic_per_kloc=cc_per_kloc,
+                high_complexity_functions=total_high,
+                very_high_complexity_functions=total_very_high,
+                computed_at=computed_at
+            ))
+            
+        return {"snapshots": snapshots, "dailies": dailies}
+
     def generate_files(self) -> List[GitFile]:
         return [
             GitFile(repo_id=self.repo_id, path=f, executable=False) for f in self.files
         ]
+
+    def generate_blame(
+        self, commits: List[GitCommit]
+    ) -> List[Any]: # using Any to avoid circular import issues if GitBlame isn't imported, but it is
+        # We need to import GitBlame inside the method or file level
+        from models.git import GitBlame
+        
+        blame_records = []
+        if not commits:
+            return blame_records
+
+        for file_path in self.files:
+            # Generate random file length
+            num_lines = random.randint(10, 200)
+            
+            for i in range(1, num_lines + 1):
+                # Pick a random commit that "modified" this line
+                commit = random.choice(commits)
+                
+                blame_records.append(
+                    GitBlame(
+                        repo_id=self.repo_id,
+                        path=file_path,
+                        line_no=i,
+                        author_email=commit.author_email,
+                        author_name=commit.author_name,
+                        author_when=commit.author_when,
+                        commit_hash=commit.hash,
+                        line=f"Line {i} content for {file_path}",
+                    )
+                )
+        return blame_records
 
     def generate_work_item_metrics(
         self, days: int = 30

@@ -25,9 +25,9 @@ def _resolve_team(
     team_resolver: Optional[TeamResolver], identity: Optional[str]
 ) -> Tuple[str, str]:
     if team_resolver is None:
-        return "", ""
+        return "unassigned", "Unassigned"
     team_id, team_name = team_resolver.resolve(identity)
-    return team_id or "", team_name or ""
+    return team_id or "unassigned", team_name or "Unassigned"
 
 
 def _segment_statuses(

@@ -609,3 +609,53 @@ async def process_local_repo(
     )
 
     logging.info("Local repository processing complete.")
+
+
+async def process_local_blame(
+    store: Any,
+    repo_path: str,
+    since: Optional[datetime] = None,
+) -> None:
+    """
+    Backfill git blame data without syncing commits or PRs.
+    """
+    repo_root = Path(repo_path).resolve()
+    logging.info("Processing local blame at %s", repo_root)
+    if not (repo_root / ".git").exists():
+        logging.error("No git repository found at %s", repo_root)
+        return
+
+    repo_name = repo_root.name
+    repo = Repo(repo_path=str(repo_root), repo=repo_name)
+    await store.insert_repo(repo)
+    logging.info("Repository stored: %s (%s)", repo.repo, repo.id)
+
+    from git import Repo as GitPythonRepo
+
+    repo_obj = GitPythonRepo(str(repo_root))
+    commits_iter = list(iter_commits_since(repo_obj, since))
+    files_for_blame = set(collect_changed_files(repo_root, commits_iter)) if commits_iter else set()
+
+    all_files_path = []
+    for root, _, files in os.walk(str(repo_root)):
+        root_path = Path(root)
+        if ".git" in root_path.parts:
+            continue
+        for file in files:
+            file_path = (root_path / file).resolve()
+            all_files_path.append(file_path)
+
+    if not files_for_blame:
+        files_for_blame_path = set(all_files_path)
+    else:
+        files_for_blame_path = {Path(p).resolve() for p in files_for_blame}
+
+    await process_files_and_blame(
+        repo,
+        all_files_path,
+        files_for_blame_path,
+        store,
+        str(repo_root),
+    )
+
+    logging.info("Local blame sync complete.")

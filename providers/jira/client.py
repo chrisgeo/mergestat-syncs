@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, Iterator, Optional
+from typing import Any, Dict, Iterable, Iterator, List, Optional
 
 from connectors.utils import retry_with_backoff
 from connectors.utils.rate_limit_queue import RateLimitConfig, RateLimitGate
@@ -208,6 +208,49 @@ class JiraClient:
             if (page or {}).get("isLast") is True:
                 logger.debug("Jira search complete (isLast=true); fetched=%d", fetched)
                 break
+
+    def get_all_projects(self) -> List[Dict[str, Any]]:
+        """
+        Fetch all visible projects from Jira.
+        Uses GET /rest/api/3/project/search for pagination.
+        """
+        projects = []
+        start_at = 0
+        max_results = 50 
+
+        while True:
+            params = {
+                "startAt": start_at,
+                "maxResults": max_results,
+                "expand": "description,lead"
+            }
+            # Note: project/search is the modern endpoint, but fallback to project if needed.
+            # We'll try project/search first.
+            try:
+                data = self._request_json(path="/rest/api/3/project/search", params=params)
+                page = data.get("values", [])
+            except Exception:
+                # Fallback to non-paginated (or differently paginated) /project endpoint
+                # which usually returns all projects if the list is small, or 
+                # strictly follows deprecated behavior. 
+                # Ideally, we stick to /search. If it fails, we might just re-raise.
+                logger.warning("Jira project/search failed, trying /project (may be unpaginated)")
+                return self._request_json(path="/rest/api/3/project", params={}) # type: ignore
+
+            if not page:
+                break
+            
+            projects.extend(page)
+            if data.get("isLast"):
+                break
+            
+            start_at += len(page)
+            # Safety break for massive instances if isLast isn't reliable
+            if len(page) < max_results:
+                break
+                
+        return projects
+
 
 
 def build_jira_jql(

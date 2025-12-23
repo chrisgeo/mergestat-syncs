@@ -93,6 +93,7 @@ def compute_file_risk_hotspots(
     day: date,
     window_stats: Sequence[CommitStatRow],
     complexity_map: Dict[str, FileComplexitySnapshot],
+    blame_map: Optional[Dict[str, float]] = None,
     computed_at: datetime,
 ) -> List[FileHotspotDaily]:
     """
@@ -100,8 +101,7 @@ def compute_file_risk_hotspots(
     
     risk_score = z(churn) + z(complexity)
     
-    (Blame concentration is placeholder for now as it's computationally expensive 
-    to derive accurately without full blame data loaded).
+    Blame concentration can be provided (e.g., derived from git blame data).
     """
     # 1. Aggregate churn per file
     churn_map: Dict[str, Dict[str, int]] = {}
@@ -168,6 +168,9 @@ def compute_file_risk_hotspots(
         risk = z_churn[i] + z_comp[i]
         
         comp_obj = d["comp_obj"]
+        blame_concentration = None
+        if blame_map:
+            blame_concentration = blame_map.get(d["path"])
         
         results.append(FileHotspotDaily(
             repo_id=repo_id,
@@ -177,7 +180,7 @@ def compute_file_risk_hotspots(
             churn_commits_30d=d["commits"],
             cyclomatic_total=comp_obj.cyclomatic_total if comp_obj else 0,
             cyclomatic_avg=comp_obj.cyclomatic_avg if comp_obj else 0.0,
-            blame_concentration=None,
+            blame_concentration=blame_concentration,
             risk_score=risk,
             computed_at=computed_at
         ))

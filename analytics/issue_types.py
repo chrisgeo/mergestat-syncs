@@ -23,7 +23,7 @@ class IssueTypeNormalizer:
         # Jira: direct mapping from raw_type
         if provider == "jira":
             mapping = self.mapping.get("jira", {})
-            return mapping.get(raw_type, "unknown")
+            return mapping.get(raw_type, "unassigned")
 
         # GitHub: infer from labels
         if provider == "github":
@@ -34,7 +34,7 @@ class IssueTypeNormalizer:
                 if norm:
                     return norm
             # Fallback or default
-            return "unknown"
+            return "unassigned"
 
         # GitLab: infer from labels (scoped or simple)
         if provider == "gitlab":
@@ -43,6 +43,6 @@ class IssueTypeNormalizer:
                 norm = mapping.get(label.lower())
                 if norm:
                     return norm
-            return "unknown"
+            return "unassigned"
 
-        return "unknown"
+        return "unassigned"

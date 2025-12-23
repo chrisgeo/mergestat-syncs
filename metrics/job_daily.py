@@ -622,6 +622,13 @@ def run_daily_metrics_job(
             )
             hotspot_repos: Set[uuid.UUID] = {r["repo_id"] for r in h_commit_rows}
             hotspot_repos |= set(complexity_by_repo.keys())
+            blame_by_repo = _load_blame_concentration(
+                backend=backend,
+                primary_sink=primary_sink,
+                repo_ids=hotspot_repos,
+                repo_id=repo_id,
+                repo_name=repo_name,
+            )
 
             for r_id in sorted(hotspot_repos, key=str):
                 risk_hotspots.extend(
@@ -630,6 +637,7 @@ def run_daily_metrics_job(
                         day=d,
                         window_stats=h_commit_rows,
                         complexity_map=complexity_by_repo.get(r_id) or {},
+                        blame_map=blame_by_repo.get(r_id) or {},
                         computed_at=computed_at,
                     )
                 )
@@ -643,12 +651,17 @@ def run_daily_metrics_job(
             def _get_team(wi) -> str:
                 # Use team resolver logic or fallback
                 # We can reuse the team_id from computed work_item_metrics if we had it mapped,
-                # but let's re-resolve quickly or use 'unknown'
+                # but let's re-resolve quickly or use 'unassigned'
                 if wi.assignees:
                     t_id, _ = team_resolver.resolve(wi.assignees[0])
                     if t_id:
                         return t_id
-                return "unknown"
+                return "unassigned"
+
+            def _normalize_investment_team_id(team_id: Optional[str]) -> Optional[str]:
+                if not team_id or team_id == "unassigned":
+                    return None
+                return team_id
 
             start_dt = _to_utc(start)
             end_dt = _to_utc(end)
@@ -758,7 +771,7 @@ def run_daily_metrics_job(
                     if item.completed_at:
                         completed = _to_utc(item.completed_at)
                         if start_dt <= completed < end_dt:
-                            team_id = _get_team(item)
+                            team_id = _normalize_investment_team_id(_get_team(item))
                             key = (r_id, team_id, cls.investment_area, cls.project_stream or "")
                             if key not in inv_metrics_map:
                                 inv_metrics_map[key] = {"units": 0, "completed": 0, "churn": 0, "cycles": []}
@@ -802,7 +815,7 @@ def run_daily_metrics_job(
                 # We need author team
                 author_email = c["author_email"] or ""
                 t_id, _ = team_resolver.resolve(author_email)
-                team_id = t_id if t_id else "unknown"
+                team_id = _normalize_investment_team_id(t_id)
                 
                 key = (r_id, team_id, cls.investment_area, cls.project_stream or "")
                 if key not in inv_metrics_map:
@@ -1151,6 +1164,39 @@ def _load_complexity_snapshots(
     return by_repo
 
 
+def _load_blame_concentration(
+    *,
+    backend: str,
+    primary_sink: Any,
+    repo_ids: Optional[Set[uuid.UUID]] = None,
+    repo_id: Optional[uuid.UUID] = None,
+    repo_name: Optional[str] = None,
+) -> Dict[uuid.UUID, Dict[str, float]]:
+    if repo_ids is not None and not repo_ids:
+        return {}
+
+    if backend == "clickhouse":
+        return _load_clickhouse_blame_concentration(
+            primary_sink.client,
+            repo_ids=repo_ids,
+            repo_id=repo_id,
+            repo_name=repo_name,
+        )
+    if backend in {"sqlite", "postgres"}:
+        return _load_sqlite_blame_concentration(
+            primary_sink.engine,
+            repo_ids=repo_ids,
+            repo_id=repo_id,
+            repo_name=repo_name,
+        )
+    return _load_mongo_blame_concentration(
+        primary_sink.db,
+        repo_ids=repo_ids,
+        repo_id=repo_id,
+        repo_name=repo_name,
+    )
+
+
 def _load_work_item_user_metrics_daily(
     *,
     db_url: str,
@@ -1295,6 +1341,54 @@ def _load_clickhouse_rows(
         })
 
     return commit_rows, pr_rows
+
+
+def _load_clickhouse_blame_concentration(
+    client: Any,
+    *,
+    repo_ids: Optional[Set[uuid.UUID]] = None,
+    repo_id: Optional[uuid.UUID] = None,
+    repo_name: Optional[str] = None,
+) -> Dict[uuid.UUID, Dict[str, float]]:
+    params: Dict[str, Any] = {}
+    where = ""
+    if repo_ids:
+        params["repo_ids"] = [str(r) for r in sorted(repo_ids, key=str)]
+        where = "WHERE repo_id IN {repo_ids:Array(UUID)}"
+    elif repo_id is not None:
+        params["repo_id"] = str(repo_id)
+        where = "WHERE repo_id = {repo_id:UUID}"
+    elif repo_name is not None:
+        params["repo_name"] = repo_name
+        where = "WHERE repo_id IN (SELECT id FROM repos WHERE repo = {repo_name:String})"
+
+    query = f"""
+    SELECT
+      repo_id,
+      file_path,
+      max(lines_by_author) / sum(lines_by_author) AS ownership_concentration
+    FROM (
+      SELECT
+        repo_id,
+        path AS file_path,
+        author_email,
+        count() AS lines_by_author
+      FROM git_blame
+      {where}
+      GROUP BY repo_id, path, author_email
+    )
+    GROUP BY repo_id, file_path
+    """
+    rows = _clickhouse_query_dicts(client, query, params)
+    by_repo: Dict[uuid.UUID, Dict[str, float]] = {}
+    for row in rows:
+        repo_uuid = _parse_uuid(row.get("repo_id"))
+        file_path = row.get("file_path")
+        value = row.get("ownership_concentration")
+        if repo_uuid is None or not file_path or value is None:
+            continue
+        by_repo.setdefault(repo_uuid, {})[str(file_path)] = float(value)
+    return by_repo
 
 
 def _chunked(values: Sequence[str], chunk_size: int) -> Iterable[List[str]]:
@@ -1444,6 +1538,67 @@ def _load_mongo_rows(
         })
 
     return commit_rows, pr_rows
+
+
+def _load_mongo_blame_concentration(
+    db: Any,
+    *,
+    repo_ids: Optional[Set[uuid.UUID]] = None,
+    repo_id: Optional[uuid.UUID] = None,
+    repo_name: Optional[str] = None,
+) -> Dict[uuid.UUID, Dict[str, float]]:
+    match: Dict[str, Any] = {}
+    if repo_ids:
+        match["repo_id"] = {"$in": [str(r) for r in sorted(repo_ids, key=str)]}
+    elif repo_id is not None:
+        match["repo_id"] = str(repo_id)
+    elif repo_name is not None:
+        repo_doc = db["repos"].find_one({"repo": repo_name}, {"id": 1, "_id": 1})
+        if not repo_doc:
+            return {}
+        match["repo_id"] = str(repo_doc.get("id") or repo_doc.get("_id"))
+
+    pipeline = []
+    if match:
+        pipeline.append({"$match": match})
+    pipeline.extend([
+        {
+            "$group": {
+                "_id": {"repo_id": "$repo_id", "path": "$path", "author": "$author_email"},
+                "lines_by_author": {"$sum": 1},
+            }
+        },
+        {
+            "$group": {
+                "_id": {"repo_id": "$_id.repo_id", "path": "$_id.path"},
+                "max_lines": {"$max": "$lines_by_author"},
+                "total_lines": {"$sum": "$lines_by_author"},
+            }
+        },
+        {
+            "$project": {
+                "repo_id": "$_id.repo_id",
+                "file_path": "$_id.path",
+                "ownership_concentration": {
+                    "$cond": [
+                        {"$gt": ["$total_lines", 0]},
+                        {"$divide": ["$max_lines", "$total_lines"]},
+                        None,
+                    ]
+                },
+            }
+        },
+    ])
+
+    by_repo: Dict[uuid.UUID, Dict[str, float]] = {}
+    for row in db["git_blame"].aggregate(pipeline):
+        repo_uuid = _parse_uuid(row.get("repo_id"))
+        file_path = row.get("file_path")
+        value = row.get("ownership_concentration")
+        if repo_uuid is None or not file_path or value is None:
+            continue
+        by_repo.setdefault(repo_uuid, {})[str(file_path)] = float(value)
+    return by_repo
 
 
 def _load_sqlite_rows(
@@ -1606,6 +1761,61 @@ def _load_sqlite_rows(
         return [], []
 
     return commit_rows, pr_rows
+
+
+def _load_sqlite_blame_concentration(
+    engine: Any,
+    *,
+    repo_ids: Optional[Set[uuid.UUID]] = None,
+    repo_id: Optional[uuid.UUID] = None,
+    repo_name: Optional[str] = None,
+) -> Dict[uuid.UUID, Dict[str, float]]:
+    from sqlalchemy import bindparam, text
+
+    where = ""
+    params: Dict[str, Any] = {}
+    bind = None
+    if repo_ids:
+        where = "WHERE repo_id IN :repo_ids"
+        params["repo_ids"] = [str(r) for r in sorted(repo_ids, key=str)]
+        bind = bindparam("repo_ids", expanding=True)
+    elif repo_id is not None:
+        where = "WHERE repo_id = :repo_id"
+        params["repo_id"] = str(repo_id)
+    elif repo_name is not None:
+        where = "WHERE repo_id IN (SELECT id FROM repos WHERE repo = :repo_name)"
+        params["repo_name"] = repo_name
+
+    query = text(f"""
+        SELECT
+          repo_id,
+          file_path,
+          max(lines_by_author) * 1.0 / sum(lines_by_author) AS ownership_concentration
+        FROM (
+          SELECT
+            repo_id,
+            path AS file_path,
+            author_email,
+            COUNT(*) AS lines_by_author
+          FROM git_blame
+          {where}
+          GROUP BY repo_id, path, author_email
+        ) AS author_lines
+        GROUP BY repo_id, file_path
+    """)
+    if bind is not None:
+        query = query.bindparams(bind)
+
+    by_repo: Dict[uuid.UUID, Dict[str, float]] = {}
+    with engine.connect() as conn:
+        for row in conn.execute(query, params).fetchall():
+            repo_uuid = _parse_uuid(row[0])
+            file_path = row[1]
+            value = row[2]
+            if repo_uuid is None or not file_path or value is None:
+                continue
+            by_repo.setdefault(repo_uuid, {})[str(file_path)] = float(value)
+    return by_repo
 
 
 def _load_clickhouse_reviews(

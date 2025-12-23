@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS investment_metrics_daily
 (
     repo_id Nullable(UUID),
     day Date,
-    team_id LowCardinality(String),
+    team_id LowCardinality(Nullable(String)),
     investment_area LowCardinality(String),
     project_stream LowCardinality(String),
     delivery_units UInt32,
@@ -86,7 +86,8 @@ CREATE TABLE IF NOT EXISTS investment_metrics_daily
 )
 ENGINE = MergeTree
 PARTITION BY toYYYYMM(day)
-ORDER BY (day, team_id, investment_area, project_stream);
+ORDER BY (day, team_id, investment_area, project_stream)
+SETTINGS allow_nullable_key = 1;
 
 -- 4.2 Issue type metrics
 CREATE TABLE IF NOT EXISTS issue_type_metrics_daily

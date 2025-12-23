@@ -7,9 +7,13 @@
 - **Calculate**: run `metrics daily` using stored facts (no provider calls by default).
 - **Planned**: allow `sync work-items` filtering by repo tags/settings.
 - **Dashboards**: Investment Areas uses regex `match(...)` filtering for the team variable in ClickHouse queries.
+- **Dashboards**: Team filters normalize `team_id` with `ifNull(nullIf(team_id, ''), 'unassigned')` to include legacy NULL/empty values.
+- **Investment metrics**: `investment_metrics_daily.team_id` stores NULL for unassigned; the investment flow view casts via `toNullable(team_id)`.
+- **Dashboards**: Hotspot Explorer queries should use table format and order by day to avoid Grafana time-sorting errors.
 - **Panels**: `grafana/plugins/dev-health-panels` provides Developer Landscape, Hotspot Explorer, and Investment Flow visualizations.
 - **Panel contracts**: ClickHouse views in `stats` back the Dev Health panel plugin queries.
 - **ClickHouse view syntax**: use `WITH ... AS` aliasing (avoid `WITH name = expr`).
+- **Backfill commits**: GitHub/GitLab `--date/--backfill` runs default to unlimited commits unless `--max-commits-per-repo` is set.
 
 ## LinearB — Flow & Team Efficiency
 
@@ -622,6 +626,15 @@ Team-level **Code Risk score** can be e.g. 80th percentile of hotspot scores in 
 risk_raw = P80(hotspot_score_file_for_team)
 risk_score = 100 - risk_raw
 ```
+
+Ownership concentration (for hotspot drivers) is derived from git blame data:
+
+```text
+ownership_concentration = max(lines_by_author) / total_lines
+```
+
+Synthetic fixtures include an expanded file set to improve blame-driven ownership coverage.
+Blame-only sync is available via `cli.py sync <local|github|gitlab> --blame-only`.
 
 #### 1.3.3 PR Size
 

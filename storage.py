@@ -33,6 +33,7 @@ from models.git import (
 if TYPE_CHECKING:
     from metrics.schemas import FileComplexitySnapshot
     from metrics.schemas import WorkItemUserMetricsDailyRecord
+    from models.teams import Team
 
 
 def _parse_date_value(value: Any) -> Optional[date]:
@@ -228,6 +229,7 @@ class SQLAlchemyStore:
 
     async def ensure_tables(self) -> None:
         from models.git import Base
+        import models.teams  # noqa: F401
 
         async with self.engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
@@ -910,6 +912,39 @@ class SQLAlchemyStore:
             ],
         )
 
+    async def insert_teams(self, teams: List["Team"]) -> None:
+        from models.teams import Team
+        if not teams:
+            return
+        
+        # Convert objects to dicts for upsert
+        rows: List[Dict[str, Any]] = []
+        for item in teams:
+            if isinstance(item, dict):
+                 rows.append(item)
+            else:
+                rows.append({
+                    "id": item.id,
+                    "team_uuid": item.team_uuid,
+                    "name": item.name,
+                    "description": item.description,
+                    "members": item.members,
+                    "updated_at": item.updated_at,
+                })
+        
+        await self._upsert_many(
+            Team,
+            rows,
+            conflict_columns=["id"],
+            update_columns=["team_uuid", "name", "description", "members", "updated_at"],
+        )
+
+    async def get_all_teams(self) -> List["Team"]:
+        from models.teams import Team
+        assert self.session is not None
+        result = await self.session.execute(select(Team))
+        return list(result.scalars().all())
+
 
 class MongoStore:
     """Async storage implementation backed by MongoDB (via Motor)."""
@@ -1296,6 +1331,31 @@ class MongoStore:
             incidents,
             lambda obj: f"{getattr(obj, 'repo_id')}:{getattr(obj, 'incident_id')}",
         )
+
+    async def insert_teams(self, teams: List["Team"]) -> None:
+        from models.teams import Team
+        await self._upsert_many(
+            "teams",
+            teams,
+            lambda obj: str(getattr(obj, "id")),
+        )
+
+    async def get_all_teams(self) -> List["Team"]:
+        from models.teams import Team
+        cursor = self.db["teams"].find({})
+        teams = []
+        async for doc in cursor:
+            teams.append(
+                Team(
+                    id=doc.get("id") or doc.get("_id"),
+                    team_uuid=uuid.UUID(str(doc.get("team_uuid"))) if doc.get("team_uuid") else None,
+                    name=doc.get("name"),
+                    description=doc.get("description"),
+                    members=doc.get("members", []),
+                    updated_at=_parse_datetime_value(doc.get("updated_at")),
+                )
+            )
+        return teams
 
     async def _upsert_many(
         self,
@@ -2116,3 +2176,59 @@ class ClickHouseStore:
             ],
             rows,
         )
+
+    async def insert_teams(self, teams: List["Team"]) -> None:
+        if not teams:
+            return
+        # Note: Imports inside method to avoid circular deps if models imports storage
+        from models.teams import Team
+        
+        synced_at = self._normalize_datetime(datetime.now(timezone.utc))
+        rows: List[Dict[str, Any]] = []
+        for item in teams:
+            if isinstance(item, dict):
+                rows.append({
+                    "id": item.get("id"),
+                    "name": item.get("name"),
+                    "description": item.get("description"),
+                    "members": item.get("members") or [],
+                    "updated_at": self._normalize_datetime(item.get("updated_at")),
+                    "_mergestat_synced_at": synced_at,
+                })
+            else:
+                rows.append({
+                    "id": getattr(item, "id"),
+                    "team_uuid": self._normalize_uuid(getattr(item, "team_uuid")),
+                    "name": getattr(item, "name"),
+                    "description": getattr(item, "description"),
+                    "members": getattr(item, "members", []) or [],
+                    "updated_at": self._normalize_datetime(getattr(item, "updated_at")),
+                    "_mergestat_synced_at": synced_at,
+                })
+        
+        await self._insert_rows(
+            "teams",
+            ["id", "team_uuid", "name", "description", "members", "updated_at", "_mergestat_synced_at"],
+            rows
+        )
+
+    async def get_all_teams(self) -> List["Team"]:
+        from models.teams import Team
+        assert self.client is not None
+        # Using FINAL to get the latest version of each team
+        query = "SELECT id, team_uuid, name, description, members, updated_at FROM teams FINAL"
+        async with self._lock:
+            result = await asyncio.to_thread(self.client.query, query)
+        
+        teams = []
+        if result.result_rows:
+            for row in result.result_rows:
+                teams.append(Team(
+                    id=row[0],
+                    team_uuid=row[1],
+                    name=row[2],
+                    description=row[3],
+                    members=row[4],
+                    updated_at=_parse_datetime_value(row[5])
+                ))
+        return teams
