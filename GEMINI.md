@@ -16,6 +16,7 @@ The project follows a pipeline-like architecture:
     - Dashboard team filters normalize `team_id` with `ifNull(nullIf(team_id, ''), 'unassigned')` to include legacy NULL/empty values.
     - Investment metrics store NULL team_id for unassigned; the investment flow view casts with `toNullable(team_id)`.
     - Hotspot Explorer queries should use table format and order by day to satisfy Grafana time sorting.
+    - Hotspot Explorer panel selects the facts frame by requiring `churn_loc_30d` to avoid binding to the sparkline frame.
     - Hotspot ownership concentration uses `git_blame` max-lines share per file.
     - Synthetic fixtures cover a broader file set to improve blame/ownership coverage.
     - Blame-only sync is available via `cli.py sync <local|github|gitlab> --blame-only`.

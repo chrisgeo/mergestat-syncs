@@ -19,6 +19,7 @@ Purpose: compact, actionable rules for an AI coding agent (Copilot-like) working
 - Investment metrics store NULL team_id for unassigned; the investment flow view casts with toNullable(team_id).
 - Grafana panel plugin lives in `grafana/plugins/dev-health-panels` with Developer Landscape, Hotspot Explorer, and Investment Flow panels.
 - Hotspot Explorer queries should use table format and order by day to avoid Grafana time-sorting errors.
+- Hotspot Explorer panel selects the facts frame by requiring `churn_loc_30d` so trend/driver rendering doesn't grab the sparkline frame.
 - Hotspot ownership concentration is derived from `git_blame` as max-lines share per file.
 - Synthetic fixtures now cover a broader file set to improve blame/ownership coverage.
 - Blame can be synced without full repo processing via `cli.py sync <local|github|gitlab> --blame-only`.

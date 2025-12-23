@@ -10,6 +10,7 @@
 - **Dashboards**: Team filters normalize `team_id` with `ifNull(nullIf(team_id, ''), 'unassigned')` to include legacy NULL/empty values.
 - **Investment metrics**: `investment_metrics_daily.team_id` stores NULL for unassigned; the investment flow view casts via `toNullable(team_id)`.
 - **Dashboards**: Hotspot Explorer queries should use table format and order by day to avoid Grafana time-sorting errors.
+- **Dashboards**: Hotspot Explorer binds the facts frame using `churn_loc_30d` to prevent sparkline frames from masking drivers.
 - **Panels**: `grafana/plugins/dev-health-panels` provides Developer Landscape, Hotspot Explorer, and Investment Flow visualizations.
 - **Panel contracts**: ClickHouse views in `stats` back the Dev Health panel plugin queries.
 - **ClickHouse view syntax**: use `WITH ... AS` aliasing (avoid `WITH name = expr`).

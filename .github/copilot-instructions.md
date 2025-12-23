@@ -119,6 +119,7 @@ pytest tests/test_github_connector.py -q
 
 - `processors/github.py` uses a `CONNECTORS_AVAILABLE` flag to fall back when `connectors` are not installed — tests and local runs may toggle this. If you add a new connector, ensure tests import hooks or mocks account for this flag.
 - `processors/local.py` composes the local pipeline: `process_git_commits`, `process_local_pull_requests`, `process_git_commit_stats`, then `process_files_and_blame`. Keep that ordering for correctness when changing flow.
+- Hotspot Explorer binds the facts frame using `churn_loc_30d` to avoid selecting the sparkline query for drivers/trends.
 
 **Key files to inspect for common tasks**
 
