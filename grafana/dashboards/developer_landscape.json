@@ -7,7 +7,7 @@
   ],
   "timezone": "utc",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 4,
   "refresh": "5m",
   "annotations": {
     "list": []
@@ -20,8 +20,8 @@
   "panels": [
     {
       "id": 1,
-      "title": "Churn (Loc Touched) vs Throughput (Delivery Units)",
-      "type": "xychart",
+      "title": "Churn vs Throughput",
+      "type": "devhealth-dev-health-panels-panel",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "clickhouse"
@@ -34,49 +34,25 @@
       },
       "targets": [
         {
+          "format": 1,
           "rawQuery": true,
-          "rawSql": "SELECT (x_norm - 0.5) AS x_centered, (y_norm - 0.5) AS y_centered, identity_id AS name, team_id FROM stats.ic_landscape_rolling_30d WHERE map_name = 'churn_throughput' AND as_of_day = toDate(toDateTime(intDiv($__to, 1000))) AND match(ifNull(nullIf(team_id, ''), 'unassigned'), '${team_id:regex}') ORDER BY delivery_units_30d DESC",
+          "rawSql": "SELECT max(v.as_of_day) as as_of_day, map_name, team_id, identity_id, argMax(x_raw, v.as_of_day) as x_raw, argMax(y_raw, v.as_of_day) as y_raw, argMax(x_norm, v.as_of_day) as x_norm, argMax(y_norm, v.as_of_day) as y_norm FROM stats.v_ic_landscape_points AS v WHERE map_name = 'churn_throughput' AND v.as_of_day >= toDate(toDateTime(intDiv($__from, 1000))) AND v.as_of_day < toDate(toDateTime(intDiv($__to, 1000))) AND team_id IN (${team_id:sqlstring}) GROUP BY map_name, team_id, identity_id ORDER BY team_id, identity_id",
           "refId": "A"
         }
       ],
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "showPoints": "auto",
-            "pointSize": {
-              "fixed": 5
-            },
-            "lineWidth": 0
-          }
-        },
-        "overrides": []
-      },
       "options": {
-        "seriesMapping": "auto",
-        "xField": "x_centered",
-        "yField": "y_centered",
-        "seriesField": "name",
-        "xMin": -0.5,
-        "xMax": 0.5,
-        "yMin": -0.5,
-        "yMax": 0.5,
-        "xAxis": {
-          "centeredZero": true,
-          "label": "Churn (normalized)"
-        },
-        "yAxis": {
-          "centeredZero": true,
-          "label": "Throughput (normalized)"
+        "mode": "developerLandscape",
+        "developerLandscape": {
+          "mapName": "churn_throughput",
+          "showLabels": true,
+          "colorByTeam": true
         }
       }
     },
     {
       "id": 2,
       "title": "Cycle Time vs Throughput",
-      "type": "xychart",
+      "type": "devhealth-dev-health-panels-panel",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "clickhouse"
@@ -89,34 +65,25 @@
       },
       "targets": [
         {
+          "format": 1,
           "rawQuery": true,
-          "rawSql": "SELECT (x_norm - 0.5) AS x_centered, (y_norm - 0.5) AS y_centered, identity_id AS name, team_id FROM stats.ic_landscape_rolling_30d WHERE map_name = 'cycle_throughput' AND as_of_day = toDate(toDateTime(intDiv($__to, 1000))) AND match(ifNull(nullIf(team_id, ''), 'unassigned'), '${team_id:regex}')",
+          "rawSql": "SELECT max(v.as_of_day) as as_of_day, map_name, team_id, identity_id, argMax(x_raw, v.as_of_day) as x_raw, argMax(y_raw, v.as_of_day) as y_raw, argMax(x_norm, v.as_of_day) as x_norm, argMax(y_norm, v.as_of_day) as y_norm FROM stats.v_ic_landscape_points AS v WHERE map_name = 'cycle_throughput' AND v.as_of_day >= toDate(toDateTime(intDiv($__from, 1000))) AND v.as_of_day < toDate(toDateTime(intDiv($__to, 1000))) AND team_id IN (${team_id:sqlstring}) GROUP BY map_name, team_id, identity_id ORDER BY team_id, identity_id",
           "refId": "A"
         }
       ],
       "options": {
-        "seriesMapping": "auto",
-        "xField": "x_centered",
-        "yField": "y_centered",
-        "seriesField": "name",
-        "xMin": -0.5,
-        "xMax": 0.5,
-        "yMin": -0.5,
-        "yMax": 0.5,
-        "xAxis": {
-          "centeredZero": true,
-          "label": "Cycle Time (normalized)"
-        },
-        "yAxis": {
-          "centeredZero": true,
-          "label": "Throughput (normalized)"
+        "mode": "developerLandscape",
+        "developerLandscape": {
+          "mapName": "cycle_throughput",
+          "showLabels": true,
+          "colorByTeam": true
         }
       }
     },
     {
       "id": 3,
       "title": "WIP vs Throughput",
-      "type": "xychart",
+      "type": "devhealth-dev-health-panels-panel",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "clickhouse"
@@ -129,27 +96,18 @@
       },
       "targets": [
         {
+          "format": 1,
           "rawQuery": true,
-          "rawSql": "SELECT (x_norm - 0.5) AS x_centered, (y_norm - 0.5) AS y_centered, identity_id AS name, team_id FROM stats.ic_landscape_rolling_30d WHERE map_name = 'wip_throughput' AND as_of_day = toDate(toDateTime(intDiv($__to, 1000))) AND match(ifNull(nullIf(team_id, ''), 'unassigned'), '${team_id:regex}')",
+          "rawSql": "SELECT max(v.as_of_day) as as_of_day, map_name, team_id, identity_id, argMax(x_raw, v.as_of_day) as x_raw, argMax(y_raw, v.as_of_day) as y_raw, argMax(x_norm, v.as_of_day) as x_norm, argMax(y_norm, v.as_of_day) as y_norm FROM stats.v_ic_landscape_points AS v WHERE map_name = 'wip_throughput' AND v.as_of_day >= toDate(toDateTime(intDiv($__from, 1000))) AND v.as_of_day < toDate(toDateTime(intDiv($__to, 1000))) AND team_id IN (${team_id:sqlstring}) GROUP BY map_name, team_id, identity_id ORDER BY team_id, identity_id",
           "refId": "A"
         }
       ],
       "options": {
-        "seriesMapping": "auto",
-        "xField": "x_centered",
-        "yField": "y_centered",
-        "seriesField": "name",
-        "xMin": -0.5,
-        "xMax": 0.5,
-        "yMin": -0.5,
-        "yMax": 0.5,
-        "xAxis": {
-          "centeredZero": true,
-          "label": "WIP (normalized)"
-        },
-        "yAxis": {
-          "centeredZero": true,
-          "label": "Throughput (normalized)"
+        "mode": "developerLandscape",
+        "developerLandscape": {
+          "mapName": "wip_throughput",
+          "showLabels": true,
+          "colorByTeam": true
         }
       }
     }
@@ -165,10 +123,9 @@
           "uid": "clickhouse"
         },
         "refresh": 1,
-        "query": "SELECT DISTINCT ifNull(nullIf(team_id, ''), 'unassigned') AS __text, ifNull(nullIf(team_id, ''), 'unassigned') AS __value FROM stats.ic_landscape_rolling_30d ORDER BY __value",
+        "query": "SELECT DISTINCT team_id AS __text, team_id AS __value FROM team_metrics_daily ORDER BY team_id",
         "multi": true,
-        "includeAll": true,
-        "allValue": ".*"
+        "includeAll": true
       }
     ]
   },

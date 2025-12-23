@@ -18,151 +18,36 @@
   "links": [],
   "panels": [
     {
+      "id": 1,
+      "title": "Investment Flow",
+      "type": "devhealth-dev-health-panels-panel",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "clickhouse"
       },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "normal"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
       "gridPos": {
-        "h": 9,
+        "h": 20,
         "w": 24,
         "x": 0,
         "y": 0
       },
-      "id": 2,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
       "targets": [
         {
           "refId": "A",
-          "datasource": {
-            "type": "grafana-clickhouse-datasource",
-            "uid": "clickhouse"
-          },
           "rawQuery": true,
-          "rawSql": "SELECT day AS time, investment_area AS metric, sum(delivery_units) AS value FROM investment_metrics_daily WHERE match(ifNull(nullIf(team_id, ''), 'unassigned'), '${team_id:regex}') AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY time, metric ORDER BY time"
+          "rawSql": "SELECT investment_area AS source, project_stream AS target, sum(delivery_units) AS value FROM stats.v_investment_flow_edges WHERE team_id IN (${team_id:sqlstring}) AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY source, target HAVING value > 0 ORDER BY value DESC"
         }
       ],
-      "title": "Delivery Units by Investment Area",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "grafana-clickhouse-datasource",
-        "uid": "clickhouse"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            }
-          },
-          "mappings": []
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 9
-      },
-      "id": 4,
       "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "pieType": "pie",
-        "reduceOptions": {
-          "calcs": [
-            "sum"
-          ],
-          "fields": "",
-          "values": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
+        "mode": "investmentFlow",
+        "investmentFlow": {
+          "timeWindowDays": 30,
+          "valueField": "value",
+          "sourceField": "source",
+          "targetField": "project_stream",
+          "dayField": "day"
         }
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "grafana-clickhouse-datasource",
-            "uid": "clickhouse"
-          },
-          "rawQuery": true,
-          "rawSql": "SELECT investment_area, sum(delivery_units) AS units FROM investment_metrics_daily WHERE match(ifNull(nullIf(team_id, ''), 'unassigned'), '${team_id:regex}') AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY investment_area ORDER BY units DESC"
-        }
-      ],
-      "title": "Investment Mix (Total Period)",
-      "type": "piechart"
+      }
     }
   ],
   "schemaVersion": 39,
@@ -179,10 +64,9 @@
           "uid": "clickhouse"
         },
         "refresh": 1,
-        "query": "SELECT DISTINCT ifNull(nullIf(team_id, ''), 'unassigned') AS __text, ifNull(nullIf(team_id, ''), 'unassigned') AS __value FROM investment_metrics_daily ORDER BY __value",
+        "query": "SELECT DISTINCT team_id AS __text, team_id AS __value FROM team_metrics_daily ORDER BY team_id",
         "multi": true,
-        "includeAll": true,
-        "allValue": ".*"
+        "includeAll": true
       }
     ]
   },
@@ -194,6 +78,6 @@
   "timezone": "utc",
   "title": "Investment Areas",
   "uid": "investment_areas",
-  "version": 1,
+  "version": 3,
   "weekStart": ""
 }
