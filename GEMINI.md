@@ -13,6 +13,8 @@ The project follows a pipeline-like architecture:
 4.  **Metrics (`metrics/`)**: Compute high-level metrics (e.g., throughput, cycle time, rework, bus factor, predictability) from the stored data.
 5.  **Visualization (`grafana/`)**: Provision Grafana dashboards to visualize the computed metrics.
     - Investment Areas dashboard filters teams via `match(..., '${team_id:regex}')`.
+    - Dashboard team filters normalize `team_id` with `ifNull(nullIf(team_id, ''), 'unassigned')` to include legacy NULL/empty values.
+    - Investment metrics store NULL team_id for unassigned; the investment flow view casts with `toNullable(team_id)`.
 
 ## Key Technologies
 - **Language**: Python 3.10+

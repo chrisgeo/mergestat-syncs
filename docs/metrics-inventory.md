@@ -3,6 +3,8 @@
 This inventory tracks the implementation status of all metrics defined in the `dev-health-ops` project.
 Work item metrics assume provider data has been synced via `python cli.py sync work-items ...` (use `-s` to filter repos; `--auth` to override GitHub/GitLab tokens when needed; tags/settings filtering planned).
 Grafana Investment Areas dashboard filters team IDs with regex `match(...)` in ClickHouse queries.
+Dashboard team filters normalize `team_id` with `ifNull(nullIf(team_id, ''), 'unassigned')` to include legacy NULL/empty values.
+Investment metrics store NULL team IDs for unassigned; the investment flow view casts via `toNullable(team_id)`.
 Grafana panel plugin `grafana/plugins/dev-health-panels` visualizes landscape, hotspots, and investment flow metrics from ClickHouse query results, using `stats.v_ic_landscape_points`, `stats.v_file_hotspots_windowed`, and `stats.v_investment_flow_edges`.
 ClickHouse view definitions use `WITH ... AS` aliasing (avoid `WITH name = expr` syntax).
 

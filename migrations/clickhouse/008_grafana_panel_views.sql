@@ -48,7 +48,7 @@ GROUP BY
 CREATE OR REPLACE VIEW stats.v_investment_flow_edges AS
 SELECT
     day,
-    team_id,
+    toNullable(team_id) AS team_id,
     investment_area AS source,
     project_stream AS target,
     delivery_units,

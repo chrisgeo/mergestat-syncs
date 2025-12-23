@@ -22,6 +22,8 @@ This file orients AI coding agents to the dev-health-ops repository: key archite
 - `utils.py` holds shared helpers (parsing, git iteration, file filtering).
 - `fixtures/` generates synthetic data for testing.
 - Investment Areas dashboard uses regex team filters in ClickHouse queries.
+- Dashboard team filters normalize `team_id` with `ifNull(nullIf(team_id, ''), 'unassigned')` to include legacy NULL/empty values.
+- Investment metrics store NULL team_id for unassigned; the investment flow view casts with `toNullable(team_id)`.
 - Grafana panel plugin lives in `grafana/plugins/dev-health-panels` (Developer Landscape, Hotspot Explorer, Investment Flow) and reads from `stats` ClickHouse views.
 - ClickHouse view definitions use `WITH ... AS` aliasing (avoid `WITH name = expr` syntax).
 

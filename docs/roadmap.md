@@ -21,6 +21,8 @@ This checklist tracks what is complete and what remains to finalize `dev-health-
 - [x] **IC Metrics + Landscape**: Identity resolution, unified UserMetricsDailyRecord, and landscape rolling stats (Churn/Cycle/WIP vs Throughput).
 - [x] **Grafana Dev Health Panels**: Panel plugin with Developer Landscape, Hotspot Explorer, and Investment Flow views.
 - [x] **Grafana Panel ClickHouse Contracts**: Stats schema views for landscape, hotspot, and investment flow panels (use `WITH ... AS` aliasing).
+- [x] **Dashboard team filter normalization**: Include legacy NULL/empty team IDs in Grafana ClickHouse queries via `ifNull(nullIf(team_id, ''), 'unassigned')`.
+- [x] **Investment metrics NULL team IDs**: `investment_metrics_daily.team_id` stores NULL for unassigned; investment flow view casts via `toNullable(team_id)`.
 
 ## Remaining
 

@@ -282,6 +282,11 @@ def run_work_items_sync_job(
                         return t_id
                 return "unassigned"
 
+            def _normalize_investment_team_id(team_id: Optional[str]) -> Optional[str]:
+                if not team_id or team_id == "unassigned":
+                    return None
+                return team_id
+
             start_dt = _to_utc(datetime.combine(d, time.min, tzinfo=timezone.utc))
             end_dt = start_dt + timedelta(days=1)
             for item in work_items:
@@ -383,7 +388,7 @@ def run_work_items_sync_job(
                     completed = _to_utc(item.completed_at)
                     if not (start_dt <= completed < end_dt):
                         continue
-                    team_id = _get_team(item)
+                    team_id = _normalize_investment_team_id(_get_team(item))
                     key = (r_id, team_id, cls.investment_area, cls.project_stream or "")
                     if key not in inv_metrics_map:
                         inv_metrics_map[key] = {

@@ -35,7 +35,7 @@
         {
           "refId": "A",
           "rawQuery": true,
-          "rawSql": "SELECT source, target, sum(delivery_units) AS value FROM stats.v_investment_flow_edges WHERE team_id IN (${team_id:sqlstring}) AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY source, target ORDER BY value DESC"
+          "rawSql": "SELECT source, target, sum(delivery_units) AS value FROM stats.v_investment_flow_edges WHERE ifNull(nullIf(team_id, ''), 'unassigned') IN (${team_id:sqlstring}) AND day >= toDate(toDateTime(intDiv($__from, 1000))) AND day < toDate(toDateTime(intDiv($__to, 1000))) GROUP BY source, target ORDER BY value DESC"
         }
       ],
       "options": {

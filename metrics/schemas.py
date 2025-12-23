@@ -414,7 +414,7 @@ class InvestmentClassificationRecord:
 class InvestmentMetricsRecord:
     repo_id: Optional[uuid.UUID]
     day: date
-    team_id: str
+    team_id: Optional[str]
     investment_area: str
     project_stream: Optional[str]
     delivery_units: int

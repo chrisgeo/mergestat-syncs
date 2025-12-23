@@ -650,6 +650,11 @@ def run_daily_metrics_job(
                         return t_id
                 return "unassigned"
 
+            def _normalize_investment_team_id(team_id: Optional[str]) -> Optional[str]:
+                if not team_id or team_id == "unassigned":
+                    return None
+                return team_id
+
             start_dt = _to_utc(start)
             end_dt = _to_utc(end)
 
@@ -758,7 +763,7 @@ def run_daily_metrics_job(
                     if item.completed_at:
                         completed = _to_utc(item.completed_at)
                         if start_dt <= completed < end_dt:
-                            team_id = _get_team(item)
+                            team_id = _normalize_investment_team_id(_get_team(item))
                             key = (r_id, team_id, cls.investment_area, cls.project_stream or "")
                             if key not in inv_metrics_map:
                                 inv_metrics_map[key] = {"units": 0, "completed": 0, "churn": 0, "cycles": []}
@@ -802,7 +807,7 @@ def run_daily_metrics_job(
                 # We need author team
                 author_email = c["author_email"] or ""
                 t_id, _ = team_resolver.resolve(author_email)
-                team_id = t_id if t_id else "unassigned"
+                team_id = _normalize_investment_team_id(t_id)
                 
                 key = (r_id, team_id, cls.investment_area, cls.project_stream or "")
                 if key not in inv_metrics_map:

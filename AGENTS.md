@@ -15,6 +15,8 @@ Purpose: compact, actionable rules for an AI coding agent (Copilot-like) working
 - Work item sync is separate (`sync work-items`); `metrics daily` expects work items already stored unless explicitly asked to fetch providers.
 - Planned: repo filtering for `sync work-items` by tags/settings (beyond name glob).
 - Grafana Investment Areas dashboard uses regex team filters in ClickHouse queries.
+- Grafana dashboards normalize team filters with ifNull(nullIf(team_id, ''), 'unassigned') to include legacy NULL/empty values.
+- Investment metrics store NULL team_id for unassigned; the investment flow view casts with toNullable(team_id).
 - Grafana panel plugin lives in `grafana/plugins/dev-health-panels` with Developer Landscape, Hotspot Explorer, and Investment Flow panels.
 - Grafana panel plugin ClickHouse contracts live in views `stats.v_ic_landscape_points`, `stats.v_file_hotspots_windowed`, and `stats.v_investment_flow_edges`.
 - ClickHouse view definitions use `WITH ... AS` aliasing (avoid `WITH name = expr` syntax).
