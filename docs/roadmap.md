@@ -28,6 +28,7 @@ This checklist tracks what is complete and what remains to finalize `dev-health-
 - [x] **Synthetic blame coverage**: Expand fixture file set to improve hotspot ownership coverage.
 - [x] **Blame-only sync**: Add `cli.py sync <local|github|gitlab> --blame-only` for targeted blame backfill.
 - [x] **Backfill commit caps**: GitHub/GitLab `--date/--backfill` runs default to unlimited commits unless explicitly capped.
+- [x] **Hotspot Explorer frame binding**: Prefer facts frames via `churn_loc_30d` to keep drivers/trends rendering.
 
 ## Remaining
 

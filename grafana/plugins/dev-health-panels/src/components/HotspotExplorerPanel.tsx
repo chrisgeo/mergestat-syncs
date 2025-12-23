@@ -124,7 +124,7 @@ const DonutGlyph: React.FC<{ slices: Array<{ label: string; value: number }> }> 
 };
 
 export const HotspotExplorerPanel: React.FC<Props> = ({ data, options }) => {
-  const tableFrame = getFrameWithFields(data.series, ['file_path']);
+  const tableFrame = getFrameWithFields(data.series, ['file_path', 'churn_loc_30d']);
   const hotspotOptions = options.hotspotExplorer ?? { defaultSortByRisk: true };
 
   const [sortKey, setSortKey] = useState<'file_path' | 'risk_score'>(
