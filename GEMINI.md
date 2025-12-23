@@ -15,7 +15,7 @@ The project follows a pipeline-like architecture:
     - Investment Areas dashboard filters teams via `match(..., '${team_id:regex}')`.
     - Dashboard team filters normalize `team_id` with `ifNull(nullIf(team_id, ''), 'unassigned')` to include legacy NULL/empty values.
     - Investment metrics store NULL team_id for unassigned; the investment flow view casts with `toNullable(team_id)`.
-    - Hotspot Explorer time-series queries should order by day to satisfy Grafana time sorting.
+    - Hotspot Explorer queries should use table format and order by day to satisfy Grafana time sorting.
 
 ## Key Technologies
 - **Language**: Python 3.10+

@@ -18,7 +18,7 @@ Purpose: compact, actionable rules for an AI coding agent (Copilot-like) working
 - Grafana dashboards normalize team filters with ifNull(nullIf(team_id, ''), 'unassigned') to include legacy NULL/empty values.
 - Investment metrics store NULL team_id for unassigned; the investment flow view casts with toNullable(team_id).
 - Grafana panel plugin lives in `grafana/plugins/dev-health-panels` with Developer Landscape, Hotspot Explorer, and Investment Flow panels.
-- Hotspot Explorer time-series queries should order by day to keep Grafana time sorting valid.
+- Hotspot Explorer queries should use table format and order by day to avoid Grafana time-sorting errors.
 - Grafana panel plugin ClickHouse contracts live in views `stats.v_ic_landscape_points`, `stats.v_file_hotspots_windowed`, and `stats.v_investment_flow_edges`.
 - ClickHouse view definitions use `WITH ... AS` aliasing (avoid `WITH name = expr` syntax).
 - Fixtures in `fixtures/` generate synthetic data for testing/demos.
