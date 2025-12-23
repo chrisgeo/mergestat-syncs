@@ -280,7 +280,7 @@ def run_work_items_sync_job(
                     t_id, _ = team_resolver.resolve(wi.assignees[0])
                     if t_id:
                         return t_id
-                return "unknown"
+                return "unassigned"
 
             start_dt = _to_utc(datetime.combine(d, time.min, tzinfo=timezone.utc))
             end_dt = start_dt + timedelta(days=1)

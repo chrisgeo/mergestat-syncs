@@ -643,12 +643,12 @@ def run_daily_metrics_job(
             def _get_team(wi) -> str:
                 # Use team resolver logic or fallback
                 # We can reuse the team_id from computed work_item_metrics if we had it mapped,
-                # but let's re-resolve quickly or use 'unknown'
+                # but let's re-resolve quickly or use 'unassigned'
                 if wi.assignees:
                     t_id, _ = team_resolver.resolve(wi.assignees[0])
                     if t_id:
                         return t_id
-                return "unknown"
+                return "unassigned"
 
             start_dt = _to_utc(start)
             end_dt = _to_utc(end)
@@ -802,7 +802,7 @@ def run_daily_metrics_job(
                 # We need author team
                 author_email = c["author_email"] or ""
                 t_id, _ = team_resolver.resolve(author_email)
-                team_id = t_id if t_id else "unknown"
+                team_id = t_id if t_id else "unassigned"
                 
                 key = (r_id, team_id, cls.investment_area, cls.project_stream or "")
                 if key not in inv_metrics_map:

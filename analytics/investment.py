@@ -43,17 +43,17 @@ class InvestmentClassifier:
             
             if self._matches(match, artifact):
                 return InvestmentClassification(
-                    investment_area=output.get("investment_area", "unknown"),
+                    investment_area=output.get("investment_area", "unassigned"),
                     project_stream=output.get("project_stream"),
                     confidence=1.0,
-                    rule_id=rule.get("id", "unknown")
+                    rule_id=rule.get("id", "unassigned")
                 )
         
         return InvestmentClassification(
-            investment_area="unknown",
+            investment_area="unassigned",
             project_stream=None,
             confidence=0.0,
-            rule_id="default"
+            rule_id="unassigned"
         )
 
     def _matches(self, match_criteria: Dict, artifact: Dict) -> bool:

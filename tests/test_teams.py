@@ -97,7 +97,7 @@ async def test_clickhouse_store_teams():
         # Mock get_all_teams
         mock_result = MagicMock()
         mock_result.result_rows = [
-            ("t1", "Team 1", "Desc", ["m1"], datetime.now(timezone.utc))
+            ("t1", str(uuid.uuid4()), "Team 1", "Desc", ["m1"], datetime.now(timezone.utc))
         ]
         mock_client.query.return_value = mock_result
         

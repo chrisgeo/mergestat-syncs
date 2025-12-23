@@ -171,7 +171,7 @@ def compute_ic_landscape_rolling(
         identity = row.get("identity_id") or ""
         team_id = row.get("team_id")
         if not team_id or team_id == "":
-            team_id = team_map.get(identity, "unknown")
+            team_id = team_map.get(identity, "unassigned")
         
         # Ensure numeric types
         churn = float(row.get("churn_loc_30d") or 0)

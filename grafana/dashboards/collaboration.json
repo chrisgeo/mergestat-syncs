@@ -38,7 +38,7 @@
           "uid": "clickhouse"
         },
         "refresh": 1,
-        "query": "SELECT DISTINCT ifNull(team_id, 'unassigned') AS __text, ifNull(team_id, 'unassigned') AS __value FROM user_metrics_daily ORDER BY __text",
+        "query": "SELECT id AS __value, name AS __text FROM teams UNION ALL SELECT 'unassigned' AS __value, 'Unassigned' AS __text ORDER BY __text",
         "multi": true,
         "includeAll": true
       }

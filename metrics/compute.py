@@ -420,10 +420,13 @@ def compute_daily_metrics(
     for (repo_id, author_identity), ua in sorted(
         user_aggs.items(), key=lambda kv: (str(kv[0][0]), kv[0][1])
     ):
-        team_id = None
-        team_name = None
+        team_id = "unassigned"
+        team_name = "Unassigned"
         if team_resolver is not None:
-            team_id, team_name = team_resolver.resolve(author_identity)
+            t_id, t_name = team_resolver.resolve(author_identity)
+            if t_id:
+                team_id = t_id
+                team_name = t_name or t_id
         commits_count = int(ua.commits_count)
         total_loc_touched = int(ua.loc_added) + int(ua.loc_deleted)
         avg_commit_size_loc = (
