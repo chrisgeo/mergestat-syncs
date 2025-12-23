@@ -33,7 +33,7 @@ export const InvestmentFlowPanel: React.FC<Props> = ({ data, width, height, opti
     timeWindowDays: 30,
     valueField: 'value',
     sourceField: 'source',
-    targetField: 'project_stream',
+    targetField: 'target',
     dayField: 'day',
   };
   const sourceFieldName = investmentOptions.sourceField || 'source';

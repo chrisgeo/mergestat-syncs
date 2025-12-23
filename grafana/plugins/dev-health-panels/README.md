@@ -106,21 +106,21 @@ ORDER BY file_path, day
 ```
 
 ### Investment Flow (Sankey)
-
-**Variables:**
-- `team_id` (Query): `SELECT DISTINCT team_id AS __text, team_id AS __value FROM team_metrics_daily ORDER BY team_id` (Multi + IncludeAll)
-
-**Panel Query:**
-```sql
-SELECT
-    investment_area AS source,
-    project_stream AS target,
-    sum(delivery_units) AS value
-FROM stats.v_investment_flow_edges
-WHERE team_id IN (${team_id:sqlstring})
-  AND day >= toDate(toDateTime(intDiv($__from, 1000)))
-  AND day < toDate(toDateTime(intDiv($__to, 1000)))
-GROUP BY source, target
-HAVING value > 0
-ORDER BY value DESC
-```
+ 
+ **Variables:**
+ - `team_id` (Query): `SELECT DISTINCT team_id AS __text, team_id AS __value FROM team_metrics_daily ORDER BY team_id` (Multi + IncludeAll)
+ 
+ **Panel Query:**
+ ```sql
+ SELECT
+     source,
+     target,
+     sum(delivery_units) AS value
+ FROM stats.v_investment_flow_edges
+ WHERE team_id IN (${team_id:sqlstring})
+   AND day >= toDate(toDateTime(intDiv($__from, 1000)))
+   AND day < toDate(toDateTime(intDiv($__to, 1000)))
+ GROUP BY source, target
+ HAVING value > 0
+ ORDER BY value DESC
+ ```
