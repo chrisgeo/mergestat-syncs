@@ -19,6 +19,8 @@ This checklist tracks what is complete and what remains to finalize `dev-health-
 - [x] **Work Item Auth Override**: `sync work-items --auth` can override GitHub/GitLab tokens for provider sync.
 - [x] **Synthetic fixtures**: CI/CD + deployments + incidents with metrics rollups for ClickHouse.
 - [x] **IC Metrics + Landscape**: Identity resolution, unified UserMetricsDailyRecord, and landscape rolling stats (Churn/Cycle/WIP vs Throughput).
+- [x] **Grafana Dev Health Panels**: Panel plugin with Developer Landscape, Hotspot Explorer, and Investment Flow views.
+- [x] **Grafana Panel ClickHouse Contracts**: Stats schema views for landscape, hotspot, and investment flow panels (use `WITH ... AS` aliasing).
 
 ## Remaining
 
