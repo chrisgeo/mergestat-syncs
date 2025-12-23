@@ -605,6 +605,7 @@ async def _backfill_github_missing_data(
     repo_full_name: str,
     default_branch: str,
     max_commits: Optional[int],
+    blame_only: bool = False,
 ) -> None:
     # Logic matches the CLI sync orchestration.
     logging.info(
@@ -621,7 +622,7 @@ async def _backfill_github_missing_data(
         return
 
     needs_files = not await store.has_any_git_files(db_repo.id)
-    needs_commit_stats = not await store.has_any_git_commit_stats(db_repo.id)
+    needs_commit_stats = False if blame_only else not await store.has_any_git_commit_stats(db_repo.id)
     needs_blame = not await store.has_any_git_blame(db_repo.id)
 
     if not (needs_files or needs_commit_stats or needs_blame):
@@ -796,6 +797,7 @@ async def process_github_repo(
     repo_name: str,
     token: str,
     fetch_blame: bool = False,
+    blame_only: bool = False,
     max_commits: int = 100,
     sync_cicd: bool = True,
     sync_deployments: bool = True,
@@ -853,6 +855,23 @@ async def process_github_repo(
 
         await store.insert_repo(db_repo)
         logging.info(f"Repository stored: {db_repo.repo} ({db_repo.id})")
+
+        if blame_only:
+            await _backfill_github_missing_data(
+                store=store,
+                connector=connector,
+                db_repo=db_repo,
+                repo_full_name=db_repo.repo,
+                default_branch=repo_info.default_branch,
+                max_commits=max_commits,
+                blame_only=True,
+            )
+            logging.info(
+                "Completed blame-only sync for GitHub repository: %s/%s",
+                owner,
+                repo_name,
+            )
+            return
 
         # 2. Fetch Commits
         logging.info(f"Fetching up to {max_commits} commits from GitHub...")
@@ -981,6 +1000,7 @@ async def process_github_repos_batch(
     sync_cicd: bool = True,
     sync_deployments: bool = True,
     sync_incidents: bool = True,
+    blame_only: bool = False,
     since: Optional[datetime] = None,
 ) -> None:
     """
@@ -1034,6 +1054,25 @@ async def process_github_repos_batch(
         await store.insert_repo(db_repo)
         stored_count += 1
         logging.debug(f"Stored repository ({stored_count}): {db_repo.repo}")
+
+        if blame_only:
+            try:
+                await _backfill_github_missing_data(
+                    store=store,
+                    connector=connector,
+                    db_repo=db_repo,
+                    repo_full_name=repo_info.full_name,
+                    default_branch=repo_info.default_branch,
+                    max_commits=max_commits_per_repo,
+                    blame_only=True,
+                )
+            except Exception as e:
+                logging.debug(
+                    "Blame-only backfill failed for GitHub repo %s: %s",
+                    repo_info.full_name,
+                    e,
+                )
+            return
 
         # Fetch commits and stats to populate git_commits/git_commit_stats.
         commit_limit = max_commits_per_repo or 100

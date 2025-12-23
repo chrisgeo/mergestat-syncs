@@ -510,6 +510,7 @@ async def _backfill_gitlab_missing_data(
     project_full_name: str,
     default_branch: str,
     max_commits: Optional[int],
+    blame_only: bool = False,
 ) -> None:
     if not (
         hasattr(store, "has_any_git_files")
@@ -519,7 +520,7 @@ async def _backfill_gitlab_missing_data(
         return
 
     needs_files = not await store.has_any_git_files(db_repo.id)
-    needs_commit_stats = not await store.has_any_git_commit_stats(db_repo.id)
+    needs_commit_stats = False if blame_only else not await store.has_any_git_commit_stats(db_repo.id)
     needs_blame = not await store.has_any_git_blame(db_repo.id)
 
     if not (needs_files or needs_commit_stats or needs_blame):
@@ -661,6 +662,7 @@ async def process_gitlab_project(
     token: str,
     gitlab_url: str,
     fetch_blame: bool = False,
+    blame_only: bool = False,
     max_commits: int = 100,
     sync_cicd: bool = True,
     sync_deployments: bool = True,
@@ -713,6 +715,19 @@ async def process_gitlab_project(
 
         await store.insert_repo(db_repo)
         logging.info(f"Project stored: {db_repo.repo} ({db_repo.id})")
+
+        if blame_only:
+            await _backfill_gitlab_missing_data(
+                store=store,
+                connector=connector,
+                db_repo=db_repo,
+                project_full_name=full_name,
+                default_branch=db_repo.settings.get("default_branch", "main"),
+                max_commits=max_commits,
+                blame_only=True,
+            )
+            logging.info("Completed blame-only sync for GitLab project: %s", project_id)
+            return
 
         # 2. Fetch Commits
         logging.info(f"Fetching up to {max_commits} commits from GitLab...")
@@ -850,6 +865,7 @@ async def process_gitlab_projects_batch(
     sync_cicd: bool = True,
     sync_deployments: bool = True,
     sync_incidents: bool = True,
+    blame_only: bool = False,
     since: Optional[datetime] = None,
 ) -> None:
     """
@@ -898,6 +914,25 @@ async def process_gitlab_projects_batch(
         await store.insert_repo(db_repo)
         stored_count += 1
         logging.debug(f"Stored project ({stored_count}): {db_repo.repo}")
+
+        if blame_only:
+            try:
+                await _backfill_gitlab_missing_data(
+                    store=store,
+                    connector=connector,
+                    db_repo=db_repo,
+                    project_full_name=project_info.full_name,
+                    default_branch=project_info.default_branch,
+                    max_commits=max_commits_per_project,
+                    blame_only=True,
+                )
+            except Exception as e:
+                logging.debug(
+                    "Blame-only backfill failed for GitLab project %s: %s",
+                    project_info.full_name,
+                    e,
+                )
+            return
 
         # Fetch commits and stats to populate git_commits/git_commit_stats.
         commit_limit = max_commits_per_project or 100

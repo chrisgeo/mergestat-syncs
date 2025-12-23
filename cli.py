@@ -12,7 +12,7 @@ from typing import List, Optional
 
 from processors.github import process_github_repo, process_github_repos_batch
 from processors.gitlab import process_gitlab_project, process_gitlab_projects_batch
-from processors.local import process_local_repo
+from processors.local import process_local_blame, process_local_repo
 from storage import create_store, detect_db_type
 from utils import _parse_since
 
@@ -205,6 +205,13 @@ def _cmd_sync_local(ns: argparse.Namespace) -> int:
         since = _parse_since(ns.since)
 
     async def _handler(store):
+        if ns.blame_only:
+            await process_local_blame(
+                store=store,
+                repo_path=ns.repo_path,
+                since=since,
+            )
+            return
         await process_local_repo(
             store=store,
             repo_path=ns.repo_path,
@@ -234,24 +241,25 @@ def _cmd_sync_github(ns: argparse.Namespace) -> int:
         if ns.search_pattern:
             org_name = ns.group
             user_name = ns.owner if not ns.group else None
-        await process_github_repos_batch(
-            store=store,
-            token=token,
-            org_name=org_name,
-            user_name=user_name,
-            pattern=ns.search_pattern,
-            batch_size=ns.batch_size,
-            max_concurrent=ns.max_concurrent,
-            rate_limit_delay=ns.rate_limit_delay,
-            max_commits_per_repo=ns.max_commits_per_repo,
-            max_repos=ns.max_repos,
-            use_async=ns.use_async,
-            sync_cicd=ns.sync_cicd,
-            sync_deployments=ns.sync_deployments,
-            sync_incidents=ns.sync_incidents,
-            since=since,
-        )
-        return
+            await process_github_repos_batch(
+                store=store,
+                token=token,
+                org_name=org_name,
+                user_name=user_name,
+                pattern=ns.search_pattern,
+                batch_size=ns.batch_size,
+                max_concurrent=ns.max_concurrent,
+                rate_limit_delay=ns.rate_limit_delay,
+                max_commits_per_repo=ns.max_commits_per_repo,
+                max_repos=ns.max_repos,
+                use_async=ns.use_async,
+                sync_cicd=ns.sync_cicd,
+                sync_deployments=ns.sync_deployments,
+                sync_incidents=ns.sync_incidents,
+                blame_only=ns.blame_only,
+                since=since,
+            )
+            return
 
         if not (ns.owner and ns.repo):
             raise SystemExit(
@@ -263,6 +271,7 @@ def _cmd_sync_github(ns: argparse.Namespace) -> int:
             ns.repo,
             token,
             fetch_blame=ns.fetch_blame,
+            blame_only=ns.blame_only,
             max_commits=ns.max_commits_per_repo or 100,
             sync_cicd=ns.sync_cicd,
             sync_deployments=ns.sync_deployments,
@@ -305,6 +314,7 @@ def _cmd_sync_gitlab(ns: argparse.Namespace) -> int:
                 sync_cicd=ns.sync_cicd,
                 sync_deployments=ns.sync_deployments,
                 sync_incidents=ns.sync_incidents,
+                blame_only=ns.blame_only,
                 since=since,
             )
             return
@@ -319,6 +329,7 @@ def _cmd_sync_gitlab(ns: argparse.Namespace) -> int:
             token,
             ns.gitlab_url,
             fetch_blame=ns.fetch_blame,
+            blame_only=ns.blame_only,
             max_commits=ns.max_commits_per_repo or 100,
             sync_cicd=ns.sync_cicd,
             sync_deployments=ns.sync_deployments,
@@ -535,6 +546,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     # ---- sync ----
+    # TODO: add `cli.py sync <command> --provider` for unified provider routing.
+    # TODO: ship an installed binary (e.g. `dho sync ...`) instead of `python cli.py`.
     sync = sub.add_parser("sync", help="Sync git facts into a DB backend.")
     sync_sub = sync.add_subparsers(dest="source", required=True)
 
@@ -563,6 +576,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     local.add_argument(
         "--fetch-blame", action="store_true", help="Fetch blame data (slow)."
+    )
+    local.add_argument(
+        "--blame-only", action="store_true", help="Only sync blame data (skip commits/PRs)."
     )
     local.add_argument(
         "--max-commits-per-repo", type=int, help="Limit commits analyzed."
@@ -603,6 +619,7 @@ def build_parser() -> argparse.ArgumentParser:
     gh.add_argument("--max-repos", type=int)
     gh.add_argument("--use-async", action="store_true")
     gh.add_argument("--fetch-blame", action="store_true")
+    gh.add_argument("--blame-only", action="store_true", help="Only sync blame data (skip commits/PRs).")
     gh.add_argument(
         "--sync-cicd",
         dest="sync_cicd",
@@ -664,6 +681,7 @@ def build_parser() -> argparse.ArgumentParser:
     gl.add_argument("--max-repos", type=int)
     gl.add_argument("--use-async", action="store_true")
     gl.add_argument("--fetch-blame", action="store_true")
+    gl.add_argument("--blame-only", action="store_true", help="Only sync blame data (skip commits/PRs).")
     gl.add_argument(
         "--sync-cicd",
         dest="sync_cicd",

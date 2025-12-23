@@ -27,6 +27,8 @@ This file orients AI coding agents to the dev-health-ops repository: key archite
 - Grafana panel plugin lives in `grafana/plugins/dev-health-panels` (Developer Landscape, Hotspot Explorer, Investment Flow) and reads from `stats` ClickHouse views.
 - Hotspot Explorer queries should use table format and order by day to keep Grafana time sorting valid.
 - Hotspot ownership concentration uses `git_blame` max-lines share per file.
+- Synthetic fixtures cover a broader file set to improve blame/ownership coverage.
+- Blame-only sync is available via `cli.py sync <local|github|gitlab> --blame-only`.
 - ClickHouse view definitions use `WITH ... AS` aliasing (avoid `WITH name = expr` syntax).
 
 **Project-specific conventions & patterns**

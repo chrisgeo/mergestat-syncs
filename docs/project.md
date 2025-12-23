@@ -632,6 +632,9 @@ Ownership concentration (for hotspot drivers) is derived from git blame data:
 ownership_concentration = max(lines_by_author) / total_lines
 ```
 
+Synthetic fixtures include an expanded file set to improve blame-driven ownership coverage.
+Blame-only sync is available via `cli.py sync <local|github|gitlab> --blame-only`.
+
 #### 1.3.3 PR Size
 
 ```text

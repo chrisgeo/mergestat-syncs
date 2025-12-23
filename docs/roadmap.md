@@ -25,6 +25,8 @@ This checklist tracks what is complete and what remains to finalize `dev-health-
 - [x] **Investment metrics NULL team IDs**: `investment_metrics_daily.team_id` stores NULL for unassigned; investment flow view casts via `toNullable(team_id)`.
 - [x] **Hotspot Explorer formatting**: Use table format and order by day to keep Grafana sorting valid.
 - [x] **Hotspot ownership concentration**: Derive ownership concentration from git blame line shares.
+- [x] **Synthetic blame coverage**: Expand fixture file set to improve hotspot ownership coverage.
+- [x] **Blame-only sync**: Add `cli.py sync <local|github|gitlab> --blame-only` for targeted blame backfill.
 
 ## Remaining
 
