@@ -32,7 +32,7 @@ def _fetch_gitlab_project_info_sync(connector, project_id):
 
 def _fetch_gitlab_commits_sync(
     gl_project,
-    max_commits,
+    max_commits: Optional[int],
     repo_id,
     since: Optional[datetime] = None,
 ):
@@ -42,7 +42,7 @@ def _fetch_gitlab_commits_sync(
         since_iso = since.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
         list_params["since"] = since_iso
 
-    if max_commits > 100:
+    if max_commits is None or max_commits > 100:
         commits = gl_project.commits.list(**list_params, as_list=False)
     else:
         commits = gl_project.commits.list(**list_params, get_all=False)
@@ -52,7 +52,7 @@ def _fetch_gitlab_commits_sync(
     commit_hashes = []
 
     for commit in commits:
-        if count >= max_commits:
+        if max_commits is not None and count >= max_commits:
             break
 
         committed_when = None
@@ -663,7 +663,7 @@ async def process_gitlab_project(
     gitlab_url: str,
     fetch_blame: bool = False,
     blame_only: bool = False,
-    max_commits: int = 100,
+    max_commits: Optional[int] = None,
     sync_cicd: bool = True,
     sync_deployments: bool = True,
     sync_incidents: bool = True,
@@ -730,7 +730,10 @@ async def process_gitlab_project(
             return
 
         # 2. Fetch Commits
-        logging.info(f"Fetching up to {max_commits} commits from GitLab...")
+        if max_commits is None:
+            logging.info("Fetching all commits from GitLab...")
+        else:
+            logging.info(f"Fetching up to {max_commits} commits from GitLab...")
         commit_hashes, commit_objects = await loop.run_in_executor(
             None,
             _fetch_gitlab_commits_sync,
@@ -746,7 +749,7 @@ async def process_gitlab_project(
 
         # 3. Fetch Stats
         logging.info("Fetching commit stats from GitLab...")
-        stats_limit = min(max_commits, 50)
+        stats_limit = 50 if max_commits is None else min(max_commits, 50)
         stats_objects = await loop.run_in_executor(
             None,
             _fetch_gitlab_commit_stats_sync,
@@ -935,7 +938,10 @@ async def process_gitlab_projects_batch(
             return
 
         # Fetch commits and stats to populate git_commits/git_commit_stats.
-        commit_limit = max_commits_per_project or 100
+        if max_commits_per_project is None and since is None:
+            commit_limit = 100
+        else:
+            commit_limit = max_commits_per_project
         try:
             gl_project = await loop.run_in_executor(
                 None, connector.gitlab.projects.get, project_info.id
@@ -957,7 +963,7 @@ async def process_gitlab_projects_batch(
                 gl_project,
                 commit_hashes,
                 db_repo.id,
-                min(commit_limit, 50),
+                50 if commit_limit is None else min(commit_limit, 50),
             )
             if stats_objects:
                 await store.insert_git_commit_stats(stats_objects)

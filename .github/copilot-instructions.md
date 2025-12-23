@@ -29,6 +29,7 @@ This file orients AI coding agents to the dev-health-ops repository: key archite
 - Hotspot ownership concentration uses `git_blame` max-lines share per file.
 - Synthetic fixtures cover a broader file set to improve blame/ownership coverage.
 - Blame-only sync is available via `cli.py sync <local|github|gitlab> --blame-only`.
+- GitHub/GitLab backfills (`--date/--backfill`) default to unlimited commits unless `--max-commits-per-repo` is set.
 - ClickHouse view definitions use `WITH ... AS` aliasing (avoid `WITH name = expr` syntax).
 
 **Project-specific conventions & patterns**

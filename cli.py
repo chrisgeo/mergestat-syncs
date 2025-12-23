@@ -232,10 +232,16 @@ def _cmd_sync_github(ns: argparse.Namespace) -> int:
 
     if ns.date is not None:
         since = _since_from_date_backfill(ns.date, ns.backfill)
+        max_commits = (
+            ns.max_commits_per_repo
+            if ns.max_commits_per_repo is not None
+            else None
+        )
     else:
         if int(ns.backfill) != 1:
             raise SystemExit("--backfill requires --date")
         since = None
+        max_commits = ns.max_commits_per_repo or 100
 
     async def _handler(store):
         if ns.search_pattern:
@@ -250,7 +256,7 @@ def _cmd_sync_github(ns: argparse.Namespace) -> int:
                 batch_size=ns.batch_size,
                 max_concurrent=ns.max_concurrent,
                 rate_limit_delay=ns.rate_limit_delay,
-                max_commits_per_repo=ns.max_commits_per_repo,
+                max_commits_per_repo=max_commits,
                 max_repos=ns.max_repos,
                 use_async=ns.use_async,
                 sync_cicd=ns.sync_cicd,
@@ -272,7 +278,7 @@ def _cmd_sync_github(ns: argparse.Namespace) -> int:
             token,
             fetch_blame=ns.fetch_blame,
             blame_only=ns.blame_only,
-            max_commits=ns.max_commits_per_repo or 100,
+            max_commits=max_commits,
             sync_cicd=ns.sync_cicd,
             sync_deployments=ns.sync_deployments,
             sync_incidents=ns.sync_incidents,
@@ -292,10 +298,16 @@ def _cmd_sync_gitlab(ns: argparse.Namespace) -> int:
 
     if ns.date is not None:
         since = _since_from_date_backfill(ns.date, ns.backfill)
+        max_commits = (
+            ns.max_commits_per_repo
+            if ns.max_commits_per_repo is not None
+            else None
+        )
     else:
         if int(ns.backfill) != 1:
             raise SystemExit("--backfill requires --date")
         since = None
+        max_commits = ns.max_commits_per_repo or 100
 
     async def _handler(store):
         if ns.search_pattern:
@@ -308,7 +320,7 @@ def _cmd_sync_gitlab(ns: argparse.Namespace) -> int:
                 batch_size=ns.batch_size,
                 max_concurrent=ns.max_concurrent,
                 rate_limit_delay=ns.rate_limit_delay,
-                max_commits_per_project=ns.max_commits_per_repo,
+                max_commits_per_project=max_commits,
                 max_projects=ns.max_repos,
                 use_async=ns.use_async,
                 sync_cicd=ns.sync_cicd,
@@ -330,7 +342,7 @@ def _cmd_sync_gitlab(ns: argparse.Namespace) -> int:
             ns.gitlab_url,
             fetch_blame=ns.fetch_blame,
             blame_only=ns.blame_only,
-            max_commits=ns.max_commits_per_repo or 100,
+            max_commits=max_commits,
             sync_cicd=ns.sync_cicd,
             sync_deployments=ns.sync_deployments,
             sync_incidents=ns.sync_incidents,

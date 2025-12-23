@@ -13,6 +13,7 @@
 - **Panels**: `grafana/plugins/dev-health-panels` provides Developer Landscape, Hotspot Explorer, and Investment Flow visualizations.
 - **Panel contracts**: ClickHouse views in `stats` back the Dev Health panel plugin queries.
 - **ClickHouse view syntax**: use `WITH ... AS` aliasing (avoid `WITH name = expr`).
+- **Backfill commits**: GitHub/GitLab `--date/--backfill` runs default to unlimited commits unless `--max-commits-per-repo` is set.
 
 ## LinearB — Flow & Team Efficiency
 

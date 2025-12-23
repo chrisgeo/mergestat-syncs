@@ -22,6 +22,7 @@ Purpose: compact, actionable rules for an AI coding agent (Copilot-like) working
 - Hotspot ownership concentration is derived from `git_blame` as max-lines share per file.
 - Synthetic fixtures now cover a broader file set to improve blame/ownership coverage.
 - Blame can be synced without full repo processing via `cli.py sync <local|github|gitlab> --blame-only`.
+- GitHub/GitLab backfills (`--date/--backfill`) default to unlimited commits unless `--max-commits-per-repo` is set.
 - Grafana panel plugin ClickHouse contracts live in views `stats.v_ic_landscape_points`, `stats.v_file_hotspots_windowed`, and `stats.v_investment_flow_edges`.
 - ClickHouse view definitions use `WITH ... AS` aliasing (avoid `WITH name = expr` syntax).
 - Fixtures in `fixtures/` generate synthetic data for testing/demos.

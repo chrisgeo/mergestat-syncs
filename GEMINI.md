@@ -19,6 +19,7 @@ The project follows a pipeline-like architecture:
     - Hotspot ownership concentration uses `git_blame` max-lines share per file.
     - Synthetic fixtures cover a broader file set to improve blame/ownership coverage.
     - Blame-only sync is available via `cli.py sync <local|github|gitlab> --blame-only`.
+    - GitHub/GitLab backfills (`--date/--backfill`) default to unlimited commits unless `--max-commits-per-repo` is set.
 
 ## Key Technologies
 - **Language**: Python 3.10+

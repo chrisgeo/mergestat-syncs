@@ -27,6 +27,7 @@ This checklist tracks what is complete and what remains to finalize `dev-health-
 - [x] **Hotspot ownership concentration**: Derive ownership concentration from git blame line shares.
 - [x] **Synthetic blame coverage**: Expand fixture file set to improve hotspot ownership coverage.
 - [x] **Blame-only sync**: Add `cli.py sync <local|github|gitlab> --blame-only` for targeted blame backfill.
+- [x] **Backfill commit caps**: GitHub/GitLab `--date/--backfill` runs default to unlimited commits unless explicitly capped.
 
 ## Remaining
 

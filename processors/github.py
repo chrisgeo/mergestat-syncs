@@ -49,7 +49,7 @@ def _fetch_github_repo_info_sync(connector, owner, repo_name):
 
 def _fetch_github_commits_sync(
     gh_repo,
-    max_commits,
+    max_commits: Optional[int],
     repo_id,
     since: Optional[datetime] = None,
 ):
@@ -62,7 +62,7 @@ def _fetch_github_commits_sync(
 
     for commit in commits_iter:
         raw_commits.append(commit)
-        if len(raw_commits) >= max_commits:
+        if max_commits is not None and len(raw_commits) >= max_commits:
             break
 
     commit_objects = []
@@ -798,7 +798,7 @@ async def process_github_repo(
     token: str,
     fetch_blame: bool = False,
     blame_only: bool = False,
-    max_commits: int = 100,
+    max_commits: Optional[int] = None,
     sync_cicd: bool = True,
     sync_deployments: bool = True,
     sync_incidents: bool = True,
@@ -874,7 +874,10 @@ async def process_github_repo(
             return
 
         # 2. Fetch Commits
-        logging.info(f"Fetching up to {max_commits} commits from GitHub...")
+        if max_commits is None:
+            logging.info("Fetching all commits from GitHub...")
+        else:
+            logging.info(f"Fetching up to {max_commits} commits from GitHub...")
         raw_commits, commit_objects = await loop.run_in_executor(
             None, _fetch_github_commits_sync, gh_repo, max_commits, db_repo.id, since
         )
@@ -885,7 +888,7 @@ async def process_github_repo(
 
         # 3. Fetch Stats
         logging.info("Fetching commit stats from GitHub...")
-        stats_limit = min(max_commits, 50)
+        stats_limit = 50 if max_commits is None else min(max_commits, 50)
         stats_objects = await loop.run_in_executor(
             None,
             _fetch_github_commit_stats_sync,
@@ -1075,7 +1078,10 @@ async def process_github_repos_batch(
             return
 
         # Fetch commits and stats to populate git_commits/git_commit_stats.
-        commit_limit = max_commits_per_repo or 100
+        if max_commits_per_repo is None and since is None:
+            commit_limit = 100
+        else:
+            commit_limit = max_commits_per_repo
         try:
             gh_repo = connector.github.get_repo(repo_info.full_name)
             raw_commits, commit_objects = await loop.run_in_executor(
@@ -1094,7 +1100,7 @@ async def process_github_repos_batch(
                 _fetch_github_commit_stats_sync,
                 raw_commits,
                 db_repo.id,
-                min(commit_limit, 50),
+                50 if commit_limit is None else min(commit_limit, 50),
                 since,
             )
             if stats_objects:
