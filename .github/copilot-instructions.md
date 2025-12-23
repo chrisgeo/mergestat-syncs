@@ -23,6 +23,7 @@ This file orients AI coding agents to the dev-health-ops repository: key archite
 - `fixtures/` generates synthetic data for testing.
 - Investment Areas dashboard uses regex team filters in ClickHouse queries.
 - Grafana panel plugin lives in `grafana/plugins/dev-health-panels` (Developer Landscape, Hotspot Explorer, Investment Flow) and reads from `stats` ClickHouse views.
+- ClickHouse view definitions use `WITH ... AS` aliasing (avoid `WITH name = expr` syntax).
 
 **Project-specific conventions & patterns**
 

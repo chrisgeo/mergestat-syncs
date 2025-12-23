@@ -56,7 +56,7 @@ Windowed facts view (30d rolling window, using existing schema mappings):
 
 ```sql
 CREATE OR REPLACE VIEW stats.v_file_hotspots_windowed AS
-WITH start_day = toDate(now()) - toIntervalDay(30), end_day = toDate(now())
+WITH toDate(now()) - toIntervalDay(30) AS start_day, toDate(now()) AS end_day
 SELECT
   metrics.repo_id,
   metrics.path AS file_path,
@@ -88,8 +88,9 @@ GROUP BY metrics.repo_id, metrics.path, lookup.cyclomatic_total, lookup.ownershi
 Panel Query A (facts) template:
 
 ```sql
-WITH start_day = toDate({to:DateTime}) - toIntervalDay({window_days:Int32}),
-     end_day = toDate({to:DateTime})
+ WITH
+     toDate({to:DateTime}) - toIntervalDay({window_days:Int32}) AS start_day,
+     toDate({to:DateTime}) AS end_day
 SELECT repo_id, file_path, churn_loc_window, cyclomatic_total, ownership_concentration, incident_count,
        churn_signal, complexity_signal, ownership_signal, incident_signal, risk_score
 FROM (
@@ -127,8 +128,9 @@ LIMIT {limit:Int32};
 Panel Query B (sparklines) template:
 
 ```sql
-WITH start_day = toDate({to:DateTime}) - toIntervalDay({window_days:Int32}),
-     end_day = toDate({to:DateTime})
+WITH
+     toDate({to:DateTime}) - toIntervalDay({window_days:Int32}) AS start_day,
+     toDate({to:DateTime}) AS end_day
 SELECT metrics.path AS file_path, metrics.day, sum(metrics.churn) AS churn_loc
 FROM stats.file_metrics_daily AS metrics
 WHERE metrics.repo_id = {repo_id:String}
@@ -152,8 +154,9 @@ FROM stats.investment_metrics_daily;
 Panel query template:
 
 ```sql
-WITH start_day = toDate({to:DateTime}) - toIntervalDay({window_days:Int32}),
-     end_day = toDate({to:DateTime})
+WITH
+     toDate({to:DateTime}) - toIntervalDay({window_days:Int32}) AS start_day,
+     toDate({to:DateTime}) AS end_day
 SELECT source, target,
   sum(CASE {value_metric:String}
         WHEN 'delivery_units' THEN delivery_units

@@ -9,6 +9,7 @@
 - **Dashboards**: Investment Areas uses regex `match(...)` filtering for the team variable in ClickHouse queries.
 - **Panels**: `grafana/plugins/dev-health-panels` provides Developer Landscape, Hotspot Explorer, and Investment Flow visualizations.
 - **Panel contracts**: ClickHouse views in `stats` back the Dev Health panel plugin queries.
+- **ClickHouse view syntax**: use `WITH ... AS` aliasing (avoid `WITH name = expr`).
 
 ## LinearB — Flow & Team Efficiency
 

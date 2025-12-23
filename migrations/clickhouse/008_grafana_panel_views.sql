@@ -12,8 +12,8 @@ FROM stats.ic_landscape_rolling_30d;
 
 CREATE OR REPLACE VIEW stats.v_file_hotspots_windowed AS
 WITH
-    start_day = toDate(now()) - toIntervalDay(30),
-    end_day = toDate(now())
+    toDate(now()) - toIntervalDay(30) AS start_day,
+    toDate(now()) AS end_day
 SELECT
     metrics.repo_id AS repo_id,
     metrics.path AS file_path,
