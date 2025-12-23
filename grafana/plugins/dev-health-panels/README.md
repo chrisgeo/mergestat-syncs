@@ -108,7 +108,7 @@ ORDER BY file_path, day
 ### Investment Flow (Sankey)
  
  **Variables:**
- - `team_id` (Query): `SELECT DISTINCT team_id AS __text, team_id AS __value FROM team_metrics_daily ORDER BY team_id` (Multi + IncludeAll)
+ - `team_id` (Query): `SELECT DISTINCT team_id AS __text, team_id AS __value FROM (SELECT team_id FROM stats.team_metrics_daily UNION ALL SELECT team_id FROM stats.investment_metrics_daily) ORDER BY team_id` (Multi + IncludeAll)
  
  **Panel Query:**
  ```sql
