@@ -90,6 +90,110 @@ async def _run_with_store(db_url: str, db_type: str, handler) -> None:
         await handler(store)
 
 
+def _cmd_sync_teams(ns: argparse.Namespace) -> int:
+    from models.teams import Team
+    
+    provider = (ns.provider or "config").lower()
+    teams_data: List[Team] = []
+
+    if provider == "config":
+        from providers.teams import DEFAULT_TEAM_MAPPING_PATH
+        import yaml
+
+        path = Path(ns.path) if ns.path else DEFAULT_TEAM_MAPPING_PATH
+        if not path.exists():
+            logging.error(f"Teams config file not found at {path}")
+            return 1
+
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                payload = yaml.safe_load(handle) or {}
+        except Exception as e:
+            logging.error(f"Failed to parse teams config: {e}")
+            return 1
+
+        for entry in payload.get("teams") or []:
+            team_id = str(entry.get("team_id") or "").strip()
+            team_name = str(entry.get("team_name") or team_id).strip()
+            description = entry.get("description")
+            members = entry.get("members") or []
+            if team_id:
+                teams_data.append(
+                    Team(
+                        id=team_id,
+                        name=team_name,
+                        description=str(description) if description else None,
+                        members=[str(m) for m in members],
+                    )
+                )
+
+    elif provider == "jira":
+        from providers.jira.client import JiraClient
+        
+        try:
+            client = JiraClient.from_env()
+        except ValueError as e:
+            logging.error(f"Jira configuration error: {e}")
+            return 1
+            
+        try:
+            logging.info("Fetching projects from Jira...")
+            projects = client.get_all_projects()
+            for p in projects:
+                # Use project Key as ID (stable), Name as Name
+                key = p.get("key")
+                name = p.get("name")
+                desc = p.get("description")
+                lead = p.get("lead", {})
+                
+                members = []
+                if lead and lead.get("accountId"):
+                    members.append(lead.get("accountId"))
+                    
+                if key and name:
+                    teams_data.append(
+                        Team(
+                            id=key,
+                            name=name,
+                            description=str(desc) if desc else f"Jira Project {key}",
+                            members=members
+                        )
+                    )
+            logging.info(f"Fetched {len(teams_data)} projects from Jira.")
+        except Exception as e:
+            logging.error(f"Failed to fetch Jira projects: {e}")
+            return 1
+        finally:
+            client.close()
+
+    elif provider == "synthetic":
+        from fixtures.generator import SyntheticDataGenerator
+        generator = SyntheticDataGenerator()
+        # Use 8 teams as requested for better visualization
+        teams_data = generator.generate_teams(count=8)
+        logging.info(f"Generated {len(teams_data)} synthetic teams.")
+
+    else:
+        logging.error(f"Unknown provider: {provider}")
+        return 1
+
+    if not teams_data:
+        logging.warning("No teams found/generated.")
+        return 0
+
+    db_type = _resolve_db_type(ns.db, ns.db_type)
+
+    async def _handler(store):
+        # Ensure table exists (for SQL stores)
+        if hasattr(store, "ensure_tables"):
+            await store.ensure_tables()
+        await store.insert_teams(teams_data)
+        logging.info(f"Synced {len(teams_data)} teams to DB.")
+
+    asyncio.run(_run_with_store(ns.db, db_type, _handler))
+    return 0
+
+
 def _cmd_sync_local(ns: argparse.Namespace) -> int:
     db_type = _resolve_db_type(ns.db, ns.db_type)
 
@@ -400,7 +504,7 @@ def _cmd_grafana_up(_ns: argparse.Namespace) -> int:
         "docker",
         "compose",
         "-f",
-        str(REPO_ROOT / "grafana" / "docker-compose.yml"),
+        str(REPO_ROOT / "compose.yml"),
         "up",
         "-d",
     ]
@@ -412,7 +516,7 @@ def _cmd_grafana_down(_ns: argparse.Namespace) -> int:
         "docker",
         "compose",
         "-f",
-        str(REPO_ROOT / "grafana" / "docker-compose.yml"),
+        str(REPO_ROOT / "compose.yml"),
         "down",
     ]
     return subprocess.run(cmd, check=False).returncode
@@ -464,6 +568,22 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-commits-per-repo", type=int, help="Limit commits analyzed."
     )
     local.set_defaults(func=_cmd_sync_local)
+
+    teams = sync_sub.add_parser("teams", help="Sync teams from config/teams.yaml, Jira, or Synthetic.")
+    teams.add_argument("--db", required=True, help="Database connection string.")
+    teams.add_argument(
+        "--db-type",
+        choices=["postgres", "mongo", "sqlite", "clickhouse"],
+        help="Optional DB backend override.",
+    )
+    teams.add_argument(
+        "--provider",
+        choices=["config", "jira", "synthetic"],
+        default="config",
+        help="Source of team data (default: config).",
+    )
+    teams.add_argument("--path", help="Path to teams.yaml config (used if provider=config).")
+    teams.set_defaults(func=_cmd_sync_teams)
 
     gh = sync_sub.add_parser("github", help="Sync from GitHub (single repo or batch).")
     gh.add_argument("--db", required=True, help="Database connection string.")
@@ -934,13 +1054,8 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
                 transitions = generator.generate_work_item_transitions(work_items)
 
                 # Provide stable team IDs for dashboards without requiring config.
-                member_to_team = {}
-                for idx, (name, email) in enumerate(generator.authors):
-                    team_id = "alpha" if idx < 3 else "beta"
-                    team_name = "Alpha Team" if team_id == "alpha" else "Beta Team"
-                    member_to_team[str(email).strip().lower()] = (team_id, team_name)
-                    member_to_team[str(name).strip().lower()] = (team_id, team_name)
-                team_resolver = TeamResolver(member_to_team=member_to_team)
+                team_assignment = generator.get_team_assignment(count=8)
+                team_resolver = TeamResolver(member_to_team=team_assignment["member_map"])
 
                 computed_at = datetime.now(timezone.utc)
                 end_day = computed_at.date()
@@ -1040,7 +1155,7 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
 
                     # Enrich User Metrics with IC fields
                     # Convert TeamResolver map to simple identity->team_id map
-                    team_map = {k: v[0] for k, v in member_to_team.items()}
+                    team_map = {k: v[0] for k, v in team_assignment["member_map"].items()}
                     ic_metrics = compute_ic_metrics_daily(
                         git_metrics=repo_result.user_metrics,
                         wi_metrics=wi_user_rows,

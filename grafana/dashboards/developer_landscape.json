@@ -123,7 +123,7 @@
           "uid": "clickhouse"
         },
         "refresh": 1,
-        "query": "SELECT DISTINCT team_id AS __text, team_id AS __value FROM (SELECT team_id FROM stats.team_metrics_daily UNION ALL SELECT team_id FROM stats.ic_landscape_rolling_30d) ORDER BY team_id",
+        "query": "SELECT id AS __value, name AS __text FROM teams ORDER BY name",
         "multi": true,
         "includeAll": true
       }

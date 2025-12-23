@@ -15,6 +15,7 @@ from models.git import (
     Incident,
 )
 from models.work_items import WorkItem, WorkItemStatusTransition, WorkItemType
+from models.teams import Team
 from metrics.schemas import (
     RepoMetricsDailyRecord,
     UserMetricsDailyRecord,
@@ -45,6 +46,17 @@ class SyntheticDataGenerator:
             ("Charlie Brown", "charlie@example.com"),
             ("David White", "david@example.com"),
             ("Eve Black", "eve@example.com"),
+            ("Frank Green", "frank@example.com"),
+            ("Grace Hall", "grace@example.com"),
+            ("Heidi Blue", "heidi@example.com"),
+            ("Ivan Red", "ivan@example.com"),
+            ("Judy Orange", "judy@example.com"),
+            ("Kevin Purple", "kevin@example.com"),
+            ("Liam Cyan", "liam@example.com"),
+            ("Mia Magenta", "mia@example.com"),
+            ("Noah Yellow", "noah@example.com"),
+            ("Olivia Gray", "olivia@example.com"),
+            ("Pat Lime", "pat@example.com"),
         ]
         self.files = [
             "src/main.py",
@@ -57,6 +69,53 @@ class SyntheticDataGenerator:
             "docker-compose.yml",
             ".github/workflows/ci.yml",
         ]
+
+    def get_team_assignment(self, count: int = 2) -> Dict[str, Any]:
+        """
+        Returns a consistent assignment of authors to teams.
+        Output includes 'teams' (List[Team]) and 'member_map' (email -> (id, name)).
+        """
+        teams = []
+        member_map = {}
+        
+        # Ensure at least 1 author per team if possible, loop if more teams than authors
+        # For simplicity, just chunk authors.
+        chunk_size = max(1, len(self.authors) // count)
+        
+        for i in range(count):
+            start = i * chunk_size
+            # Last team gets the rest
+            end = (i + 1) * chunk_size if i < count - 1 else len(self.authors)
+            team_members = self.authors[start:end]
+            
+            # Stable IDs
+            if count == 2:
+                team_id = "alpha" if i == 0 else "beta"
+                team_name = "Alpha Team" if i == 0 else "Beta Team"
+            else:
+                team_id = f"team-{chr(97+i)}"
+                team_name = f"Team {chr(65+i)}"
+            
+            member_emails = [email for _, email in team_members]
+            
+            teams.append(Team(
+                id=team_id,
+                name=team_name,
+                description=f"Synthetic {team_name}",
+                members=member_emails
+            ))
+            
+            for name, email in team_members:
+                member_map[str(email).strip().lower()] = (team_id, team_name)
+                member_map[str(name).strip().lower()] = (team_id, team_name)
+                
+        return {"teams": teams, "member_map": member_map}
+
+    def generate_teams(self, count: int = 2) -> List[Team]:
+        """
+        Generate synthetic teams with members distributed among them.
+        """
+        return self.get_team_assignment(count)["teams"]
 
     def generate_repo(self) -> Repo:
         return Repo(

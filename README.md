@@ -170,6 +170,21 @@ Work items are fetched from provider APIs via a dedicated sync command. This is 
 
 `cli.py` automatically loads a local `.env` file from the repo root (without overriding already-set environment variables). Disable with `DISABLE_DOTENV=1`.
 
+### Sync Teams
+
+You can sync team definitions into the database from multiple sources. This allows dashboards to group data by teams.
+
+```bash
+# Sync from a local YAML config (default)
+python cli.py sync teams --db "sqlite+aiosqlite:///mergestat.db" --path config/teams.yaml
+
+# Sync from Jira Projects (uses JIRA_* env vars)
+python cli.py sync teams --db "sqlite+aiosqlite:///mergestat.db" --provider jira
+
+# Generate synthetic teams for testing
+python cli.py sync teams --db "sqlite+aiosqlite:///mergestat.db" --provider synthetic
+```
+
 ## Database Configuration
 
 This project supports PostgreSQL, MongoDB, SQLite, and ClickHouse as storage backends.
