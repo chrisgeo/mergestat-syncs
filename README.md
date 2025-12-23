@@ -4,6 +4,23 @@ Development team and developers' operational help should be available for all.
 
 This project's goal is to provide tools and quick-win implementations by integrating with a majority of popular tooling.
 
+## Why this exists
+
+Developer health tooling drifted into expensive, opaque “scoring” systems that are easy to misuse. This project is intentionally different.
+
+### Principles
+
+- **Accessibility over extraction**: derived from data teams already own; should be cheap to run and never gated behind per-seat pricing.
+- **Learning, not judgment**: metrics are **signals** about system behavior (WIP, churn, cycle time, blocked work), not performance rankings.
+- **Trends > absolutes**: compare change over time and distributions, not “who’s best”.
+- **Inspectable by default**: open schemas, explicit definitions, and reproducible computation.
+
+### Non-goals
+
+- Individual leaderboards and “scores”
+- HR/performance-management tooling
+- Executive theater dashboards that hide context
+
 ## Private Repository Support ✅
 
 **Both GitHub and GitLab connectors fully support private repositories!** When provided with tokens that have appropriate permissions, you can access and sync data from private repositories just as easily as public ones.
