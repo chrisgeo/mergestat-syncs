@@ -23,6 +23,7 @@ This checklist tracks what is complete and what remains to finalize `dev-health-
 - [x] **Grafana Panel ClickHouse Contracts**: Stats schema views for landscape, hotspot, and investment flow panels (use `WITH ... AS` aliasing).
 - [x] **Dashboard team filter normalization**: Include legacy NULL/empty team IDs in Grafana ClickHouse queries via `ifNull(nullIf(team_id, ''), 'unassigned')`.
 - [x] **Investment metrics NULL team IDs**: `investment_metrics_daily.team_id` stores NULL for unassigned; investment flow view casts via `toNullable(team_id)`.
+- [x] **Hotspot Explorer time ordering**: Order time-series queries by day to keep Grafana sorting valid.
 
 ## Remaining
 
