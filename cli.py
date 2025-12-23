@@ -921,9 +921,15 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
         await store.insert_deployments(deployments)
         await store.insert_incidents(incidents)
 
+        # 6. Blame Data (for Complexity)
+        blame_data = generator.generate_blame(commits)
+        if blame_data:
+            await store.insert_blame_data(blame_data)
+
         logging.info(f"Generated synthetic data for {ns.repo_name}")
         logging.info(f"- Repo ID: {repo.id}")
         logging.info(f"- Commits: {len(commits)}")
+        logging.info(f"- Blame lines: {len(blame_data)}")
         logging.info(f"- PRs: {len(prs)}")
         logging.info(f"- Reviews: {len(all_reviews)}")
         logging.info(f"- CI pipeline runs: {len(pipeline_runs)}")
@@ -1058,6 +1064,16 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
                 team_resolver = TeamResolver(member_to_team=team_assignment["member_map"])
 
                 computed_at = datetime.now(timezone.utc)
+
+                # Generate and write complexity metrics
+                if hasattr(sink, "write_file_complexity_snapshots"):
+                    comp_data = generator.generate_complexity_metrics(days=ns.days)
+                    if comp_data["snapshots"]:
+                        sink.write_file_complexity_snapshots(comp_data["snapshots"])
+                    if comp_data["dailies"]:
+                        sink.write_repo_complexity_daily(comp_data["dailies"])
+                    logging.info(f"- Complexity snapshots: {len(comp_data['snapshots'])}")
+
                 end_day = computed_at.date()
                 start_day = end_day - timedelta(days=max(1, int(ns.days)) - 1)
 

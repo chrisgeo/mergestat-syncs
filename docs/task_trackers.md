@@ -65,11 +65,20 @@ Schema:
 
 ## Team Mapping (optional)
 
-To enable team filtering in Grafana, populate `config/team_mapping.yaml`.
+To enable team filtering in Grafana, you can sync teams from various sources.
 
-Schema:
-- `team_id`, `team_name`
-- `members`: canonical identities (preferred) or aliases
+### Config-based Mapping
+Populate `config/team_mapping.yaml` (schema: `team_id`, `team_name`, `members`).
+Then run:
+```bash
+python cli.py sync teams --path config/team_mapping.yaml
+```
+
+### Jira Project Mapping
+Automatically import Jira projects as teams:
+```bash
+python cli.py sync teams --provider jira
+```
 
 ## Running Jira work metrics
 

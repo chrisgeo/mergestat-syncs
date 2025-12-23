@@ -31,7 +31,7 @@ The project follows a pipeline-like architecture:
 - `storage.py`: Unified storage interface for all supported databases.
 - `connectors/`: Provider-specific logic for data fetching.
 - `metrics/`: Core logic for computing DORA and other team health metrics.
-- `models/`: SQLAlchemy and Pydantic models for data structures.
+- `models/`: SQLAlchemy and Pydantic models for data structures (includes `models/teams.py`).
 - `processors/`: Logic to bridge connectors and storage.
 - `providers/`: Mapping and identity management logic.
 - `grafana/`: Configuration for automated Grafana setup.
@@ -43,6 +43,7 @@ The project follows a pipeline-like architecture:
 
 ## Development Workflow
 - **Syncing Data**: `python cli.py sync <provider> --db <connection_string> ...`
+- **Syncing Teams**: `python cli.py sync teams --provider <config|jira|synthetic> --db <connection_string> ...`
 - **Syncing Work Items**: `python cli.py sync work-items --provider <jira|github|gitlab|synthetic|all> -s "<org/*>" --db <connection_string> ...` (use `--auth` to override `GITHUB_TOKEN`/`GITLAB_TOKEN`)
 - **Planned**: repo filtering for `sync work-items` by tags/settings (beyond name glob).
 - **Computing Metrics**: `python cli.py metrics daily --db <connection_string> ...` (expects work items already synced unless `--provider` is set)
