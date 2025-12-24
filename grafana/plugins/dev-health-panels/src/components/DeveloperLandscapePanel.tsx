@@ -1,33 +1,34 @@
 import React, { useMemo } from 'react';
 import { css } from '@emotion/css';
-import { PanelProps } from '@grafana/data';
-import { useTheme2 } from '@grafana/ui';
+import { GrafanaTheme2, PanelProps } from '@grafana/data';
+import { useStyles2, useTheme2 } from '@grafana/ui';
 import { DevHealthOptions } from '../types';
 import { getField, getFieldValue, getFrameWithFields } from './dataFrame';
 import { PanelEmptyState } from './PanelEmptyState';
 
-interface Props extends PanelProps<DevHealthOptions> {}
+interface Props extends PanelProps<DevHealthOptions> { }
 
-const styles = {
+const getStyles = (theme: GrafanaTheme2) => ({
   wrapper: css`
     width: 100%;
     height: 100%;
-    font-family: Open Sans, Helvetica, Arial, sans-serif;
+    font-family: ${theme.typography.fontFamily};
   `,
   label: css`
     font-size: 11px;
-    fill: #dbe2ea;
+    fill: ${theme.colors.text.secondary};
   `,
   axisLabel: css`
     font-size: 11px;
-    fill: #9aa7b2;
+    fill: ${theme.colors.text.secondary};
     text-anchor: middle;
     font-weight: 500;
   `,
-};
+});
 
 export const DeveloperLandscapePanel: React.FC<Props> = ({ data, width, height, options, replaceVariables }) => {
   const theme = useTheme2();
+  const styles = useStyles2(getStyles);
   const palette = theme.visualization.palette;
 
   const landscapeOptions = options.developerLandscape ?? {
@@ -161,13 +162,19 @@ export const DeveloperLandscapePanel: React.FC<Props> = ({ data, width, height, 
     const teams = Array.from(new Set(points.map((p) => p.team).filter(Boolean) as string[])).sort();
 
     const iMap = new Map<string, string>();
-    identities.forEach((id, index) => iMap.set(id, palette[index % palette.length]));
+    identities.forEach((id, index) => {
+      const paletteColor = palette[index % palette.length];
+      iMap.set(id, theme.visualization.getColorByName(paletteColor));
+    });
 
     const tMap = new Map<string, string>();
-    teams.forEach((team, index) => tMap.set(team, palette[index % palette.length]));
+    teams.forEach((team, index) => {
+      const paletteColor = palette[index % palette.length];
+      tMap.set(team, theme.visualization.getColorByName(paletteColor));
+    });
 
     return { identityColorMap: iMap, teamColorMap: tMap };
-  }, [points]);
+  }, [points, palette, theme]);
 
 
 
@@ -181,15 +188,29 @@ export const DeveloperLandscapePanel: React.FC<Props> = ({ data, width, height, 
     <div className={styles.wrapper}>
       <svg width={width} height={height}>
         <rect x={0} y={0} width={width} height={height} fill="transparent" />
-        <line x1={midX} y1={padding} x2={midX} y2={padding + plotHeight} stroke="#3a4654" strokeWidth={1} />
-        <line x1={padding} y1={midY} x2={padding + plotWidth} y2={midY} stroke="#3a4654" strokeWidth={1} />
+        <line
+          x1={midX}
+          y1={padding}
+          x2={midX}
+          y2={padding + plotHeight}
+          stroke={theme.colors.border.weak}
+          strokeWidth={1}
+        />
+        <line
+          x1={padding}
+          y1={midY}
+          x2={padding + plotWidth}
+          y2={midY}
+          stroke={theme.colors.border.weak}
+          strokeWidth={1}
+        />
         <rect
           x={padding}
           y={padding}
           width={plotWidth}
           height={plotHeight}
           fill="none"
-          stroke="#2b3440"
+          stroke={theme.colors.border.medium}
           strokeWidth={1}
         />
 
@@ -222,7 +243,7 @@ export const DeveloperLandscapePanel: React.FC<Props> = ({ data, width, height, 
       ? (point.team ? teamColorMap.get(point.team) : '#7f8fa3')
       : (point.label ? identityColorMap.get(point.label) : '#7f8fa3');
 
-    const opacity = focusIdentity ? (isFocus ? 1 : 0.15) : 1;
+    const opacity = focusIdentity ? (isFocus ? 1 : 0.25) : 1;
     const showLabel = focusIdentity ? isFocus : landscapeOptions.showLabels;
 
     const tooltip = [
@@ -241,10 +262,10 @@ export const DeveloperLandscapePanel: React.FC<Props> = ({ data, width, height, 
     const displayName = point.label
       ? point.label.includes('@')
         ? point.label
-            .split('@')[0]
-            .split(/[\._]/)
-            .map((s: string) => s.charAt(0).toUpperCase() + s.slice(1))
-            .join(' ')
+          .split('@')[0]
+          .split(/[\._]/)
+          .map((s: string) => s.charAt(0).toUpperCase() + s.slice(1))
+          .join(' ')
         : point.label
       : '';
 

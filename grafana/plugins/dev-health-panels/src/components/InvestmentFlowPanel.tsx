@@ -1,36 +1,24 @@
 import React, { useMemo } from 'react';
 import { css } from '@emotion/css';
-import { PanelProps } from '@grafana/data';
+import { GrafanaTheme2, PanelProps } from '@grafana/data';
+import { useStyles2, useTheme2 } from '@grafana/ui';
 import { DevHealthOptions } from '../types';
 import { getField, getFieldValue, getFrameWithFields } from './dataFrame';
 import { PanelEmptyState } from './PanelEmptyState';
 
 interface Props extends PanelProps<DevHealthOptions> {}
 
-const styles = {
+const getStyles = (theme: GrafanaTheme2) => ({
   wrapper: css`
     width: 100%;
     height: 100%;
-    font-family: Open Sans, Helvetica, Arial, sans-serif;
+    font-family: ${theme.typography.fontFamily};
   `,
   label: css`
     font-size: 11px;
-    fill: #dbe2ea;
+    fill: ${theme.colors.text.secondary};
   `,
-};
-
-const palette = [
-  '#73BF69', // Green
-  '#F2CC0C', // Yellow
-  '#FF780A', // Orange
-  '#F2495C', // Red
-  '#8AB8FF', // Light Blue
-  '#3274D9', // Blue
-  '#B877D9', // Purple
-  '#E0B400', // Gold
-  '#96D98D', // Light Green
-  '#FF9F30', // Light Orange
-];
+});
 
 type FlowRecord = {
   source: string;
@@ -40,6 +28,8 @@ type FlowRecord = {
 };
 
 export const InvestmentFlowPanel: React.FC<Props> = ({ data, width, height, options }) => {
+  const theme = useTheme2();
+  const styles = useStyles2(getStyles);
   const investmentOptions = options.investmentFlow ?? {
     timeWindowDays: 30,
     valueField: 'value',
@@ -131,11 +121,13 @@ export const InvestmentFlowPanel: React.FC<Props> = ({ data, width, height, opti
     });
     const sortedNames = Array.from(allNames).sort();
     const map = new Map<string, string>();
+    const palette = theme.visualization.palette;
     sortedNames.forEach((name, index) => {
-      map.set(name, palette[index % palette.length]);
+      const paletteColor = palette[index % palette.length];
+      map.set(name, theme.visualization.getColorByName(paletteColor));
     });
     return map;
-  }, [flows]);
+  }, [flows, theme]);
 
   if (!targetExists) {
     const totals = new Map<string, number>();
@@ -152,7 +144,7 @@ export const InvestmentFlowPanel: React.FC<Props> = ({ data, width, height, opti
           {Array.from(totals.entries()).map(([source, value], index) => {
             const y = 20 + index * (barHeight + 12);
             const segmentWidth = totalValue ? (value / totalValue) * barWidth : 0;
-            const color = colorMap.get(source) ?? palette[0];
+            const color = colorMap.get(source) ?? theme.visualization.getColorByName(theme.visualization.palette[0]);
             return (
               <g key={source}>
                 <text x={8} y={y + barHeight - 4} className={styles.label}>
@@ -247,7 +239,7 @@ export const InvestmentFlowPanel: React.FC<Props> = ({ data, width, height, opti
           
           // If we have a single source, color links by target to show the breakdown
           const colorKey = nodesLeft.length === 1 ? link.target : link.source;
-          const color = colorMap.get(colorKey) ?? palette[0];
+          const color = colorMap.get(colorKey) ?? theme.visualization.getColorByName(theme.visualization.palette[0]);
           const percent = total > 0 ? (link.value / total) * 100 : 0;
 
           return (
@@ -271,7 +263,7 @@ export const InvestmentFlowPanel: React.FC<Props> = ({ data, width, height, opti
           if (!pos) {
             return null;
           }
-          const color = colorMap.get(node.name) ?? palette[0];
+          const color = colorMap.get(node.name) ?? theme.visualization.getColorByName(theme.visualization.palette[0]);
           return (
             <g key={node.name}>
               <rect x={leftX} y={pos.y} width={nodeWidth} height={pos.height} fill={color} />
@@ -287,7 +279,7 @@ export const InvestmentFlowPanel: React.FC<Props> = ({ data, width, height, opti
           if (!pos) {
             return null;
           }
-          const color = colorMap.get(node.name) ?? palette[0];
+          const color = colorMap.get(node.name) ?? theme.visualization.getColorByName(theme.visualization.palette[0]);
           return (
             <g key={node.name}>
               <rect x={rightX} y={pos.y} width={nodeWidth} height={pos.height} fill={color} />
