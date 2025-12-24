@@ -2,7 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/grafana/grafana/main/docs/sources/developers/plugins/plugin.schema.json",
   "type": "panel",
   "name": "Dev Health Panels",
-  "id": "devhealth-dev-health-panels-panel",
+  "id": "devhealth-ops-panel",
   "info": {
     "keywords": ["panel"],
     "description": "Opinionated developer health panels for grafana",
@@ -13,8 +13,30 @@
       "small": "img/logo.svg",
       "large": "img/logo.svg"
     },
-    "links": [],
-    "screenshots": [],
+    "links": [
+      {
+        "name": "Project",
+        "url": "https://github.com/chrisgeo/dev-health-ops"
+      },
+      {
+        "name": "License",
+        "url": "https://github.com/chrisgeo/dev-health-ops/blob/main/grafana/plugins/dev-health-panels/LICENSE"
+      },
+      {
+        "name": "Documentation",
+        "url": "https://github.com/chrisgeo/dev-health-ops/blob/main/grafana/plugins/dev-health-panels/README.md"
+      },
+      {
+        "name": "sponsor",
+        "url": "https://github.com/sponsors/chrisgeo"
+      }
+    ],
+    "screenshots": [
+      {
+        "path": "img/screenshot.png",
+        "name": "Dev Health Panels Overview"
+      }
+    ],
     "version": "%VERSION%",
     "updated": "%TODAY%"
   },

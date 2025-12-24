@@ -20,8 +20,7 @@
     {
       "id": 1,
       "title": "Investment Flow",
-      "type": "devhealth-dev-health-panels-panel",
-      "datasource": {
+              "type": "devhealth-ops-panel",      "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "clickhouse"
       },

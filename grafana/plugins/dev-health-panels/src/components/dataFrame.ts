@@ -24,5 +24,5 @@ export const getFieldValue = <T>(field: Field, index: number): T | undefined => 
   if (!values) {
     return undefined;
   }
-  return values.get ? (values.get(index) as T) : (values[index] as T);
+  return values[index] as T;
 };

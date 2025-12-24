@@ -27,7 +27,7 @@ const getStyles = (theme: GrafanaTheme2) => ({
   schema: css`
     background: ${theme.colors.background.secondary};
     padding: 10px 12px;
-    border-radius: ${theme.shape.borderRadius(1)};
+    border-radius: ${theme.shape.radius.default};
     font-family: ${theme.typography.fontFamilyMonospace};
     font-size: 12px;
     white-space: pre-wrap;

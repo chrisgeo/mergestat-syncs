@@ -23,7 +23,7 @@ npm run build
 
 ## Unsigned plugin
 
-This plugin loads unsigned. Ensure Grafana has `GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=devhealth-dev-health-panels-panel`.
+This plugin loads unsigned. Ensure Grafana has `GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=devhealth-ops-panel`.
 
 ## Dashboard Configuration
 
