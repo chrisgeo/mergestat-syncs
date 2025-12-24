@@ -21,6 +21,22 @@ Developer health tooling drifted into expensive, opaque “scoring” systems th
 - HR/performance-management tooling
 - Executive theater dashboards that hide context
 
+## Installation
+
+If you are not developing on this project and just want to use the tools, you can install the package directly:
+
+```bash
+pip install dev-health-ops
+```
+
+This provides the `dev-hops` command in your terminal.
+
+```bash
+dev-hops --help
+```
+
+*Note: In the documentation below, you can replace `python cli.py` with `dev-hops` if you have installed the package.*
+
 ## Private Repository Support ✅
 
 **Both GitHub and GitLab connectors fully support private repositories!** When provided with tokens that have appropriate permissions, you can access and sync data from private repositories just as easily as public ones.
