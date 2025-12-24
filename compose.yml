@@ -91,4 +91,4 @@ services:
     volumes:
       - ./:/app
     working_dir: /app
-    command: /bin/sh -c 'python3 cli.py sync local --db "$DB_CONN_STRING" --repo-path .'
+    command: /bin/sh -c 'python3 cli.py sync git --provider local --db "$DB_CONN_STRING" --repo-path .'

@@ -799,6 +799,8 @@ async def process_github_repo(
     fetch_blame: bool = False,
     blame_only: bool = False,
     max_commits: Optional[int] = None,
+    sync_git: bool = True,
+    sync_prs: bool = True,
     sync_cicd: bool = True,
     sync_deployments: bool = True,
     sync_incidents: bool = True,
@@ -873,55 +875,62 @@ async def process_github_repo(
             )
             return
 
-        # 2. Fetch Commits
-        if max_commits is None:
-            logging.info("Fetching all commits from GitHub...")
-        else:
-            logging.info(f"Fetching up to {max_commits} commits from GitHub...")
-        raw_commits, commit_objects = await loop.run_in_executor(
-            None, _fetch_github_commits_sync, gh_repo, max_commits, db_repo.id, since
-        )
-
-        if commit_objects:
-            await store.insert_git_commit_data(commit_objects)
-            logging.info(f"Stored {len(commit_objects)} commits from GitHub")
-
-        # 3. Fetch Stats
-        logging.info("Fetching commit stats from GitHub...")
-        stats_limit = 50 if max_commits is None else min(max_commits, 50)
-        stats_objects = await loop.run_in_executor(
-            None,
-            _fetch_github_commit_stats_sync,
-            raw_commits,
-            db_repo.id,
-            stats_limit,
-            since,
-        )
-
-        if stats_objects:
-            await store.insert_git_commit_stats(stats_objects)
-            logging.info(
-                "Stored %d commit stats from GitHub",
-                len(stats_objects),
+        if sync_git:
+            # 2. Fetch Commits
+            if max_commits is None:
+                logging.info("Fetching all commits from GitHub...")
+            else:
+                logging.info(f"Fetching up to {max_commits} commits from GitHub...")
+            raw_commits, commit_objects = await loop.run_in_executor(
+                None,
+                _fetch_github_commits_sync,
+                gh_repo,
+                max_commits,
+                db_repo.id,
+                since,
             )
 
-        # 4. Fetch PRs
-        logging.info("Fetching pull requests from GitHub...")
-        pr_total = await loop.run_in_executor(
-            None,
-            _sync_github_prs_to_store,
-            connector,
-            owner,
-            repo_name,
-            db_repo.id,
-            store,
-            loop,
-            BATCH_SIZE,
-            "all",
-            None,
-            since,
-        )
-        logging.info(f"Stored {pr_total} pull requests from GitHub")
+            if commit_objects:
+                await store.insert_git_commit_data(commit_objects)
+                logging.info(f"Stored {len(commit_objects)} commits from GitHub")
+
+            # 3. Fetch Stats
+            logging.info("Fetching commit stats from GitHub...")
+            stats_limit = 50 if max_commits is None else min(max_commits, 50)
+            stats_objects = await loop.run_in_executor(
+                None,
+                _fetch_github_commit_stats_sync,
+                raw_commits,
+                db_repo.id,
+                stats_limit,
+                since,
+            )
+
+            if stats_objects:
+                await store.insert_git_commit_stats(stats_objects)
+                logging.info(
+                    "Stored %d commit stats from GitHub",
+                    len(stats_objects),
+                )
+
+        if sync_prs:
+            # 4. Fetch PRs
+            logging.info("Fetching pull requests from GitHub...")
+            pr_total = await loop.run_in_executor(
+                None,
+                _sync_github_prs_to_store,
+                connector,
+                owner,
+                repo_name,
+                db_repo.id,
+                store,
+                loop,
+                BATCH_SIZE,
+                "all",
+                None,
+                since,
+            )
+            logging.info(f"Stored {pr_total} pull requests from GitHub")
 
         if sync_cicd:
             logging.info("Fetching CI/CD workflow runs from GitHub...")
@@ -1000,10 +1009,13 @@ async def process_github_repos_batch(
     max_commits_per_repo: int = None,
     max_repos: int = None,
     use_async: bool = False,
+    sync_git: bool = True,
+    sync_prs: bool = True,
     sync_cicd: bool = True,
     sync_deployments: bool = True,
     sync_incidents: bool = True,
     blame_only: bool = False,
+    backfill_missing: bool = True,
     since: Optional[datetime] = None,
 ) -> None:
     """
@@ -1017,10 +1029,13 @@ async def process_github_repos_batch(
     connector = GitHubConnector(token=token)
     loop = asyncio.get_running_loop()
 
-    pr_gate = RateLimitGate(
-        RateLimitConfig(initial_backoff_seconds=max(1.0, rate_limit_delay))
-    )
-    pr_semaphore = asyncio.Semaphore(max(1, max_concurrent))
+    pr_gate = None
+    pr_semaphore = None
+    if sync_prs:
+        pr_gate = RateLimitGate(
+            RateLimitConfig(initial_backoff_seconds=max(1.0, rate_limit_delay))
+        )
+        pr_semaphore = asyncio.Semaphore(max(1, max_concurrent))
 
     # Track results for summary and incremental storage
     all_results: List[BatchResult] = []
@@ -1077,70 +1092,76 @@ async def process_github_repos_batch(
                 )
             return
 
-        # Fetch commits and stats to populate git_commits/git_commit_stats.
-        if max_commits_per_repo is None and since is None:
-            commit_limit = 100
-        else:
-            commit_limit = max_commits_per_repo
-        try:
-            gh_repo = connector.github.get_repo(repo_info.full_name)
-            raw_commits, commit_objects = await loop.run_in_executor(
-                None,
-                _fetch_github_commits_sync,
-                gh_repo,
-                commit_limit,
-                db_repo.id,
-                since,
-            )
-            if commit_objects:
-                await store.insert_git_commit_data(commit_objects)
-
-            stats_objects = await loop.run_in_executor(
-                None,
-                _fetch_github_commit_stats_sync,
-                raw_commits,
-                db_repo.id,
-                50 if commit_limit is None else min(commit_limit, 50),
-                since,
-            )
-            if stats_objects:
-                await store.insert_git_commit_stats(stats_objects)
-        except Exception as e:
-            logging.warning(
-                "Failed to fetch commits for GitHub repo %s: %s",
-                repo_info.full_name,
-                e,
-                exc_info=True,
-            )
-
-        # Fetch ALL PRs for batch-processed repos, storing in batches.
-        try:
-            owner, repo_name = _split_full_name(repo_info.full_name)
-            async with pr_semaphore:
-                await loop.run_in_executor(
+        gh_repo = None
+        if sync_git:
+            # Fetch commits and stats to populate git_commits/git_commit_stats.
+            if max_commits_per_repo is None and since is None:
+                commit_limit = 100
+            else:
+                commit_limit = max_commits_per_repo
+            try:
+                if gh_repo is None:
+                    gh_repo = connector.github.get_repo(repo_info.full_name)
+                raw_commits, commit_objects = await loop.run_in_executor(
                     None,
-                    _sync_github_prs_to_store,
-                    connector,
-                    owner,
-                    repo_name,
+                    _fetch_github_commits_sync,
+                    gh_repo,
+                    commit_limit,
                     db_repo.id,
-                    store,
-                    loop,
-                    BATCH_SIZE,
-                    "all",
-                    pr_gate,
                     since,
                 )
-        except Exception as e:
-            logging.error(
-                "Failed to fetch/store PRs for GitHub repo %s: %s",
-                repo_info.full_name,
-                e,
-            )
-            raise
+                if commit_objects:
+                    await store.insert_git_commit_data(commit_objects)
+
+                stats_objects = await loop.run_in_executor(
+                    None,
+                    _fetch_github_commit_stats_sync,
+                    raw_commits,
+                    db_repo.id,
+                    50 if commit_limit is None else min(commit_limit, 50),
+                    since,
+                )
+                if stats_objects:
+                    await store.insert_git_commit_stats(stats_objects)
+            except Exception as e:
+                logging.warning(
+                    "Failed to fetch commits for GitHub repo %s: %s",
+                    repo_info.full_name,
+                    e,
+                    exc_info=True,
+                )
+
+        if sync_prs:
+            # Fetch ALL PRs for batch-processed repos, storing in batches.
+            try:
+                owner, repo_name = _split_full_name(repo_info.full_name)
+                async with pr_semaphore:
+                    await loop.run_in_executor(
+                        None,
+                        _sync_github_prs_to_store,
+                        connector,
+                        owner,
+                        repo_name,
+                        db_repo.id,
+                        store,
+                        loop,
+                        BATCH_SIZE,
+                        "all",
+                        pr_gate,
+                        since,
+                    )
+            except Exception as e:
+                logging.error(
+                    "Failed to fetch/store PRs for GitHub repo %s: %s",
+                    repo_info.full_name,
+                    e,
+                )
+                raise
 
         if sync_cicd:
             try:
+                if gh_repo is None:
+                    gh_repo = connector.github.get_repo(repo_info.full_name)
                 pipeline_runs = await loop.run_in_executor(
                     None,
                     _fetch_github_workflow_runs_sync,
@@ -1160,6 +1181,8 @@ async def process_github_repos_batch(
 
         if sync_deployments:
             try:
+                if gh_repo is None:
+                    gh_repo = connector.github.get_repo(repo_info.full_name)
                 deployments = await loop.run_in_executor(
                     None,
                     _fetch_github_deployments_sync,
@@ -1179,6 +1202,8 @@ async def process_github_repos_batch(
 
         if sync_incidents:
             try:
+                if gh_repo is None:
+                    gh_repo = connector.github.get_repo(repo_info.full_name)
                 incidents = await loop.run_in_executor(
                     None,
                     _fetch_github_incidents_sync,
@@ -1196,7 +1221,7 @@ async def process_github_repos_batch(
                     e,
                 )
 
-        if result.stats:
+        if result.stats and sync_git:
             stat = GitCommitStat(
                 repo_id=db_repo.id,
                 commit_hash=AGGREGATE_STATS_MARKER,
@@ -1208,21 +1233,22 @@ async def process_github_repos_batch(
             )
             await store.insert_git_commit_stats([stat])
 
-        try:
-            await _backfill_github_missing_data(
-                store=store,
-                connector=connector,
-                db_repo=db_repo,
-                repo_full_name=repo_info.full_name,
-                default_branch=repo_info.default_branch,
-                max_commits=max_commits_per_repo,
-            )
-        except Exception as e:
-            logging.debug(
-                "Backfill failed for GitHub repo %s: %s",
-                repo_info.full_name,
-                e,
-            )
+        if backfill_missing:
+            try:
+                await _backfill_github_missing_data(
+                    store=store,
+                    connector=connector,
+                    db_repo=db_repo,
+                    repo_full_name=repo_info.full_name,
+                    default_branch=repo_info.default_branch,
+                    max_commits=max_commits_per_repo,
+                )
+            except Exception as e:
+                logging.debug(
+                    "Backfill failed for GitHub repo %s: %s",
+                    repo_info.full_name,
+                    e,
+                )
 
     def on_repo_complete(result: BatchResult) -> None:
         all_results.append(result)
@@ -1259,37 +1285,24 @@ async def process_github_repos_batch(
                 loop.call_soon_threadsafe(_enqueue)
 
     try:
-        results_queue = asyncio.Queue(maxsize=max(1, max_concurrent * 2))
+        if sync_git:
+            results_queue = asyncio.Queue(maxsize=max(1, max_concurrent * 2))
 
-        async def _consume_results() -> None:
-            assert results_queue is not None
-            while True:
-                item = await results_queue.get()
-                try:
-                    if item is _queue_sentinel:
-                        return
-                    await store_result(item)
-                finally:
-                    results_queue.task_done()
+            async def _consume_results() -> None:
+                assert results_queue is not None
+                while True:
+                    item = await results_queue.get()
+                    try:
+                        if item is _queue_sentinel:
+                            return
+                        await store_result(item)
+                    finally:
+                        results_queue.task_done()
 
-        consumer_task = asyncio.create_task(_consume_results())
+            consumer_task = asyncio.create_task(_consume_results())
 
-        if use_async:
-            await connector.get_repos_with_stats_async(
-                org_name=org_name,
-                user_name=user_name,
-                pattern=pattern,
-                batch_size=batch_size,
-                max_concurrent=max_concurrent,
-                rate_limit_delay=rate_limit_delay,
-                max_commits_per_repo=max_commits_per_repo,
-                max_repos=max_repos,
-                on_repo_complete=on_repo_complete,
-            )
-        else:
-            await loop.run_in_executor(
-                None,
-                lambda: connector.get_repos_with_stats(
+            if use_async:
+                await connector.get_repos_with_stats_async(
                     org_name=org_name,
                     user_name=user_name,
                     pattern=pattern,
@@ -1299,12 +1312,59 @@ async def process_github_repos_batch(
                     max_commits_per_repo=max_commits_per_repo,
                     max_repos=max_repos,
                     on_repo_complete=on_repo_complete,
+                )
+            else:
+                await loop.run_in_executor(
+                    None,
+                    lambda: connector.get_repos_with_stats(
+                        org_name=org_name,
+                        user_name=user_name,
+                        pattern=pattern,
+                        batch_size=batch_size,
+                        max_concurrent=max_concurrent,
+                        rate_limit_delay=rate_limit_delay,
+                        max_commits_per_repo=max_commits_per_repo,
+                        max_repos=max_repos,
+                        on_repo_complete=on_repo_complete,
+                    ),
+                )
+
+            await results_queue.join()
+            await results_queue.put(_queue_sentinel)
+            await consumer_task
+        else:
+            repos = await loop.run_in_executor(
+                None,
+                lambda: connector.list_repositories(
+                    org_name=org_name,
+                    user_name=user_name,
+                    pattern=pattern,
+                    max_repos=max_repos,
                 ),
             )
+            semaphore = asyncio.Semaphore(max(1, max_concurrent))
 
-        await results_queue.join()
-        await results_queue.put(_queue_sentinel)
-        await consumer_task
+            async def _process_repo(repo_info) -> None:
+                async with semaphore:
+                    result = BatchResult(
+                        repository=repo_info,
+                        stats=None,
+                        success=True,
+                    )
+                    try:
+                        await store_result(result)
+                    except Exception as e:
+                        result = BatchResult(
+                            repository=repo_info,
+                            stats=None,
+                            error=str(e),
+                            success=False,
+                        )
+                    on_repo_complete(result)
+
+            tasks = [asyncio.create_task(_process_repo(repo)) for repo in repos]
+            if tasks:
+                await asyncio.gather(*tasks)
 
         # Summary
         successful = sum(1 for r in all_results if r.success)

@@ -67,7 +67,7 @@ pytest tests/test_private_repo_access.py::TestGitHubPrivateRepoAccess -v
 **Option C: Test with actual data sync**
 
 ```bash
-python cli.py sync github \
+python cli.py sync git --provider github \
   --db "postgresql+asyncpg://localhost:5432/mergestat" \
   --auth "$GITHUB_TOKEN" \
   --owner myusername \
@@ -128,7 +128,7 @@ pytest tests/test_private_repo_access.py::TestGitLabPrivateProjectAccess -v
 **Option C: Test with actual data sync**
 
 ```bash
-python cli.py sync gitlab \
+python cli.py sync git --provider gitlab \
   --db "postgresql+asyncpg://localhost:5432/mergestat" \
   --auth "$GITLAB_TOKEN" \
   --project-id 12345
@@ -180,7 +180,7 @@ The test should:
 
 - **Cause**: Using project path when numeric ID is expected or vice versa
 - **Solution**:
-- For `cli.py sync gitlab`: Use numeric project ID
+- For `cli.py sync git --provider gitlab`: Use numeric project ID
   - For connector methods: Can use either project name or ID
 
 **Problem**: Self-hosted GitLab connection issues
