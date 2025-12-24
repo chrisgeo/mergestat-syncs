@@ -19,7 +19,7 @@ volumes:
       o: bind
 services:
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana-enterprise:latest
     container_name: grafana
     restart: unless-stopped
     environment:
@@ -38,6 +38,8 @@ services:
       GF_LOG_FILTERS: plugin.devhealth-devhealthpanels-panel:debug
       GF_LOG_LEVEL: debug
       GF_DATAPROXY_LOGGING: 1
+      GF_RENDERING_SERVER_URL: http://renderer:8081/render
+      GF_RENDERING_CALLBACK_URL: http://grafana:3000/
     ports:
       - "3000:3000"
     depends_on:
@@ -95,3 +97,5 @@ services:
       - ./:/app
     working_dir: /app
     command: /bin/sh -c 'python3 cli.py sync git --provider local --db "$DB_CONN_STRING" --repo-path .'
+  renderer:
+    image: grafana/grafana-image-renderer:latest
