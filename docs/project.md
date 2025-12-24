@@ -2,20 +2,11 @@
 
 ## System Flow (Connect → Sync → Calculate)
 
-- **Connect & sync**: ingest Git facts via `sync local|github|gitlab`.
-- **Sync work items**: fetch Jira/GitHub/GitLab issues separately via `sync work-items` (use `--auth` to override GitHub/GitLab tokens).
-- **Calculate**: run `metrics daily` using stored facts (no provider calls by default).
-- **Planned**: allow `sync work-items` filtering by repo tags/settings.
-- **Dashboards**: Investment Areas uses regex `match(...)` filtering for the team variable in ClickHouse queries.
-- **Dashboards**: Team filters normalize `team_id` with `ifNull(nullIf(team_id, ''), 'unassigned')` to include legacy NULL/empty values.
-- **Dashboards**: IC Drilldown includes a Churn vs Throughput panel filtered by `identity_id`.
-- **Investment metrics**: `investment_metrics_daily.team_id` stores NULL for unassigned; the investment flow view casts via `toNullable(team_id)`.
-- **Dashboards**: Hotspot Explorer queries should use table format and order by day to avoid Grafana time-sorting errors.
-- **Dashboards**: Hotspot Explorer binds the facts frame using `churn_loc_30d` to prevent sparkline frames from masking drivers.
-- **Panels**: `grafana/plugins/dev-health-panels` provides Developer Landscape, Hotspot Explorer, and Investment Flow visualizations.
-- **Panel contracts**: ClickHouse views in `stats` back the Dev Health panel plugin queries.
-- **ClickHouse view syntax**: use `WITH ... AS` aliasing (avoid `WITH name = expr`).
-- **Backfill commits**: GitHub/GitLab `--date/--backfill` runs default to unlimited commits unless `--max-commits-per-repo` is set.
+- connect: Github, GitLab, IDEs, CI/CD, SCM, Databases
+- sync: code events, PRs, reviews, issues, deployments
+- calculate: metrics, scores, trends, risk indicators, health signals
+
+---
 
 ## LinearB — Flow & Team Efficiency
 
