@@ -110,7 +110,7 @@
     },
     {
       "title": "Churn vs Throughput",
-      "type": "devhealth-dev-health-panels-panel",
+      "type": "devhealth-ops-panel",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "clickhouse"

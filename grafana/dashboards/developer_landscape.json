@@ -21,7 +21,7 @@
     {
       "id": 1,
       "title": "Churn vs Throughput",
-      "type": "devhealth-dev-health-panels-panel",
+      "type": "devhealth-ops-panel",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "clickhouse"
@@ -52,7 +52,7 @@
     {
       "id": 2,
       "title": "Cycle Time vs Throughput",
-      "type": "devhealth-dev-health-panels-panel",
+      "type": "devhealth-ops-panel",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "clickhouse"
@@ -83,7 +83,7 @@
     {
       "id": 3,
       "title": "WIP vs Throughput",
-      "type": "devhealth-dev-health-panels-panel",
+      "type": "devhealth-ops-panel",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "clickhouse"
