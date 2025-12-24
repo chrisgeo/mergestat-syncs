@@ -20,6 +20,19 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Extract Version
+        id: get_version
+        run: |
+          if [[ $GITHUB_REF == refs/tags/* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/}
+            if [[ "$VERSION" == v* ]]; then
+              VERSION="${VERSION:1}"
+            fi
+          else
+            VERSION=$(npm pkg get version | tr -d '"')
+          fi
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -40,6 +53,8 @@ jobs:
         run: npm run test:ci
 
       - name: Build Plugin
+        env:
+          PLUGIN_VERSION: ${{ env.VERSION }}
         run: npm run build
 
       - name: Sign Plugin
@@ -57,9 +72,7 @@ jobs:
       - name: Get Plugin Metadata
         id: metadata
         run: |
-          VERSION=$(npm pkg get version | tr -d '"')
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          PLUGIN_ID=$(npm pkg get name | tr -d '"') # Using package name or plugin id from json
+          echo "version=${{ env.VERSION }}" >> $GITHUB_OUTPUT
           # Better to get ID from plugin.json directly as it is the true ID
           REAL_PLUGIN_ID=$(jq -r .id src/plugin.json)
           echo "plugin_id=$REAL_PLUGIN_ID" >> $GITHUB_OUTPUT

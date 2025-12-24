@@ -2,7 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/grafana/grafana/main/docs/sources/developers/plugins/plugin.schema.json",
   "type": "panel",
   "name": "Dev Health Panels",
-  "id": "devhealth-ops-panel",
+  "id": "dev-health-panels",
   "info": {
     "keywords": ["panel"],
     "description": "Opinionated developer health panels for grafana",
@@ -40,6 +40,7 @@
     "version": "%VERSION%",
     "updated": "%TODAY%"
   },
+  "rootUrls": ["https://chrisgeorge.grafana.net/"],
   "dependencies": {
     "grafanaDependency": ">=10.3.3",
     "plugins": []
