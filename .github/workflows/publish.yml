@@ -14,17 +14,18 @@ jobs:
       url: https://pypi.org/p/dev-health-ops
     permissions:
       contents: read
-      id-token: write # Mandatory for trusted publishing
+      id-token: write  # Mandatory for trusted publishing
 
-        steps:
-        - name: Checkout code
-          uses: actions/checkout@v4
-          with:
-            fetch-depth: 0
-    
-        - name: Set up Python        uses: actions/setup-python@v5
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
         with:
-          python-version: "3.12"
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
 
       - name: Install build dependencies
         run: |
