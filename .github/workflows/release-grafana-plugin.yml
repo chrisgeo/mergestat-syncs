@@ -6,8 +6,47 @@ on:
   workflow_dispatch:
 
 jobs:
+  check-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      plugin_changed: ${{ steps.check.outputs.plugin_changed }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for changes
+        id: check
+        run: |
+          CURRENT_TAG=${GITHUB_REF#refs/tags/}
+          echo "Current tag: $CURRENT_TAG"
+          
+          # Try to find the previous tag reachable from the current tag's parent
+          PREV_TAG=$(git describe --abbrev=0 --tags ${CURRENT_TAG}^ 2>/dev/null || echo "")
+          
+          if [ -z "$PREV_TAG" ]; then
+            echo "No previous tag found. Triggering release."
+            echo "plugin_changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "Comparing changes between $PREV_TAG and $CURRENT_TAG"
+            # Check for changes SPECIFICALLY in the plugin directory
+            CHANGED_FILES=$(git diff --name-only $PREV_TAG $CURRENT_TAG | grep "^grafana/plugins/dev-health-panels/" || true)
+            
+            if [ -n "$CHANGED_FILES" ]; then
+              echo "Plugin changes detected:"
+              echo "$CHANGED_FILES" | head -n 5
+              echo "plugin_changed=true" >> $GITHUB_OUTPUT
+            else
+              echo "No plugin changes detected."
+              echo "plugin_changed=false" >> $GITHUB_OUTPUT
+            fi
+          fi
+
   release-plugin:
     name: Build, Sign and Release Plugin
+    needs: check-changes
+    if: needs.check-changes.outputs.plugin_changed == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write # Needed for uploading release assets
@@ -23,15 +62,44 @@ jobs:
       - name: Extract Version
         id: get_version
         run: |
-          if [[ $GITHUB_REF == refs/tags/* ]]; then
-            VERSION=${GITHUB_REF#refs/tags/}
-            if [[ "$VERSION" == v* ]]; then
-              VERSION="${VERSION:1}"
-            fi
-          else
-            VERSION=$(npm pkg get version | tr -d '"')
-          fi
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          # Install semver for parsing
+          npm install semver
+
+          # Use node to parse version logic
+          node -e '
+            const semver = require("semver");
+            const ref = process.env.GITHUB_REF;
+            let raw = "";
+            
+            if (ref.startsWith("refs/tags/")) {
+              raw = ref.replace("refs/tags/", "");
+            } else {
+              // Fallback to package.json version if not a tag
+              raw = require("./grafana/plugins/dev-health-panels/package.json").version;
+            }
+
+            // 1. Try clean (handles v1.2.3, 1.2.3-beta) - preserves prerelease
+            let ver = semver.clean(raw);
+
+            // 2. If invalid, try coerce (handles 1.2 -> 1.2.0, 1.2.3.4 -> 1.2.3)
+            // Note: coerce strips prerelease tags from invalid strings (e.g. v1.2-beta -> 1.2.0)
+            if (!ver) {
+              const coerced = semver.coerce(raw);
+              if (coerced) ver = coerced.version;
+            }
+
+            // 3. Fail if still null
+            if (!ver) {
+              console.error(`Could not parse a valid SemVer from "${raw}"`);
+              process.exit(1);
+            }
+
+            console.log(`Parsed version: ${ver}`);
+            // Write to GITHUB_ENV
+            const fs = require("fs");
+            fs.appendFileSync(process.env.GITHUB_ENV, `VERSION=${ver}\n`);
+          '
+
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -42,6 +110,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Update package.json version
+        run: npm version ${{ env.VERSION }} --no-git-tag-version --allow-same-version
 
       - name: Lint
         run: npm run lint
