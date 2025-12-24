@@ -9,3 +9,4 @@ __pycache__/**
 *.db
 benchmark**
 demo-data**
+.flake8

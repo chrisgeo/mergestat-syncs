@@ -7,7 +7,10 @@
     {
       "title": "Delivery Units Daily",
       "type": "barchart",
-      "datasource": "ClickHouse",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -30,7 +33,10 @@
     {
       "title": "LOC Touched",
       "type": "timeseries",
-      "datasource": "ClickHouse",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -53,7 +59,10 @@
     {
       "title": "Cycle Time P50 (Hours)",
       "type": "timeseries",
-      "datasource": "ClickHouse",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -76,7 +85,10 @@
     {
       "title": "WIP Active",
       "type": "timeseries",
-      "datasource": "ClickHouse",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -95,22 +107,50 @@
         },
         "overrides": []
       }
+    },
+    {
+      "title": "Churn vs Throughput",
+      "type": "devhealth-dev-health-panels-panel",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
+      "targets": [
+        {
+          "format": 1,
+          "rawQuery": true,
+          "rawSql": "SELECT max(v.as_of_day) as as_of_day, map_name, ifNull(nullIf(team_id, ''), 'unassigned') AS team_id, identity_id, argMax(x_raw, v.as_of_day) as x_raw, argMax(y_raw, v.as_of_day) as y_raw, argMax(x_norm, v.as_of_day) as x_norm, argMax(y_norm, v.as_of_day) as y_norm FROM stats.v_ic_landscape_points AS v WHERE map_name = 'churn_throughput' AND v.as_of_day >= toDate(toDateTime(intDiv($__from, 1000))) AND v.as_of_day < toDate(toDateTime(intDiv($__to, 1000))) AND identity_id = '$identity_id' GROUP BY map_name, team_id, identity_id ORDER BY team_id, identity_id",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "mode": "developerLandscape",
+        "developerLandscape": {
+          "mapName": "churn_throughput",
+          "showLabels": true,
+          "colorByTeam": true
+        }
+      }
     }
   ],
   "templating": {
     "list": [
       {
-        "current": {
-          "text": "All",
-          "value": "All"
-        },
-        "datasource": "ClickHouse",
-        "definition": "SELECT DISTINCT identity_id FROM stats.user_metrics_daily ORDER BY 1",
-        "hide": 0,
-        "includeAll": false,
         "name": "identity_id",
-        "query": "SELECT DISTINCT identity_id FROM stats.user_metrics_daily ORDER BY 1",
-        "type": "query"
+        "label": "Identity",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "clickhouse"
+        },
+        "refresh": 1,
+        "query": "SELECT DISTINCT identity_id AS __text, identity_id AS __value FROM stats.user_metrics_daily ORDER BY 1"
       }
     ]
   },
