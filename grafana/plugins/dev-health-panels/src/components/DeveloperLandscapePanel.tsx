@@ -17,6 +17,12 @@ const styles = {
     font-size: 11px;
     fill: #dbe2ea;
   `,
+  axisLabel: css`
+    font-size: 11px;
+    fill: #9aa7b2;
+    text-anchor: middle;
+    font-weight: 500;
+  `,
 };
 
 const palette = ['#6b7c93', '#7a90a8', '#8aa0b5', '#9bb1c1', '#aebfcd', '#c2ced7'];
@@ -27,6 +33,19 @@ export const DeveloperLandscapePanel: React.FC<Props> = ({ data, width, height, 
     showLabels: false,
     colorByTeam: false,
   };
+
+  const axisLabels = useMemo(() => {
+    switch (landscapeOptions.mapName) {
+      case 'cycle_throughput':
+        return { x: 'Throughput', y: 'Cycle Time' };
+      case 'wip_throughput':
+        return { x: 'Throughput', y: 'WIP' };
+      case 'churn_throughput':
+      default:
+        return { x: 'Throughput', y: 'Churn' };
+    }
+  }, [landscapeOptions.mapName]);
+
   const frame = getFrameWithFields(data.series, ['x_norm', 'y_norm']);
 
   if (!frame) {
@@ -164,6 +183,15 @@ export const DeveloperLandscapePanel: React.FC<Props> = ({ data, width, height, 
           stroke="#2b3440"
           strokeWidth={1}
         />
+
+        {/* Axis Labels */}
+        <text x={midX} y={height - 8} className={styles.axisLabel}>
+          {axisLabels.x}
+        </text>
+        <text transform={`translate(12, ${midY}) rotate(-90)`} className={styles.axisLabel}>
+          {axisLabels.y}
+        </text>
+
         {points.map((point, index) => {
           const x = padding + Math.min(1, Math.max(0, point.xNorm)) * plotWidth;
           const y = padding + (1 - Math.min(1, Math.max(0, point.yNorm))) * plotHeight;
