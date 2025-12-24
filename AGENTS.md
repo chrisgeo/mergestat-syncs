@@ -91,7 +91,7 @@ The project follows a pipeline-like architecture:
 - Run the sync:
 
 ```bash
-python cli.py sync local --db "<DB_CONN>" --repo-path /path/to/repo
+python cli.py sync git --provider local --db "<DB_CONN>" --repo-path /path/to/repo
 ```
 
 - Generate synthetic data:
@@ -121,6 +121,7 @@ python cli.py metrics complexity --repo-path . -s "*"
 - Performance knobs: `BATCH_SIZE` and `MAX_WORKERS`.
 - Prefer async batch helpers for network I/O. Respect `RateLimitGate` backoff in connectors/processors.
 - Do not commit secrets. Use environment variables for tokens in examples only.
+- Close SQLAlchemyStore engines in tests (or use context managers) to avoid aiosqlite event-loop teardown warnings.
 
 ## When adding code
 

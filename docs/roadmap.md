@@ -11,7 +11,8 @@ This checklist tracks what is complete and what remains to finalize `dev-health-
 - [x] **Wellbeing Signals**: After-hours and weekend commit ratios; weekend active users (derived from user activity).
 - [x] **Connectors + Pipelines**: GitHub/GitLab CI/CD + deployments + incidents ingestion; async batch helpers.
 - [x] **Storage + Schema**: ClickHouse migrations and sink support for new metrics tables/columns.
-- [x] **CLI Controls**: Flags for `--sync-cicd`, `--sync-deployments`, `--sync-incidents`.
+- [x] **SQLite test cleanup**: Dispose SQLAlchemyStore engines to avoid aiosqlite event-loop teardown warnings.
+- [x] **CLI Controls**: Dedicated `sync cicd`, `sync deployments`, and `sync incidents` targets.
 - [x] **Complexity Metrics (Batch)**: Radon-based cyclomatic complexity scanning with DB-driven batch mode (`-s "*"`).
 - [x] **Unified Complexity Snapshot Loading**: `metrics daily` loads complexity snapshots via storage abstraction (`get_complexity_snapshots`).
 - [x] **Investment Area Classification**: Automated work item and churn classification based on configurable rules.
@@ -28,7 +29,7 @@ This checklist tracks what is complete and what remains to finalize `dev-health-
 - [x] **Hotspot Explorer formatting**: Use table format and order by day to keep Grafana sorting valid.
 - [x] **Hotspot ownership concentration**: Derive ownership concentration from git blame line shares.
 - [x] **Synthetic blame coverage**: Expand fixture file set to improve hotspot ownership coverage.
-- [x] **Blame-only sync**: Add `cli.py sync <local|github|gitlab> --blame-only` for targeted blame backfill.
+- [x] **Blame-only sync**: Add `cli.py sync blame --provider <local|github|gitlab>` for targeted blame backfill.
 - [x] **Backfill commit caps**: GitHub/GitLab `--date/--backfill` runs default to unlimited commits unless explicitly capped.
 - [x] **Hotspot Explorer frame binding**: Prefer facts frames via `churn_loc_30d` to keep drivers/trends rendering.
 - [x] **IC Drilldown churn vs throughput**: Add identity-filtered churn vs throughput panel.

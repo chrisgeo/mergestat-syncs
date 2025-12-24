@@ -627,7 +627,7 @@ ownership_concentration = max(lines_by_author) / total_lines
 ```
 
 Synthetic fixtures include an expanded file set to improve blame-driven ownership coverage.
-Blame-only sync is available via `cli.py sync <local|github|gitlab> --blame-only`.
+Blame-only sync is available via `cli.py sync blame --provider <local|github|gitlab>`.
 
 #### 1.3.3 PR Size
 

@@ -20,19 +20,23 @@ Git facts must already exist in the backend you point the job at:
 Work tracking facts should be synced from provider APIs via `python cli.py sync work-items ...`.
 See `docs/task_trackers.md` for configuration. (`metrics daily --provider ...` still exists as a convenience/backward-compatible path.)
 
-CI/CD pipeline facts are synced from GitHub/GitLab during the `sync` command when `--sync-cicd` is enabled:
+CI/CD pipeline facts are synced from GitHub/GitLab via the `sync cicd` job:
 
 ```bash
-python cli.py sync github --db "<DB_CONN>" --auth "$GITHUB_TOKEN" --owner "<org>" --repo "<repo>" --sync-cicd
-python cli.py sync gitlab --db "<DB_CONN>" --auth "$GITLAB_TOKEN" --gitlab-url "<URL>" --project-id <ID> --sync-cicd
+python cli.py sync cicd --provider github --db "<DB_CONN>" --auth "$GITHUB_TOKEN" --owner "<org>" --repo "<repo>"
+python cli.py sync cicd --provider gitlab --db "<DB_CONN>" --auth "$GITLAB_TOKEN" --gitlab-url "<URL>" --project-id <ID>
 ```
 
-Deployments and incident facts are synced during the `sync` command when their flags are enabled:
+Deployments and incident facts are synced via their own jobs:
 
 ```bash
-python cli.py sync github --db "<DB_CONN>" --auth "$GITHUB_TOKEN" --owner "<org>" --repo "<repo>" --sync-deployments --sync-incidents
-python cli.py sync gitlab --db "<DB_CONN>" --auth "$GITLAB_TOKEN" --gitlab-url "<URL>" --project-id <ID> --sync-deployments --sync-incidents
+python cli.py sync deployments --provider github --db "<DB_CONN>" --auth "$GITHUB_TOKEN" --owner "<org>" --repo "<repo>"
+python cli.py sync incidents --provider github --db "<DB_CONN>" --auth "$GITHUB_TOKEN" --owner "<org>" --repo "<repo>"
+python cli.py sync deployments --provider gitlab --db "<DB_CONN>" --auth "$GITLAB_TOKEN" --gitlab-url "<URL>" --project-id <ID>
+python cli.py sync incidents --provider gitlab --db "<DB_CONN>" --auth "$GITLAB_TOKEN" --gitlab-url "<URL>" --project-id <ID>
 ```
+
+Note: Jira Ops/Service Desk incidents are planned once project-to-repo or deployment mapping is defined.
 
 ## Derived Tables / Collections
 
