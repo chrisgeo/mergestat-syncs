@@ -122,12 +122,17 @@ export const InvestmentFlowPanel: React.FC<Props> = ({ data, width, height, opti
     );
   }
 
-  // Generate color map based on unique sources found in flows
+  // Generate color map based on unique sources and targets found in flows
   const colorMap = useMemo(() => {
-    const uniqueSources = Array.from(new Set(flows.map((f) => f.source))).sort();
+    const allNames = new Set<string>();
+    flows.forEach((f) => {
+      allNames.add(f.source);
+      allNames.add(f.target);
+    });
+    const sortedNames = Array.from(allNames).sort();
     const map = new Map<string, string>();
-    uniqueSources.forEach((source, index) => {
-      map.set(source, palette[index % palette.length]);
+    sortedNames.forEach((name, index) => {
+      map.set(name, palette[index % palette.length]);
     });
     return map;
   }, [flows]);
@@ -239,7 +244,10 @@ export const InvestmentFlowPanel: React.FC<Props> = ({ data, width, height, opti
           const endX = rightX;
           const controlX = (startX + endX) / 2;
           const path = `M ${startX} ${sourceY} C ${controlX} ${sourceY}, ${controlX} ${targetY}, ${endX} ${targetY}`;
-          const color = colorMap.get(link.source) ?? '#7a90a8';
+          
+          // If we have a single source, color links by target to show the breakdown
+          const colorKey = nodesLeft.length === 1 ? link.target : link.source;
+          const color = colorMap.get(colorKey) ?? palette[0];
           const percent = total > 0 ? (link.value / total) * 100 : 0;
 
           return (
@@ -263,7 +271,7 @@ export const InvestmentFlowPanel: React.FC<Props> = ({ data, width, height, opti
           if (!pos) {
             return null;
           }
-          const color = colorMap.get(node.name) ?? '#7a90a8';
+          const color = colorMap.get(node.name) ?? palette[0];
           return (
             <g key={node.name}>
               <rect x={leftX} y={pos.y} width={nodeWidth} height={pos.height} fill={color} />
@@ -279,9 +287,10 @@ export const InvestmentFlowPanel: React.FC<Props> = ({ data, width, height, opti
           if (!pos) {
             return null;
           }
+          const color = colorMap.get(node.name) ?? palette[0];
           return (
             <g key={node.name}>
-              <rect x={rightX} y={pos.y} width={nodeWidth} height={pos.height} fill="#7a90a8" />
+              <rect x={rightX} y={pos.y} width={nodeWidth} height={pos.height} fill={color} />
               <text x={rightX + nodeWidth + 6} y={pos.y + pos.height / 2 + 4} className={styles.label}>
                 {node.name}
               </text>
