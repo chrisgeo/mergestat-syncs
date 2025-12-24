@@ -1,41 +1,43 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { css } from '@emotion/css';
-import { PanelProps } from '@grafana/data';
+import { GrafanaTheme2, PanelProps } from '@grafana/data';
+import { useStyles2, useTheme2 } from '@grafana/ui';
 import { DevHealthOptions } from '../types';
 import { frameHasFields, getField, getFieldValue, getFrameWithFields } from './dataFrame';
 import { PanelEmptyState } from './PanelEmptyState';
 
 interface Props extends PanelProps<DevHealthOptions> {}
 
-const styles = {
+const getStyles = (theme: GrafanaTheme2) => ({
   wrapper: css`
     width: 100%;
     height: 100%;
     overflow: auto;
-    font-family: Open Sans, Helvetica, Arial, sans-serif;
+    font-family: ${theme.typography.fontFamily};
+    color: ${theme.colors.text.primary};
   `,
   table: css`
     width: 100%;
     border-collapse: collapse;
     font-size: 12px;
-    color: #d9e2ea;
+    color: ${theme.colors.text.primary};
   `,
   header: css`
     position: sticky;
     top: 0;
-    background: #1f2730;
+    background: ${theme.colors.background.secondary};
     text-align: left;
     font-weight: 600;
   `,
   cell: css`
     padding: 8px 10px;
-    border-bottom: 1px solid #2b3440;
+    border-bottom: 1px solid ${theme.colors.border.weak};
     vertical-align: middle;
   `,
   fileCell: css`
     max-width: 320px;
     word-break: break-all;
-    color: #f0f3f6;
+    color: ${theme.colors.text.primary};
   `,
   sortButton: css`
     background: none;
@@ -46,20 +48,14 @@ const styles = {
     padding: 0;
   `,
   muted: css`
-    color: #9aa7b2;
+    color: ${theme.colors.text.secondary};
     font-style: italic;
   `,
-};
-
-const driverColors: Record<string, string> = {
-  Churn: '#F2495C',
-  Complexity: '#FF780A',
-  Ownership: '#F2CC0C',
-  Incidents: '#B877D9',
-  Review: '#5794F2',
-};
+});
 
 const Sparkline: React.FC<{ points: number[] }> = ({ points }) => {
+  const theme = useTheme2();
+  const styles = useStyles2(getStyles);
   if (points.length === 0) {
     return <span className={styles.muted}>trend unavailable</span>;
   }
@@ -79,15 +75,19 @@ const Sparkline: React.FC<{ points: number[] }> = ({ points }) => {
 
   const areaPath = `${path} L${width.toFixed(2)},${height.toFixed(2)} L0,${height.toFixed(2)} Z`;
 
+  const stroke = theme.visualization.getColorByName('blue');
+
   return (
     <svg width={width} height={height}>
-      <path d={areaPath} fill="#5794F2" fillOpacity={0.1} />
-      <path d={path} stroke="#5794F2" strokeWidth={1.5} fill="none" />
+      <path d={areaPath} fill={theme.colors.primary.transparent} fillOpacity={0.3} />
+      <path d={path} stroke={stroke} strokeWidth={1.5} fill="none" />
     </svg>
   );
 };
 
 const DonutGlyph: React.FC<{ slices: Array<{ label: string; value: number }> }> = ({ slices }) => {
+  const theme = useTheme2();
+  const styles = useStyles2(getStyles);
   const size = 28;
   const radius = 12;
   const strokeWidth = 6;
@@ -96,6 +96,13 @@ const DonutGlyph: React.FC<{ slices: Array<{ label: string; value: number }> }> 
     return <span className={styles.muted}>n/a</span>;
   }
   let current = 0;
+  const driverColors: Record<string, string> = {
+    Churn: theme.colors.error.main,
+    Complexity: theme.colors.warning.main,
+    Ownership: theme.visualization.getColorByName('yellow'),
+    Incidents: theme.visualization.getColorByName('purple'),
+    Review: theme.visualization.getColorByName('blue'),
+  };
 
   const paths = slices.map((slice) => {
     const value = slice.value;
@@ -115,7 +122,7 @@ const DonutGlyph: React.FC<{ slices: Array<{ label: string; value: number }> }> 
       <path
         key={slice.label}
         d={`M ${x1} ${y1} A ${radius} ${radius} 0 ${largeArc} 1 ${x2} ${y2}`}
-        stroke={driverColors[slice.label] ?? '#9bb1c1'}
+        stroke={driverColors[slice.label] ?? theme.colors.text.secondary}
         strokeWidth={strokeWidth}
         fill="none"
       >
@@ -128,13 +135,21 @@ const DonutGlyph: React.FC<{ slices: Array<{ label: string; value: number }> }> 
 
   return (
     <svg width={size} height={size}>
-      <circle cx={size / 2} cy={size / 2} r={radius} stroke="#2b3440" strokeWidth={strokeWidth} fill="none" />
+      <circle
+        cx={size / 2}
+        cy={size / 2}
+        r={radius}
+        stroke={theme.colors.border.weak}
+        strokeWidth={strokeWidth}
+        fill="none"
+      />
       {paths}
     </svg>
   );
 };
 
 export const HotspotExplorerPanel: React.FC<Props> = ({ data, options }) => {
+  const styles = useStyles2(getStyles);
   const tableFrame = getFrameWithFields(data.series, ['file_path', 'churn_loc_30d']);
   const hotspotOptions = options.hotspotExplorer ?? { defaultSortByRisk: true };
 

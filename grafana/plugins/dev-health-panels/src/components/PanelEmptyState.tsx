@@ -1,5 +1,7 @@
 import React from 'react';
 import { css } from '@emotion/css';
+import { GrafanaTheme2 } from '@grafana/data';
+import { useStyles2 } from '@grafana/ui';
 
 interface Props {
   title: string;
@@ -7,11 +9,11 @@ interface Props {
   schema: string[];
 }
 
-const styles = {
+const getStyles = (theme: GrafanaTheme2) => ({
   wrapper: css`
     padding: 16px;
-    font-family: Open Sans, Helvetica, Arial, sans-serif;
-    color: #cfd6df;
+    font-family: ${theme.typography.fontFamily};
+    color: ${theme.colors.text.primary};
   `,
   title: css`
     font-size: 16px;
@@ -20,19 +22,20 @@ const styles = {
   message: css`
     font-size: 13px;
     margin-bottom: 12px;
-    color: #9aa7b2;
+    color: ${theme.colors.text.secondary};
   `,
   schema: css`
-    background: rgba(255, 255, 255, 0.05);
+    background: ${theme.colors.background.secondary};
     padding: 10px 12px;
-    border-radius: 6px;
-    font-family: Menlo, Monaco, Consolas, 'Courier New', monospace;
+    border-radius: ${theme.shape.borderRadius(1)};
+    font-family: ${theme.typography.fontFamilyMonospace};
     font-size: 12px;
     white-space: pre-wrap;
   `,
-};
+});
 
 export const PanelEmptyState: React.FC<Props> = ({ title, message, schema }) => {
+  const styles = useStyles2(getStyles);
   return (
     <div className={styles.wrapper}>
       <div className={styles.title}>{title}</div>
