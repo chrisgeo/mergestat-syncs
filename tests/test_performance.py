@@ -123,6 +123,7 @@ class TestConnectionPooling:
 
         # Check that the engine was created (we can't easily inspect pool settings)
         assert store.engine is not None
+        store.engine.sync_engine.dispose()
 
     def test_sqlite_connection_no_pooling(self):
         """Test that SQLite connections don't use pooling parameters."""
@@ -132,6 +133,7 @@ class TestConnectionPooling:
         # Should not raise an error about invalid pool parameters
         store = SQLAlchemyStore(conn_string)
         assert store.engine is not None
+        store.engine.sync_engine.dispose()
 
 
 class TestRepoUUIDDerivation:

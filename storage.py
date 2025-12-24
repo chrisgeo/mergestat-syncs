@@ -226,6 +226,7 @@ class SQLAlchemyStore:
         if self.session is not None:
             await self.session.close()
             self.session = None
+        await self.engine.dispose()
 
     async def ensure_tables(self) -> None:
         from models.git import Base
