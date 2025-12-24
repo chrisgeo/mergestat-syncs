@@ -47,6 +47,7 @@ packages = [
   "analytics",
   "connectors",
   "connectors.utils",
+  "fixtures",
   "metrics",
   "metrics.sinks",
   "models",
