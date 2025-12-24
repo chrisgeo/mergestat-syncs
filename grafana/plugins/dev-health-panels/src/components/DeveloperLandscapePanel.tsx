@@ -55,48 +55,19 @@ export const DeveloperLandscapePanel: React.FC<Props> = ({ data, width, height, 
   }, [landscapeOptions.mapName]);
 
   const frame = getFrameWithFields(data.series, ['x_norm', 'y_norm']);
-
-  if (!frame) {
-    return (
-      <PanelEmptyState
-        title="Developer Landscape"
-        message="Missing required fields to render the quadrant map."
-        schema={[
-          'Required fields:',
-          '- x_norm (0-1)',
-          '- y_norm (0-1)',
-          'Optional fields:',
-          '- identity_id',
-          '- x_raw',
-          '- y_raw',
-          '- map_name',
-          '- team_id',
-          '- as_of_day',
-        ]}
-      />
-    );
-  }
-
-  const xNormField = getField(frame, 'x_norm');
-  const yNormField = getField(frame, 'y_norm');
-  const xRawField = getField(frame, 'x_raw');
-  const yRawField = getField(frame, 'y_raw');
-  const mapField = getField(frame, 'map_name');
-  const labelField = getField(frame, 'identity_id');
-  const teamField = getField(frame, 'team_id');
-  const asOfField = getField(frame, 'as_of_day');
-
-  if (!xNormField || !yNormField) {
-    return (
-      <PanelEmptyState
-        title="Developer Landscape"
-        message="The x_norm and y_norm fields are required."
-        schema={['Required fields:', '- x_norm (0-1)', '- y_norm (0-1)']}
-      />
-    );
-  }
+  const xNormField = frame ? getField(frame, 'x_norm') : undefined;
+  const yNormField = frame ? getField(frame, 'y_norm') : undefined;
+  const xRawField = frame ? getField(frame, 'x_raw') : undefined;
+  const yRawField = frame ? getField(frame, 'y_raw') : undefined;
+  const mapField = frame ? getField(frame, 'map_name') : undefined;
+  const labelField = frame ? getField(frame, 'identity_id') : undefined;
+  const teamField = frame ? getField(frame, 'team_id') : undefined;
+  const asOfField = frame ? getField(frame, 'as_of_day') : undefined;
 
   const points = useMemo(() => {
+    if (!frame || !xNormField || !yNormField) {
+      return [];
+    }
     const result: Array<{
       xNorm: number;
       yNorm: number;
@@ -134,7 +105,7 @@ export const DeveloperLandscapePanel: React.FC<Props> = ({ data, width, height, 
     }
     return result;
   }, [
-    frame.length,
+    frame,
     xNormField,
     yNormField,
     xRawField,
@@ -145,16 +116,6 @@ export const DeveloperLandscapePanel: React.FC<Props> = ({ data, width, height, 
     asOfField,
     landscapeOptions.mapName,
   ]);
-
-  if (points.length === 0) {
-    return (
-      <PanelEmptyState
-        title="Developer Landscape"
-        message="No matching data for the selected map."
-        schema={['Expected map_name values:', '- churn_throughput', '- cycle_throughput', '- wip_throughput']}
-      />
-    );
-  }
 
   // Stable color mapping for identities and teams
   const { identityColorMap, teamColorMap } = useMemo(() => {
@@ -175,6 +136,47 @@ export const DeveloperLandscapePanel: React.FC<Props> = ({ data, width, height, 
 
     return { identityColorMap: iMap, teamColorMap: tMap };
   }, [points, palette, theme]);
+
+  if (!frame) {
+    return (
+      <PanelEmptyState
+        title="Developer Landscape"
+        message="Missing required fields to render the quadrant map."
+        schema={[
+          'Required fields:',
+          '- x_norm (0-1)',
+          '- y_norm (0-1)',
+          'Optional fields:',
+          '- identity_id',
+          '- x_raw',
+          '- y_raw',
+          '- map_name',
+          '- team_id',
+          '- as_of_day',
+        ]}
+      />
+    );
+  }
+
+  if (!xNormField || !yNormField) {
+    return (
+      <PanelEmptyState
+        title="Developer Landscape"
+        message="The x_norm and y_norm fields are required."
+        schema={['Required fields:', '- x_norm (0-1)', '- y_norm (0-1)']}
+      />
+    );
+  }
+
+  if (points.length === 0) {
+    return (
+      <PanelEmptyState
+        title="Developer Landscape"
+        message="No matching data for the selected map."
+        schema={['Expected map_name values:', '- churn_throughput', '- cycle_throughput', '- wip_throughput']}
+      />
+    );
+  }
 
 
 

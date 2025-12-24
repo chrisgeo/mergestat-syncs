@@ -30,13 +30,15 @@ type FlowRecord = {
 export const InvestmentFlowPanel: React.FC<Props> = ({ data, width, height, options }) => {
   const theme = useTheme2();
   const styles = useStyles2(getStyles);
-  const investmentOptions = options.investmentFlow ?? {
+
+  const investmentOptions = useMemo(() => options.investmentFlow ?? {
     timeWindowDays: 30,
     valueField: 'value',
     sourceField: 'source',
     targetField: 'target',
     dayField: 'day',
-  };
+  }, [options.investmentFlow]);
+
   const sourceFieldName = investmentOptions.sourceField || 'source';
   const targetFieldName = investmentOptions.targetField || 'target';
   const valueFieldName = investmentOptions.valueField || 'value';
@@ -45,24 +47,10 @@ export const InvestmentFlowPanel: React.FC<Props> = ({ data, width, height, opti
   const frame = getFrameWithFields(data.series, [sourceFieldName, valueFieldName]);
   const targetExists = frame ? Boolean(getField(frame, targetFieldName)) : false;
 
-  if (!frame) {
-    return (
-      <PanelEmptyState
-        title="Investment Flow"
-        message="Missing required fields to render investment flow."
-        schema={[
-          'Required fields:',
-          '- source (investment_area)',
-          `- ${valueFieldName}`,
-          'Optional fields:',
-          `- ${targetFieldName} (project_stream or outcome)`,
-          `- ${dayFieldName}`,
-        ]}
-      />
-    );
-  }
-
   const flows = useMemo(() => {
+    if (!frame) {
+      return [];
+    }
     const sourceField = getField(frame, sourceFieldName);
     const targetField = getField(frame, targetFieldName);
     const valueField = getField(frame, valueFieldName);
@@ -102,16 +90,6 @@ export const InvestmentFlowPanel: React.FC<Props> = ({ data, width, height, opti
     return rows;
   }, [frame, investmentOptions, sourceFieldName, targetFieldName, valueFieldName, dayFieldName]);
 
-  if (flows.length === 0) {
-    return (
-      <PanelEmptyState
-        title="Investment Flow"
-        message="No rows matched the selected time window."
-        schema={[`Time window: last ${investmentOptions.timeWindowDays} days`]}
-      />
-    );
-  }
-
   // Generate color map based on unique sources and targets found in flows
   const colorMap = useMemo(() => {
     const allNames = new Set<string>();
@@ -128,6 +106,55 @@ export const InvestmentFlowPanel: React.FC<Props> = ({ data, width, height, opti
     });
     return map;
   }, [flows, theme]);
+
+  const { nodesLeft, nodesRight, links, total } = useMemo(() => {
+    const leftTotals = new Map<string, number>();
+    const rightTotals = new Map<string, number>();
+    const linkMap = new Map<string, number>();
+
+    for (const flow of flows) {
+      leftTotals.set(flow.source, (leftTotals.get(flow.source) ?? 0) + flow.value);
+      rightTotals.set(flow.target, (rightTotals.get(flow.target) ?? 0) + flow.value);
+      const key = `${flow.source}|||${flow.target}`;
+      linkMap.set(key, (linkMap.get(key) ?? 0) + flow.value);
+    }
+
+    const nodesLeft = Array.from(leftTotals.entries()).map(([name, value]) => ({ name, value }));
+    const nodesRight = Array.from(rightTotals.entries()).map(([name, value]) => ({ name, value }));
+    const links = Array.from(linkMap.entries()).map(([key, value]) => {
+      const [source, target] = key.split('|||');
+      return { source, target, value };
+    });
+    const total = nodesLeft.reduce((sum, node) => sum + node.value, 0);
+    return { nodesLeft, nodesRight, links, total };
+  }, [flows]);
+
+  if (!frame) {
+    return (
+      <PanelEmptyState
+        title="Investment Flow"
+        message="Missing required fields to render investment flow."
+        schema={[
+          'Required fields:',
+          '- source (investment_area)',
+          `- ${valueFieldName}`,
+          'Optional fields:',
+          `- ${targetFieldName} (project_stream or outcome)`,
+          `- ${dayFieldName}`,
+        ]}
+      />
+    );
+  }
+
+  if (flows.length === 0) {
+    return (
+      <PanelEmptyState
+        title="Investment Flow"
+        message="No rows matched the selected time window."
+        schema={[`Time window: last ${investmentOptions.timeWindowDays} days`]}
+      />
+    );
+  }
 
   if (!targetExists) {
     const totals = new Map<string, number>();
@@ -162,28 +189,6 @@ export const InvestmentFlowPanel: React.FC<Props> = ({ data, width, height, opti
       </div>
     );
   }
-
-  const { nodesLeft, nodesRight, links, total } = useMemo(() => {
-    const leftTotals = new Map<string, number>();
-    const rightTotals = new Map<string, number>();
-    const linkMap = new Map<string, number>();
-
-    for (const flow of flows) {
-      leftTotals.set(flow.source, (leftTotals.get(flow.source) ?? 0) + flow.value);
-      rightTotals.set(flow.target, (rightTotals.get(flow.target) ?? 0) + flow.value);
-      const key = `${flow.source}|||${flow.target}`;
-      linkMap.set(key, (linkMap.get(key) ?? 0) + flow.value);
-    }
-
-    const nodesLeft = Array.from(leftTotals.entries()).map(([name, value]) => ({ name, value }));
-    const nodesRight = Array.from(rightTotals.entries()).map(([name, value]) => ({ name, value }));
-    const links = Array.from(linkMap.entries()).map(([key, value]) => {
-      const [source, target] = key.split('|||');
-      return { source, target, value };
-    });
-    const total = nodesLeft.reduce((sum, node) => sum + node.value, 0);
-    return { nodesLeft, nodesRight, links, total };
-  }, [flows]);
 
   const padding = 24;
   const plotHeight = Math.max(0, height - padding * 2);
