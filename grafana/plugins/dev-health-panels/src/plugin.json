@@ -27,7 +27,12 @@
         "url": "https://github.com/chrisgeo/dev-health-ops/blob/main/grafana/plugins/dev-health-panels/README.md"
       }
     ],
-    "screenshots": [],
+    "screenshots": [
+      {
+        "path": "img/screenshot.png",
+        "name": "Dev Health Panels Overview"
+      }
+    ],
     "version": "%VERSION%",
     "updated": "%TODAY%"
   },
