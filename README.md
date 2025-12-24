@@ -112,7 +112,7 @@ This repo can compute daily “developer health” metrics and provision Grafana
 - **Git + PR/MR facts** (from GitHub/GitLab/local syncs)
 - **Work tracking items** (Jira issues, GitHub issues/Projects, GitLab issues)
 
-Jira is **not** a replacement for pull request data — it’s used to track associated project work (throughput, WIP, work-item cycle/lead times). PR metrics still come from the Git provider data (e.g., GitHub PRs / GitLab MRs) synced by the CLI (`python cli.py sync ...`).
+Jira is **not** a replacement for pull request data — it’s used to track associated project work (throughput, WIP, work-item cycle/lead times). PR metrics still come from the Git provider data (e.g., GitHub PRs / GitLab MRs) synced by the CLI (`python cli.py sync <target> --provider ...`).
 
 **Docs**
 
@@ -132,14 +132,14 @@ python cli.py grafana up
 1) Sync Git data into ClickHouse (choose one):
 
 ```bash
-# Local repo
-python cli.py sync local --db "clickhouse://localhost:8123/default" --repo-path .
+# Local repo (commits + stats)
+python cli.py sync git --provider local --db "clickhouse://localhost:8123/default" --repo-path .
 
-# GitHub repo
-python cli.py sync github --db "clickhouse://localhost:8123/default" --owner <owner> --repo <repo>
+# GitHub repo (commits + stats)
+python cli.py sync git --provider github --db "clickhouse://localhost:8123/default" --owner <owner> --repo <repo>
 
-# GitLab project
-python cli.py sync gitlab --db "clickhouse://localhost:8123/default" --project-id <id>
+# GitLab project (commits + stats)
+python cli.py sync git --provider gitlab --db "clickhouse://localhost:8123/default" --project-id <id>
 ```
 
 1) Compute derived metrics (Git + Work Items):
@@ -210,9 +210,10 @@ You can also configure the database using command-line arguments, which will ove
 
 - **`--db`**: Database connection string (required for `sync`; optional for `metrics daily` if `DB_CONN_STRING`/`DATABASE_URL` is set)
 - **`--db-type`**: Database backend override (`postgres`, `mongo`, `sqlite`, or `clickhouse`) - optional if URL scheme is clear
-- **`--auth`**: Authentication token (works for both GitHub and GitLab)
-- **`--repo-path`**: Path to the git repository (for local mode)
-- **`--since`**: Lower-bound date/time for local mode. Commits, per-file stats, and blame are limited to changes at or after this timestamp. Uses ISO formats (e.g., `2024-01-01` or `2024-01-01T00:00:00`).
+- **`--provider`**: Source provider for sync targets (`local`, `github`, `gitlab`, `synthetic`)
+- **`--auth`**: Authentication token (GitHub/GitLab)
+- **`--repo-path`**: Path to the git repository (for `--provider local`)
+- **`--since`**: Lower-bound date/time filter for sync targets. Uses ISO formats (e.g., `2024-01-01` or `2024-01-01T00:00:00`).
 
 #### Connector-Specific Arguments
 
@@ -225,7 +226,7 @@ You can also configure the database using command-line arguments, which will ove
 
 These unified options work with both GitHub and GitLab connectors:
 
-- **`-s, --search-pattern`**: fnmatch-style pattern to filter repositories/projects (e.g., `owner/repo*`, `group/p*`)
+- **`-s, --search`**: fnmatch-style pattern to filter repositories/projects (e.g., `owner/repo*`, `group/p*`)
 - **`--batch-size`**: Number of repositories/projects to process in each batch (default: 10)
 - **`--group`**: Organization/group name to fetch repositories/projects from
 - **`--max-concurrent`**: Maximum concurrent workers for batch processing (default: 4)
@@ -233,48 +234,47 @@ These unified options work with both GitHub and GitLab connectors:
 - **`--max-commits-per-repo`**: Maximum commits to analyze per repository/project
 - **`--max-repos`**: Maximum number of repositories/projects to process
 - **`--use-async`**: Use async processing for better performance
-- **`--fetch-blame`**: Fetch blame data (warning: slow and rate-limited)
 
 Example usage:
 
 ```bash
 # Using PostgreSQL (auto-detected from URL)
-python cli.py sync local --db "postgresql+asyncpg://user:pass@localhost:5432/mergestat"
+python cli.py sync git --provider local --db "postgresql+asyncpg://user:pass@localhost:5432/mergestat"
 
 # Using MongoDB (auto-detected from URL)
-python cli.py sync local --db "mongodb://localhost:27017"
+python cli.py sync git --provider local --db "mongodb://localhost:27017"
 
 # Local repo filtered to recent activity
-python cli.py sync local \
+python cli.py sync git --provider local \
   --db "sqlite+aiosqlite:///mergestat.db" \
   --repo-path /path/to/repo \
   --since 2024-01-01
-# Blame is limited to files touched by commits on/after this date.
+# Commits and stats are limited to changes on/after this date.
 
 # Using SQLite (file-based, auto-detected)
-python cli.py sync local --db "sqlite+aiosqlite:///mergestat.db"
+python cli.py sync git --provider local --db "sqlite+aiosqlite:///mergestat.db"
 
 # Using SQLite (in-memory)
-python cli.py sync local --db "sqlite+aiosqlite:///:memory:"
+python cli.py sync git --provider local --db "sqlite+aiosqlite:///:memory:"
 
 # GitHub repository with unified auth
-python cli.py sync github \
+python cli.py sync git --provider github \
   --db "postgresql+asyncpg://user:pass@localhost:5432/mergestat" \
   --auth "$GITHUB_TOKEN" \
   --owner torvalds \
   --repo linux
 
 # GitLab project with unified auth
-python cli.py sync gitlab \
+python cli.py sync git --provider gitlab \
   --db "mongodb://localhost:27017" \
   --auth "$GITLAB_TOKEN" \
   --project-id 278964
 
 # Batch process repositories matching a pattern (GitHub)
-python cli.py sync github \
+python cli.py sync git --provider github \
   --db "sqlite+aiosqlite:///mergestat.db" \
   --auth "$GITHUB_TOKEN" \
-  --search-pattern "chrisgeo/dev-health-*" \
+  -s "chrisgeo/dev-health-*" \
   --group "chrisgeo" \
   --batch-size 5 \
   --max-concurrent 2 \
@@ -282,12 +282,12 @@ python cli.py sync github \
   --use-async
 
 # Batch process projects matching a pattern (GitLab)
-python cli.py sync gitlab \
+python cli.py sync git --provider gitlab \
   --db "sqlite+aiosqlite:///mergestat.db" \
   --auth "$GITLAB_TOKEN" \
   --gitlab-url "https://gitlab.com" \
   --group "mygroup" \
-  --search-pattern "mygroup/api-*" \
+  -s "mygroup/api-*" \
   --batch-size 5 \
   --max-concurrent 2 \
   --max-repos 10 \
@@ -336,14 +336,14 @@ The script includes several configuration options to optimize performance:
 
 ```bash
 export MAX_WORKERS=8
-python cli.py sync local --db "sqlite+aiosqlite:///mergestat.db" --repo-path .
+python cli.py sync git --provider local --db "sqlite+aiosqlite:///mergestat.db" --repo-path .
 ```
 
 **Example for resource-constrained environments:**
 
 ```bash
 export MAX_WORKERS=2
-python cli.py sync local --db "sqlite+aiosqlite:///mergestat.db" --repo-path .
+python cli.py sync git --provider local --db "sqlite+aiosqlite:///mergestat.db" --repo-path .
 ```
 
 ## Performance Optimizations
@@ -413,7 +413,7 @@ For a typical repository with 1000 files and 10,000 commits:
   alembic upgrade head
 
   # Sync a local repo
-  python cli.py sync local --db "$DB_CONN_STRING" --repo-path .
+  python cli.py sync git --provider local --db "$DB_CONN_STRING" --repo-path .
   ```
 
 #### Using MongoDB
@@ -428,7 +428,7 @@ For a typical repository with 1000 files and 10,000 commits:
   docker compose up mongo -d
 
   export MONGO_DB_NAME="mergestat" # optional if not in URI
-  python cli.py sync local --db "mongodb://localhost:27017" --repo-path .
+  python cli.py sync git --provider local --db "mongodb://localhost:27017" --repo-path .
   ```
 
 #### Using SQLite
@@ -440,13 +440,13 @@ For a typical repository with 1000 files and 10,000 commits:
 - Example setup:
 
   ```bash
-  python cli.py sync local --db "sqlite+aiosqlite:///mergestat.db" --repo-path .
+  python cli.py sync git --provider local --db "sqlite+aiosqlite:///mergestat.db" --repo-path .
   ```
 
   Or for in-memory database (data lost when process exits):
 
   ```bash
-  python cli.py sync local --db "sqlite+aiosqlite:///:memory:" --repo-path .
+  python cli.py sync git --provider local --db "sqlite+aiosqlite:///:memory:" --repo-path .
   ```
 
 #### Using ClickHouse
@@ -456,7 +456,7 @@ For a typical repository with 1000 files and 10,000 commits:
 - Example setup:
 
   ```bash
-  python cli.py sync local --db "clickhouse://default:@localhost:8123/default" --repo-path .
+  python cli.py sync git --provider local --db "clickhouse://default:@localhost:8123/default" --repo-path .
   ```
 
 #### Switching Between Databases

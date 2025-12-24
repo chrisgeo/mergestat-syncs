@@ -664,6 +664,8 @@ async def process_gitlab_project(
     fetch_blame: bool = False,
     blame_only: bool = False,
     max_commits: Optional[int] = None,
+    sync_git: bool = True,
+    sync_prs: bool = True,
     sync_cicd: bool = True,
     sync_deployments: bool = True,
     sync_incidents: bool = True,
@@ -729,56 +731,60 @@ async def process_gitlab_project(
             logging.info("Completed blame-only sync for GitLab project: %s", project_id)
             return
 
-        # 2. Fetch Commits
-        if max_commits is None:
-            logging.info("Fetching all commits from GitLab...")
-        else:
-            logging.info(f"Fetching up to {max_commits} commits from GitLab...")
-        commit_hashes, commit_objects = await loop.run_in_executor(
-            None,
-            _fetch_gitlab_commits_sync,
-            gl_project,
-            max_commits,
-            db_repo.id,
-            since,
-        )
+        if sync_git:
+            # 2. Fetch Commits
+            if max_commits is None:
+                logging.info("Fetching all commits from GitLab...")
+            else:
+                logging.info(f"Fetching up to {max_commits} commits from GitLab...")
+            commit_hashes, commit_objects = await loop.run_in_executor(
+                None,
+                _fetch_gitlab_commits_sync,
+                gl_project,
+                max_commits,
+                db_repo.id,
+                since,
+            )
 
-        if commit_objects:
-            await store.insert_git_commit_data(commit_objects)
-            logging.info(f"Stored {len(commit_objects)} commits from GitLab")
+            if commit_objects:
+                await store.insert_git_commit_data(commit_objects)
+                logging.info(f"Stored {len(commit_objects)} commits from GitLab")
 
-        # 3. Fetch Stats
-        logging.info("Fetching commit stats from GitLab...")
-        stats_limit = 50 if max_commits is None else min(max_commits, 50)
-        stats_objects = await loop.run_in_executor(
-            None,
-            _fetch_gitlab_commit_stats_sync,
-            gl_project,
-            commit_hashes,
-            db_repo.id,
-            stats_limit,
-        )
+            # 3. Fetch Stats
+            logging.info("Fetching commit stats from GitLab...")
+            stats_limit = 50 if max_commits is None else min(max_commits, 50)
+            stats_objects = await loop.run_in_executor(
+                None,
+                _fetch_gitlab_commit_stats_sync,
+                gl_project,
+                commit_hashes,
+                db_repo.id,
+                stats_limit,
+            )
 
-        if stats_objects:
-            await store.insert_git_commit_stats(stats_objects)
-            logging.info(f"Stored {len(stats_objects)} commit stats from GitLab")
+            if stats_objects:
+                await store.insert_git_commit_stats(stats_objects)
+                logging.info(
+                    f"Stored {len(stats_objects)} commit stats from GitLab"
+                )
 
-        # 4. Fetch Merge Requests
-        logging.info("Fetching merge requests from GitLab...")
-        mr_total = await loop.run_in_executor(
-            None,
-            _sync_gitlab_mrs_to_store,
-            connector,
-            project_id,
-            db_repo.id,
-            store,
-            loop,
-            BATCH_SIZE,
-            "all",
-            None,
-            since,
-        )
-        logging.info(f"Stored {mr_total} merge requests from GitLab")
+        if sync_prs:
+            # 4. Fetch Merge Requests
+            logging.info("Fetching merge requests from GitLab...")
+            mr_total = await loop.run_in_executor(
+                None,
+                _sync_gitlab_mrs_to_store,
+                connector,
+                project_id,
+                db_repo.id,
+                store,
+                loop,
+                BATCH_SIZE,
+                "all",
+                None,
+                since,
+            )
+            logging.info(f"Stored {mr_total} merge requests from GitLab")
 
         if sync_cicd:
             logging.info("Fetching CI/CD pipelines from GitLab...")
@@ -865,10 +871,13 @@ async def process_gitlab_projects_batch(
     max_commits_per_project: int = None,
     max_projects: int = None,
     use_async: bool = False,
+    sync_git: bool = True,
+    sync_prs: bool = True,
     sync_cicd: bool = True,
     sync_deployments: bool = True,
     sync_incidents: bool = True,
     blame_only: bool = False,
+    backfill_missing: bool = True,
     since: Optional[datetime] = None,
 ) -> None:
     """
@@ -883,10 +892,13 @@ async def process_gitlab_projects_batch(
     connector = GitLabConnector(url=gitlab_url, private_token=token)
     loop = asyncio.get_running_loop()
 
-    mr_gate = RateLimitGate(
-        RateLimitConfig(initial_backoff_seconds=max(1.0, rate_limit_delay))
-    )
-    mr_semaphore = asyncio.Semaphore(max(1, max_concurrent))
+    mr_gate = None
+    mr_semaphore = None
+    if sync_prs:
+        mr_gate = RateLimitGate(
+            RateLimitConfig(initial_backoff_seconds=max(1.0, rate_limit_delay))
+        )
+        mr_semaphore = asyncio.Semaphore(max(1, max_concurrent))
 
     all_results: List[GitLabBatchResult] = []
     stored_count = 0
@@ -937,80 +949,80 @@ async def process_gitlab_projects_batch(
                 )
             return
 
-        # Fetch commits and stats to populate git_commits/git_commit_stats.
-        if max_commits_per_project is None and since is None:
-            commit_limit = 100
-        else:
-            commit_limit = max_commits_per_project
-        try:
-            gl_project = await loop.run_in_executor(
-                None, connector.gitlab.projects.get, project_info.id
-            )
-            commit_hashes, commit_objects = await loop.run_in_executor(
-                None,
-                _fetch_gitlab_commits_sync,
-                gl_project,
-                commit_limit,
-                db_repo.id,
-                since,
-            )
-            if commit_objects:
-                await store.insert_git_commit_data(commit_objects)
-
-            stats_objects = await loop.run_in_executor(
-                None,
-                _fetch_gitlab_commit_stats_sync,
-                gl_project,
-                commit_hashes,
-                db_repo.id,
-                50 if commit_limit is None else min(commit_limit, 50),
-            )
-            if stats_objects:
-                await store.insert_git_commit_stats(stats_objects)
-        except Exception as e:
-            logging.warning(
-                "Failed to fetch commits for GitLab project %s: %s",
-                project_info.full_name,
-                e,
-            )
-
-        # Fetch ALL merge requests for batch-processed projects, storing in batches.
-        try:
-            async with mr_semaphore:
-                await loop.run_in_executor(
+        gl_project = None
+        if sync_git:
+            # Fetch commits and stats to populate git_commits/git_commit_stats.
+            if max_commits_per_project is None and since is None:
+                commit_limit = 100
+            else:
+                commit_limit = max_commits_per_project
+            try:
+                if gl_project is None:
+                    gl_project = await loop.run_in_executor(
+                        None, connector.gitlab.projects.get, project_info.id
+                    )
+                commit_hashes, commit_objects = await loop.run_in_executor(
                     None,
-                    _sync_gitlab_mrs_to_store,
-                    connector,
-                    project_info.id,
+                    _fetch_gitlab_commits_sync,
+                    gl_project,
+                    commit_limit,
                     db_repo.id,
-                    store,
-                    loop,
-                    BATCH_SIZE,
-                    "all",
-                    mr_gate,
                     since,
                 )
-        except Exception as e:
-            logging.warning(
-                "Failed to fetch/store MRs for GitLab project %s: %s",
-                project_info.full_name,
-                e,
-            )
+                if commit_objects:
+                    await store.insert_git_commit_data(commit_objects)
+
+                stats_objects = await loop.run_in_executor(
+                    None,
+                    _fetch_gitlab_commit_stats_sync,
+                    gl_project,
+                    commit_hashes,
+                    db_repo.id,
+                    50 if commit_limit is None else min(commit_limit, 50),
+                )
+                if stats_objects:
+                    await store.insert_git_commit_stats(stats_objects)
+            except Exception as e:
+                logging.warning(
+                    "Failed to fetch commits for GitLab project %s: %s",
+                    project_info.full_name,
+                    e,
+                )
+
+        if sync_prs:
+            # Fetch ALL merge requests for batch-processed projects, storing in batches.
+            try:
+                async with mr_semaphore:
+                    await loop.run_in_executor(
+                        None,
+                        _sync_gitlab_mrs_to_store,
+                        connector,
+                        project_info.id,
+                        db_repo.id,
+                        store,
+                        loop,
+                        BATCH_SIZE,
+                        "all",
+                        mr_gate,
+                        since,
+                    )
+            except Exception as e:
+                logging.warning(
+                    "Failed to fetch/store MRs for GitLab project %s: %s",
+                    project_info.full_name,
+                    e,
+                )
 
         if sync_cicd:
             try:
-                # Ensure gl_project is available
-                if 'gl_project' in locals():
-                    cicd_project = gl_project
-                else:
-                    cicd_project = await loop.run_in_executor(
+                if gl_project is None:
+                    gl_project = await loop.run_in_executor(
                         None, connector.gitlab.projects.get, project_info.id
                     )
-
                 pipeline_runs = await loop.run_in_executor(
                     None,
                     _fetch_gitlab_pipelines_sync,
-                    cicd_project,
+                    gl_project,
                     db_repo.id,
                     BATCH_SIZE,
                     since,
@@ -1064,7 +1076,7 @@ async def process_gitlab_projects_batch(
                     e,
                 )
 
-        if result.stats:
+        if result.stats and sync_git:
             stat = GitCommitStat(
                 repo_id=db_repo.id,
                 commit_hash=AGGREGATE_STATS_MARKER,
@@ -1076,19 +1088,22 @@ async def process_gitlab_projects_batch(
             )
             await store.insert_git_commit_stats([stat])
 
-        try:
-            await _backfill_gitlab_missing_data(
-                store=store,
-                connector=connector,
-                db_repo=db_repo,
-                project_full_name=project_info.full_name,
-                default_branch=project_info.default_branch,
-                max_commits=max_commits_per_project,
-            )
-        except Exception as e:
-            logging.debug(
-                f"Backfill failed for GitLab project {project_info.full_name}: {e}"
-            )
+        if backfill_missing:
+            try:
+                await _backfill_gitlab_missing_data(
+                    store=store,
+                    connector=connector,
+                    db_repo=db_repo,
+                    project_full_name=project_info.full_name,
+                    default_branch=project_info.default_branch,
+                    max_commits=max_commits_per_project,
+                )
+            except Exception as e:
+                logging.debug(
+                    "Backfill failed for GitLab project %s: %s",
+                    project_info.full_name,
+                    e,
+                )
 
     def on_project_complete(result: GitLabBatchResult) -> None:
         all_results.append(result)
@@ -1119,36 +1134,24 @@ async def process_gitlab_projects_batch(
                 loop.call_soon_threadsafe(_enqueue)
 
     try:
-        results_queue = asyncio.Queue(maxsize=max(1, max_concurrent * 2))
+        if sync_git:
+            results_queue = asyncio.Queue(maxsize=max(1, max_concurrent * 2))
 
-        async def _consume_results() -> None:
-            assert results_queue is not None
-            while True:
-                item = await results_queue.get()
-                try:
-                    if item is _queue_sentinel:
-                        return
-                    await store_result(item)
-                finally:
-                    results_queue.task_done()
+            async def _consume_results() -> None:
+                assert results_queue is not None
+                while True:
+                    item = await results_queue.get()
+                    try:
+                        if item is _queue_sentinel:
+                            return
+                        await store_result(item)
+                    finally:
+                        results_queue.task_done()
 
-        consumer_task = asyncio.create_task(_consume_results())
+            consumer_task = asyncio.create_task(_consume_results())
 
-        if use_async:
-            await connector.get_projects_with_stats_async(
-                group_name=group_name,
-                pattern=pattern,
-                batch_size=batch_size,
-                max_concurrent=max_concurrent,
-                rate_limit_delay=rate_limit_delay,
-                max_commits_per_project=max_commits_per_project,
-                max_projects=max_projects,
-                on_project_complete=on_project_complete,
-            )
-        else:
-            await loop.run_in_executor(
-                None,
-                lambda: connector.get_projects_with_stats(
+            if use_async:
+                await connector.get_projects_with_stats_async(
                     group_name=group_name,
                     pattern=pattern,
                     batch_size=batch_size,
@@ -1157,12 +1160,57 @@ async def process_gitlab_projects_batch(
                     max_commits_per_project=max_commits_per_project,
                     max_projects=max_projects,
                     on_project_complete=on_project_complete,
+                )
+            else:
+                await loop.run_in_executor(
+                    None,
+                    lambda: connector.get_projects_with_stats(
+                        group_name=group_name,
+                        pattern=pattern,
+                        batch_size=batch_size,
+                        max_concurrent=max_concurrent,
+                        rate_limit_delay=rate_limit_delay,
+                        max_commits_per_project=max_commits_per_project,
+                        max_projects=max_projects,
+                        on_project_complete=on_project_complete,
+                    ),
+                )
+
+            await results_queue.join()
+            await results_queue.put(_queue_sentinel)
+            await consumer_task
+        else:
+            projects = await loop.run_in_executor(
+                None,
+                lambda: connector.list_projects(
+                    group_name=group_name,
+                    pattern=pattern,
+                    max_projects=max_projects,
                 ),
             )
+            semaphore = asyncio.Semaphore(max(1, max_concurrent))
 
-        await results_queue.join()
-        await results_queue.put(_queue_sentinel)
-        await consumer_task
+            async def _process_project(project_info) -> None:
+                async with semaphore:
+                    result = GitLabBatchResult(
+                        project=project_info,
+                        stats=None,
+                        success=True,
+                    )
+                    try:
+                        await store_result(result)
+                    except Exception as e:
+                        result = GitLabBatchResult(
+                            project=project_info,
+                            stats=None,
+                            error=str(e),
+                            success=False,
+                        )
+                    on_project_complete(result)
+
+            tasks = [asyncio.create_task(_process_project(p)) for p in projects]
+            if tasks:
+                await asyncio.gather(*tasks)
 
         # Summary
         successful = sum(1 for r in all_results if r.success)

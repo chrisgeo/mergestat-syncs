@@ -60,7 +60,7 @@ Derived metrics (computed by `scripts/compute_metrics_daily.py`):
 1) Sync git data into ClickHouse:
 
 ```bash
-python cli.py sync local --db "clickhouse://localhost:8123/default" --repo-path .
+python cli.py sync git --provider local --db "clickhouse://localhost:8123/default" --repo-path .
 ```
 
 2) Compute derived metrics:

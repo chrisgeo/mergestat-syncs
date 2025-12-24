@@ -553,9 +553,14 @@ async def process_local_repo(
     repo_path: str,
     since: Optional[datetime] = None,
     fetch_blame: bool = False,
+    sync_git: bool = True,
+    sync_prs: bool = True,
+    sync_blame: bool = True,
 ) -> None:
     """
     Orchestrate the local repository sync pipeline.
+
+    Use the sync_* flags to control which stages run.
     """
     repo_root = Path(repo_path).resolve()
     logging.info("Processing local repository at %s", repo_root)
@@ -573,40 +578,45 @@ async def process_local_repo(
     repo_obj = GitPythonRepo(str(repo_root))
     commits_iter = list(iter_commits_since(repo_obj, since))
 
-    files_for_blame = set()
-    if fetch_blame:
-        files_for_blame = set(collect_changed_files(repo_root, commits_iter))
+    if sync_git:
+        await process_git_commits(repo, store, commits_iter, since)
 
-    all_files_path = []
-    for root, _, files in os.walk(str(repo_root)):
-        root_path = Path(root)
-        if ".git" in root_path.parts:
-            continue
-        for file in files:
-            file_path = (root_path / file).resolve()
-            all_files_path.append(file_path)
+    if sync_prs:
+        await process_local_pull_requests(
+            repo=repo,
+            store=store,
+            repo_obj=repo_obj,
+            commits=commits_iter,
+            since=since,
+        )
 
-    files_for_blame_path = {Path(p).resolve() for p in files_for_blame}
+    if sync_git:
+        commits_for_stats = list(iter_commits_since(repo_obj, since))
+        await process_git_commit_stats(repo, store, commits_for_stats, since)
 
-    await process_git_commits(repo, store, commits_iter, since)
-    await process_local_pull_requests(
-        repo=repo,
-        store=store,
-        repo_obj=repo_obj,
-        commits=commits_iter,
-        since=since,
-    )
+    if sync_blame or fetch_blame:
+        files_for_blame = set()
+        if fetch_blame:
+            files_for_blame = set(collect_changed_files(repo_root, commits_iter))
 
-    commits_for_stats = list(iter_commits_since(repo_obj, since))
-    await process_git_commit_stats(repo, store, commits_for_stats, since)
+        all_files_path = []
+        for root, _, files in os.walk(str(repo_root)):
+            root_path = Path(root)
+            if ".git" in root_path.parts:
+                continue
+            for file in files:
+                file_path = (root_path / file).resolve()
+                all_files_path.append(file_path)
 
-    await process_files_and_blame(
-        repo,
-        all_files_path,
-        files_for_blame_path,
-        store,
-        str(repo_root),
-    )
+        files_for_blame_path = {Path(p).resolve() for p in files_for_blame}
+
+        await process_files_and_blame(
+            repo,
+            all_files_path,
+            files_for_blame_path,
+            store,
+            str(repo_root),
+        )
 
     logging.info("Local repository processing complete.")
 

@@ -194,19 +194,21 @@ class TestBatchProcessingCLIArguments:
     """
 
     def test_github_pattern_argument(self):
-        """Test that --search-pattern argument is parsed correctly."""
+        """Test that --search argument is parsed correctly."""
         parser = build_parser()
         test_args = [
             "sync",
+            "git",
+            "--provider",
             "github",
             "--db",
             "sqlite+aiosqlite:///:memory:",
-            "--search-pattern",
+            "--search",
             "chrisgeo/m*",
         ]
         args = parser.parse_args(test_args)
 
-        assert args.search_pattern == "chrisgeo/m*"
+        assert args.search == "chrisgeo/m*"
         assert args.batch_size == 10
         assert args.max_concurrent == 4
         assert args.rate_limit_delay == 1.0
@@ -221,10 +223,12 @@ class TestBatchProcessingCLIArguments:
         parser = build_parser()
         test_args = [
             "sync",
+            "git",
+            "--provider",
             "github",
             "--db",
             "sqlite+aiosqlite:///:memory:",
-            "--search-pattern",
+            "--search",
             "org/*",
             "--batch-size",
             "20",
@@ -241,7 +245,7 @@ class TestBatchProcessingCLIArguments:
 
         args = parser.parse_args(test_args)
 
-        assert args.search_pattern == "org/*"
+        assert args.search == "org/*"
         assert args.batch_size == 20
         assert args.max_concurrent == 8
         assert args.rate_limit_delay == 2.5
@@ -255,10 +259,12 @@ class TestBatchProcessingCLIArguments:
         args = parser.parse_args(
             [
                 "sync",
+                "git",
+                "--provider",
                 "github",
                 "--db",
                 "sqlite+aiosqlite:///:memory:",
-                "--search-pattern",
+                "--search",
                 "org/*",
             ]
         )
@@ -271,10 +277,12 @@ class TestBatchProcessingCLIArguments:
         args = parser.parse_args(
             [
                 "sync",
+                "git",
+                "--provider",
                 "github",
                 "--db",
                 "sqlite+aiosqlite:///:memory:",
-                "--search-pattern",
+                "--search",
                 "org/*",
                 "--use-async",
             ]
@@ -283,19 +291,21 @@ class TestBatchProcessingCLIArguments:
         assert args.use_async is True
 
     def test_gitlab_pattern_argument(self):
-        """Test that --search-pattern argument is parsed correctly for GitLab."""
+        """Test that --search argument is parsed correctly for GitLab."""
         parser = build_parser()
         test_args = [
             "sync",
+            "git",
+            "--provider",
             "gitlab",
             "--db",
             "sqlite+aiosqlite:///:memory:",
-            "--search-pattern",
+            "--search",
             "group/p*",
         ]
         args = parser.parse_args(test_args)
 
-        assert args.search_pattern == "group/p*"
+        assert args.search == "group/p*"
         assert args.batch_size == 10
         assert args.max_concurrent == 4
         assert args.rate_limit_delay == 1.0
@@ -310,10 +320,12 @@ class TestBatchProcessingCLIArguments:
         parser = build_parser()
         test_args = [
             "sync",
+            "git",
+            "--provider",
             "gitlab",
             "--db",
             "sqlite+aiosqlite:///:memory:",
-            "--search-pattern",
+            "--search",
             "mygroup/*",
             "--group",
             "mygroup",
@@ -332,7 +344,7 @@ class TestBatchProcessingCLIArguments:
 
         args = parser.parse_args(test_args)
 
-        assert args.search_pattern == "mygroup/*"
+        assert args.search == "mygroup/*"
         assert args.group == "mygroup"
         assert args.batch_size == 15
         assert args.max_concurrent == 6
@@ -348,6 +360,8 @@ class TestSyncTimeWindowCLIArguments:
         args = parser.parse_args(
             [
                 "sync",
+                "git",
+                "--provider",
                 "local",
                 "--db",
                 "sqlite+aiosqlite:///:memory:",
@@ -366,6 +380,8 @@ class TestSyncTimeWindowCLIArguments:
             parser.parse_args(
                 [
                     "sync",
+                    "git",
+                    "--provider",
                     "local",
                     "--db",
                     "sqlite+aiosqlite:///:memory:",
