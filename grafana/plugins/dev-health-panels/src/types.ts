@@ -6,6 +6,7 @@ export interface DeveloperLandscapeOptions {
   mapName: DeveloperMapName;
   showLabels: boolean;
   colorByTeam: boolean;
+  focusIdentity?: string;
 }
 
 export interface HotspotExplorerOptions {

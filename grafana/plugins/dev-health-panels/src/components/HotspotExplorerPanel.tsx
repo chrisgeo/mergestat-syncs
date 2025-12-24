@@ -51,6 +51,14 @@ const styles = {
   `,
 };
 
+const driverColors: Record<string, string> = {
+  Churn: '#F2495C',
+  Complexity: '#FF780A',
+  Ownership: '#F2CC0C',
+  Incidents: '#B877D9',
+  Review: '#5794F2',
+};
+
 const Sparkline: React.FC<{ points: number[] }> = ({ points }) => {
   if (points.length === 0) {
     return <span className={styles.muted}>trend unavailable</span>;
@@ -68,9 +76,13 @@ const Sparkline: React.FC<{ points: number[] }> = ({ points }) => {
       return `${index === 0 ? 'M' : 'L'}${x.toFixed(2)},${y.toFixed(2)}`;
     })
     .join(' ');
+
+  const areaPath = `${path} L${width.toFixed(2)},${height.toFixed(2)} L0,${height.toFixed(2)} Z`;
+
   return (
     <svg width={width} height={height}>
-      <path d={path} stroke="#9bb1c1" strokeWidth={1.5} fill="none" />
+      <path d={areaPath} fill="#5794F2" fillOpacity={0.1} />
+      <path d={path} stroke="#5794F2" strokeWidth={1.5} fill="none" />
     </svg>
   );
 };
@@ -84,9 +96,8 @@ const DonutGlyph: React.FC<{ slices: Array<{ label: string; value: number }> }> 
     return <span className={styles.muted}>n/a</span>;
   }
   let current = 0;
-  const colors = ['#6b7c93', '#7a90a8', '#8aa0b5', '#9bb1c1', '#b4c1cd'];
 
-  const paths = slices.map((slice, index) => {
+  const paths = slices.map((slice) => {
     const value = slice.value;
     if (value <= 0) {
       return null;
@@ -104,7 +115,7 @@ const DonutGlyph: React.FC<{ slices: Array<{ label: string; value: number }> }> 
       <path
         key={slice.label}
         d={`M ${x1} ${y1} A ${radius} ${radius} 0 ${largeArc} 1 ${x2} ${y2}`}
-        stroke={colors[index % colors.length]}
+        stroke={driverColors[slice.label] ?? '#9bb1c1'}
         strokeWidth={strokeWidth}
         fill="none"
       >

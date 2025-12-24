@@ -19,7 +19,18 @@ const styles = {
   `,
 };
 
-const palette = ['#6b7c93', '#7a90a8', '#8aa0b5', '#9bb1c1', '#b4c1cd', '#c7d1d9'];
+const palette = [
+  '#73BF69', // Green
+  '#F2CC0C', // Yellow
+  '#FF780A', // Orange
+  '#F2495C', // Red
+  '#8AB8FF', // Light Blue
+  '#3274D9', // Blue
+  '#B877D9', // Purple
+  '#E0B400', // Gold
+  '#96D98D', // Light Green
+  '#FF9F30', // Light Orange
+];
 
 type FlowRecord = {
   source: string;
@@ -111,6 +122,21 @@ export const InvestmentFlowPanel: React.FC<Props> = ({ data, width, height, opti
     );
   }
 
+  // Generate color map based on unique sources and targets found in flows
+  const colorMap = useMemo(() => {
+    const allNames = new Set<string>();
+    flows.forEach((f) => {
+      allNames.add(f.source);
+      allNames.add(f.target);
+    });
+    const sortedNames = Array.from(allNames).sort();
+    const map = new Map<string, string>();
+    sortedNames.forEach((name, index) => {
+      map.set(name, palette[index % palette.length]);
+    });
+    return map;
+  }, [flows]);
+
   if (!targetExists) {
     const totals = new Map<string, number>();
     for (const flow of flows) {
@@ -126,12 +152,13 @@ export const InvestmentFlowPanel: React.FC<Props> = ({ data, width, height, opti
           {Array.from(totals.entries()).map(([source, value], index) => {
             const y = 20 + index * (barHeight + 12);
             const segmentWidth = totalValue ? (value / totalValue) * barWidth : 0;
+            const color = colorMap.get(source) ?? palette[0];
             return (
               <g key={source}>
                 <text x={8} y={y + barHeight - 4} className={styles.label}>
                   {source}
                 </text>
-                <rect x={110} y={y} width={segmentWidth} height={barHeight} fill="#7a90a8">
+                <rect x={110} y={y} width={segmentWidth} height={barHeight} fill={color}>
                   <title>
                     {source}: {value.toFixed(2)}
                   </title>
@@ -197,7 +224,7 @@ export const InvestmentFlowPanel: React.FC<Props> = ({ data, width, height, opti
   return (
     <div className={styles.wrapper}>
       <svg width={width} height={height}>
-        {links.map((link, index) => {
+        {links.map((link) => {
           const sourcePos = leftPositions.get(link.source);
           const targetPos = rightPositions.get(link.target);
           if (!sourcePos || !targetPos) {
@@ -217,11 +244,21 @@ export const InvestmentFlowPanel: React.FC<Props> = ({ data, width, height, opti
           const endX = rightX;
           const controlX = (startX + endX) / 2;
           const path = `M ${startX} ${sourceY} C ${controlX} ${sourceY}, ${controlX} ${targetY}, ${endX} ${targetY}`;
-          const color = palette[index % palette.length];
+          
+          // If we have a single source, color links by target to show the breakdown
+          const colorKey = nodesLeft.length === 1 ? link.target : link.source;
+          const color = colorMap.get(colorKey) ?? palette[0];
           const percent = total > 0 ? (link.value / total) * 100 : 0;
 
           return (
-            <path key={`${link.source}-${link.target}`} d={path} stroke={color} strokeWidth={thickness} fill="none">
+            <path
+              key={`${link.source}-${link.target}`}
+              d={path}
+              stroke={color}
+              strokeWidth={thickness}
+              fill="none"
+              opacity={0.5}
+            >
               <title>
                 {link.source} → {link.target}: {link.value.toFixed(2)} ({percent.toFixed(1)}%)
               </title>
@@ -229,20 +266,15 @@ export const InvestmentFlowPanel: React.FC<Props> = ({ data, width, height, opti
           );
         })}
 
-        {nodesLeft.map((node, index) => {
+        {nodesLeft.map((node) => {
           const pos = leftPositions.get(node.name);
           if (!pos) {
             return null;
           }
+          const color = colorMap.get(node.name) ?? palette[0];
           return (
             <g key={node.name}>
-              <rect
-                x={leftX}
-                y={pos.y}
-                width={nodeWidth}
-                height={pos.height}
-                fill={palette[index % palette.length]}
-              />
+              <rect x={leftX} y={pos.y} width={nodeWidth} height={pos.height} fill={color} />
               <text x={leftX + nodeWidth + 6} y={pos.y + pos.height / 2 + 4} className={styles.label}>
                 {node.name}
               </text>
@@ -250,20 +282,15 @@ export const InvestmentFlowPanel: React.FC<Props> = ({ data, width, height, opti
           );
         })}
 
-        {nodesRight.map((node, index) => {
+        {nodesRight.map((node) => {
           const pos = rightPositions.get(node.name);
           if (!pos) {
             return null;
           }
+          const color = colorMap.get(node.name) ?? palette[0];
           return (
             <g key={node.name}>
-              <rect
-                x={rightX}
-                y={pos.y}
-                width={nodeWidth}
-                height={pos.height}
-                fill={palette[index % palette.length]}
-              />
+              <rect x={rightX} y={pos.y} width={nodeWidth} height={pos.height} fill={color} />
               <text x={rightX + nodeWidth + 6} y={pos.y + pos.height / 2 + 4} className={styles.label}>
                 {node.name}
               </text>
