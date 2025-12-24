@@ -2,18 +2,6 @@
 
 This inventory tracks the implementation status of all metrics defined in the `dev-health-ops` project.
 Work item metrics assume provider data has been synced via `python cli.py sync work-items ...` (use `-s` to filter repos; `--auth` to override GitHub/GitLab tokens when needed; tags/settings filtering planned).
-Grafana Investment Areas dashboard filters team IDs with regex `match(...)` in ClickHouse queries.
-Dashboard team filters normalize `team_id` with `ifNull(nullIf(team_id, ''), 'unassigned')` to include legacy NULL/empty values.
-Investment metrics store NULL team IDs for unassigned; the investment flow view casts via `toNullable(team_id)`.
-Hotspot Explorer queries should use table format and order by day to satisfy Grafana time sorting.
-Hotspot Explorer binds the facts frame using `churn_loc_30d` to avoid binding to the sparkline query.
-Hotspot ownership concentration uses `git_blame` max-lines share per file.
-Synthetic fixtures cover a broader file set to improve blame/ownership coverage.
-IC Drilldown includes a Churn vs Throughput panel filtered by `identity_id`.
-Blame-only sync is available via `cli.py sync <local|github|gitlab> --blame-only`.
-GitHub/GitLab backfills (`--date/--backfill`) default to unlimited commits unless `--max-commits-per-repo` is set.
-Grafana panel plugin `grafana/plugins/dev-health-panels` visualizes landscape, hotspots, and investment flow metrics from ClickHouse query results, using `stats.v_ic_landscape_points`, `stats.v_file_hotspots_windowed`, and `stats.v_investment_flow_edges`.
-ClickHouse view definitions use `WITH ... AS` aliasing (avoid `WITH name = expr` syntax).
 
 ## 1. Delivery & Velocity (Flow & DORA)
 
@@ -37,15 +25,15 @@ ClickHouse view definitions use `WITH ... AS` aliasing (avoid `WITH name = expr`
 
 ## 2. Code Quality & Risk
 
-| Metric                   | Status | Source/Implementation                                                                                                                                                                  |
-| :----------------------- | :----: | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Churn                    |  [x]   | Total LOC touched in [compute.py](file:///Users/chris/projects/dev-health-ops/metrics/compute.py)                                                                                      |
-| Rework Rate (30-day)     |  [x]   | Computed in [quality.py](file:///Users/chris/projects/dev-health-ops/metrics/quality.py) and wired in [job_daily.py](file:///Users/chris/projects/dev-health-ops/metrics/job_daily.py) |
-| File Hotspot Score       |  [x]   | [metrics/hotspots.py](file:///Users/chris/projects/dev-health-ops/metrics/hotspots.py) combining churn and contributor count                                                           |
-| PR Size                  |  [x]   | `avg_commit_size_loc` and `large_pr_ratio` in [compute.py](file:///Users/chris/projects/dev-health-ops/metrics/compute.py)                                                             |
-| PR Rework Ratio          |  [x]   | `pr_rework_ratio` in [compute.py](file:///Users/chris/projects/dev-health-ops/metrics/compute.py) (based on changes requested)                                                         |
-| Defect Introduction Rate |  [x]   | [metrics/compute_work_items.py](file:///Users/chris/projects/dev-health-ops/metrics/compute_work_items.py) (bugs created vs items closed)                                              |
-| Single Owner File Ratio  |  [x]   | Computed in [quality.py](file:///Users/chris/projects/dev-health-ops/metrics/quality.py) and wired in [job_daily.py](file:///Users/chris/projects/dev-health-ops/metrics/job_daily.py) |
+| Metric                   | Status | Source/Implementation                                                                                                                                                                            |
+| :----------------------- | :----: | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Churn                    |  [x]   | Total LOC touched in [compute.py](file:///Users/chris/projects/dev-health-ops/metrics/compute.py)                                                                                                |
+| Rework Rate (30-day)     |  [x]   | Computed in [quality.py](file:///Users/chris/projects/dev-health-ops/metrics/quality.py) and wired in [job_daily.py](file:///Users/chris/projects/dev-health-ops/metrics/job_daily.py)           |
+| File Hotspot Score       |  [x]   | [metrics/hotspots.py](file:///Users/chris/projects/dev-health-ops/metrics/hotspots.py) combining churn and contributor count                                                                     |
+| PR Size                  |  [x]   | `avg_commit_size_loc` and `large_pr_ratio` in [compute.py](file:///Users/chris/projects/dev-health-ops/metrics/compute.py)                                                                       |
+| PR Rework Ratio          |  [x]   | `pr_rework_ratio` in [compute.py](file:///Users/chris/projects/dev-health-ops/metrics/compute.py) (based on changes requested)                                                                   |
+| Defect Introduction Rate |  [x]   | [metrics/compute_work_items.py](file:///Users/chris/projects/dev-health-ops/metrics/compute_work_items.py) (bugs created vs items closed)                                                        |
+| Single Owner File Ratio  |  [x]   | Computed in [quality.py](file:///Users/chris/projects/dev-health-ops/metrics/quality.py) and wired in [job_daily.py](file:///Users/chris/projects/dev-health-ops/metrics/job_daily.py)           |
 | Cyclomatic Complexity    |  [x]   | Computed via `metrics complexity` using `radon`. Stored in `file_complexity_snapshots` (per-file) and `repo_complexity_daily`; loaded in `metrics daily` via `store.get_complexity_snapshots()`. |
 
 ## 3. Investment & Portfolio
