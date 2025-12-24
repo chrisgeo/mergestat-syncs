@@ -19,6 +19,7 @@ The project follows a pipeline-like architecture:
     - Hotspot Explorer panel selects the facts frame by requiring `churn_loc_30d` to avoid binding to the sparkline frame.
     - Hotspot ownership concentration uses `git_blame` max-lines share per file.
     - Synthetic fixtures cover a broader file set to improve blame/ownership coverage.
+    - IC Drilldown includes a Churn vs Throughput panel filtered by `identity_id`.
     - Blame-only sync is available via `cli.py sync <local|github|gitlab> --blame-only`.
     - GitHub/GitLab backfills (`--date/--backfill`) default to unlimited commits unless `--max-commits-per-repo` is set.
 

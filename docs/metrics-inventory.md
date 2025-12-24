@@ -9,6 +9,7 @@ Hotspot Explorer queries should use table format and order by day to satisfy Gra
 Hotspot Explorer binds the facts frame using `churn_loc_30d` to avoid binding to the sparkline query.
 Hotspot ownership concentration uses `git_blame` max-lines share per file.
 Synthetic fixtures cover a broader file set to improve blame/ownership coverage.
+IC Drilldown includes a Churn vs Throughput panel filtered by `identity_id`.
 Blame-only sync is available via `cli.py sync <local|github|gitlab> --blame-only`.
 GitHub/GitLab backfills (`--date/--backfill`) default to unlimited commits unless `--max-commits-per-repo` is set.
 Grafana panel plugin `grafana/plugins/dev-health-panels` visualizes landscape, hotspots, and investment flow metrics from ClickHouse query results, using `stats.v_ic_landscape_points`, `stats.v_file_hotspots_windowed`, and `stats.v_investment_flow_edges`.

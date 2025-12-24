@@ -8,6 +8,7 @@
 - **Planned**: allow `sync work-items` filtering by repo tags/settings.
 - **Dashboards**: Investment Areas uses regex `match(...)` filtering for the team variable in ClickHouse queries.
 - **Dashboards**: Team filters normalize `team_id` with `ifNull(nullIf(team_id, ''), 'unassigned')` to include legacy NULL/empty values.
+- **Dashboards**: IC Drilldown includes a Churn vs Throughput panel filtered by `identity_id`.
 - **Investment metrics**: `investment_metrics_daily.team_id` stores NULL for unassigned; the investment flow view casts via `toNullable(team_id)`.
 - **Dashboards**: Hotspot Explorer queries should use table format and order by day to avoid Grafana time-sorting errors.
 - **Dashboards**: Hotspot Explorer binds the facts frame using `churn_loc_30d` to prevent sparkline frames from masking drivers.
