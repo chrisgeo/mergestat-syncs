@@ -4,7 +4,7 @@ import { DevHealthPanel } from './components/DevHealthPanel';
 
 export const plugin = new PanelPlugin<DevHealthOptions>(DevHealthPanel).setPanelOptions((builder) => {
   return builder
-    .addRadio({
+    .addSelect({
       path: 'mode',
       name: 'Panel',
       description: 'Select the panel view to render.',
