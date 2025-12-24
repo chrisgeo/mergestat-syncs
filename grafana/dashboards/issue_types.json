@@ -95,7 +95,7 @@
           "group": [],
           "metricType": "any",
           "orderByKey": "time",
-          "rawQuery": "SELECT day, issue_type_norm, sum(completed_count) as completed FROM issue_type_metrics_daily WHERE $timeFilter GROUP BY day, issue_type_norm ORDER BY day",
+          "rawSql": "SELECT day, issue_type_norm, sum(completed_count) as completed FROM issue_type_metrics_daily WHERE day >= toDate(toDateTime($__fromTime_ms)) AND day <= toDate(toDateTime($__toTime_ms)) GROUP BY day, issue_type_norm ORDER BY day",
           "refId": "A",
           "select": [
             [
@@ -194,7 +194,7 @@
           "group": [],
           "metricType": "any",
           "orderByKey": "time",
-          "rawQuery": "SELECT day, issue_type_norm, avg(cycle_p50_hours) as cycle_hours FROM issue_type_metrics_daily WHERE $timeFilter GROUP BY day, issue_type_norm ORDER BY day",
+          "rawSql": "SELECT day, issue_type_norm, avg(cycle_p50_hours) as cycle_hours FROM issue_type_metrics_daily WHERE day >= toDate(toDateTime($__fromTime_ms)) AND day <= toDate(toDateTime($__toTime_ms)) GROUP BY day, issue_type_norm ORDER BY day",
           "refId": "A",
           "select": [
             [
