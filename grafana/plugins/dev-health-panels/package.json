@@ -16,6 +16,11 @@
   },
   "author": "Devhealth",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/chrisgeo/dev-health-ops.git",
+    "directory": "grafana/plugins/dev-health-panels"
+  },
   "devDependencies": {
     "@babel/core": "^7.21.4",
     "@grafana/eslint-config": "^7.0.0",

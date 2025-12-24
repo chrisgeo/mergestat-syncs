@@ -13,7 +13,20 @@
       "small": "img/logo.svg",
       "large": "img/logo.svg"
     },
-    "links": [],
+    "links": [
+      {
+        "name": "Project",
+        "url": "https://github.com/chrisgeo/dev-health-ops"
+      },
+      {
+        "name": "License",
+        "url": "https://github.com/chrisgeo/dev-health-ops/blob/main/grafana/plugins/dev-health-panels/LICENSE"
+      },
+      {
+        "name": "Documentation",
+        "url": "https://github.com/chrisgeo/dev-health-ops/blob/main/grafana/plugins/dev-health-panels/README.md"
+      }
+    ],
     "screenshots": [],
     "version": "%VERSION%",
     "updated": "%TODAY%"

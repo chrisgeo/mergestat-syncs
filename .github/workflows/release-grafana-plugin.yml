@@ -1,0 +1,98 @@
+name: Release Grafana Plugin
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  release-plugin:
+    name: Build, Sign and Release Plugin
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Needed for uploading release assets
+
+    defaults:
+      run:
+        working-directory: grafana/plugins/dev-health-panels
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: grafana/plugins/dev-health-panels/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Run Tests
+        run: npm run test:ci
+
+      - name: Build Plugin
+        run: npm run build
+
+      - name: Sign Plugin
+        env:
+          GRAFANA_ACCESS_POLICY_TOKEN: ${{ secrets.GRAFANA_ACCESS_POLICY_TOKEN }}
+        run: |
+          if [ -n "$GRAFANA_ACCESS_POLICY_TOKEN" ]; then
+            echo "Signing plugin..."
+            npm run sign
+          else
+            echo "GRAFANA_ACCESS_POLICY_TOKEN not found. Skipping signing."
+            echo "To sign the plugin, please create a GRAFANA_ACCESS_POLICY_TOKEN secret in your repository."
+          fi
+
+      - name: Get Plugin Metadata
+        id: metadata
+        run: |
+          VERSION=$(npm pkg get version | tr -d '"')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          PLUGIN_ID=$(npm pkg get name | tr -d '"') # Using package name or plugin id from json
+          # Better to get ID from plugin.json directly as it is the true ID
+          REAL_PLUGIN_ID=$(jq -r .id src/plugin.json)
+          echo "plugin_id=$REAL_PLUGIN_ID" >> $GITHUB_OUTPUT
+
+      - name: Package Plugin
+        run: |
+          # The built artifacts are in 'dist'
+          # We need to rename 'dist' to the plugin-id for the zip structure
+          PLUGIN_ID=${{ steps.metadata.outputs.plugin_id }}
+          VERSION=${{ steps.metadata.outputs.version }}
+          
+          # Rename dist to plugin id
+          mv dist $PLUGIN_ID
+          
+          # Zip it
+          zip -r $PLUGIN_ID-$VERSION.zip $PLUGIN_ID
+          
+          # Generate MD5
+          md5sum $PLUGIN_ID-$VERSION.zip > $PLUGIN_ID-$VERSION.zip.md5
+          
+          echo "ARTIFACT_NAME=$PLUGIN_ID-$VERSION.zip" >> $GITHUB_ENV
+          echo "MD5_NAME=$PLUGIN_ID-$VERSION.zip.md5" >> $GITHUB_ENV
+
+      - name: Validate Plugin
+        run: |
+          PLUGIN_ID=${{ steps.metadata.outputs.plugin_id }}
+          VERSION=${{ steps.metadata.outputs.version }}
+          npx @grafana/plugin-validator@latest $PLUGIN_ID-$VERSION.zip
+
+      - name: Upload Release Assets
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            grafana/plugins/dev-health-panels/${{ env.ARTIFACT_NAME }}
+            grafana/plugins/dev-health-panels/${{ env.MD5_NAME }}
