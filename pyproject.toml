@@ -7,6 +7,19 @@ name = "dev-health-ops"
 version = "0.1.0"
 description = "Open Source Development Team Operation Analytics"
 readme = "README.md"
+authors = [{name = "Chris Geo", email = "chris@example.com"}]
+license = {text = "MIT"}
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+keywords = ["metrics", "git", "analytics", "developer-experience", "grafana"]
 requires-python = ">=3.10"
 dependencies = [
   "tqdm",
@@ -37,6 +50,10 @@ dev = [
   "pytest-asyncio",
   "pytest-cov",
 ]
+
+[project.urls]
+Repository = "https://github.com/chrisgeo/dev-health-ops"
+Issues = "https://github.com/chrisgeo/dev-health-ops/issues"
 
 [project.scripts]
 dev-health-ops = "cli:main"
