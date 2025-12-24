@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { css } from '@emotion/css';
 import { PanelProps } from '@grafana/data';
+import { useTheme2 } from '@grafana/ui';
 import { DevHealthOptions } from '../types';
 import { getField, getFieldValue, getFrameWithFields } from './dataFrame';
 import { PanelEmptyState } from './PanelEmptyState';
@@ -25,20 +26,10 @@ const styles = {
   `,
 };
 
-const palette = [
-  '#73BF69', // Green
-  '#F2CC0C', // Yellow
-  '#FF780A', // Orange
-  '#F2495C', // Red
-  '#8AB8FF', // Light Blue
-  '#3274D9', // Blue
-  '#B877D9', // Purple
-  '#E0B400', // Gold
-  '#96D98D', // Light Green
-  '#FF9F30', // Light Orange
-];
-
 export const DeveloperLandscapePanel: React.FC<Props> = ({ data, width, height, options, replaceVariables }) => {
+  const theme = useTheme2();
+  const palette = theme.visualization.palette;
+
   const landscapeOptions = options.developerLandscape ?? {
     mapName: 'churn_throughput',
     showLabels: false,
@@ -177,6 +168,8 @@ export const DeveloperLandscapePanel: React.FC<Props> = ({ data, width, height, 
 
     return { identityColorMap: iMap, teamColorMap: tMap };
   }, [points]);
+
+
 
   const padding = 32;
   const plotWidth = Math.max(0, width - padding * 2);
