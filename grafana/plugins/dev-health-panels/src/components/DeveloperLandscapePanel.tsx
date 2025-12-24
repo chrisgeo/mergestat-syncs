@@ -25,14 +25,30 @@ const styles = {
   `,
 };
 
-const palette = ['#6b7c93', '#7a90a8', '#8aa0b5', '#9bb1c1', '#aebfcd', '#c2ced7'];
+const palette = [
+  '#73BF69', // Green
+  '#F2CC0C', // Yellow
+  '#FF780A', // Orange
+  '#F2495C', // Red
+  '#8AB8FF', // Light Blue
+  '#3274D9', // Blue
+  '#B877D9', // Purple
+  '#E0B400', // Gold
+  '#96D98D', // Light Green
+  '#FF9F30', // Light Orange
+];
 
-export const DeveloperLandscapePanel: React.FC<Props> = ({ data, width, height, options }) => {
+export const DeveloperLandscapePanel: React.FC<Props> = ({ data, width, height, options, replaceVariables }) => {
   const landscapeOptions = options.developerLandscape ?? {
     mapName: 'churn_throughput',
     showLabels: false,
     colorByTeam: false,
   };
+
+  // Resolve focusIdentity variable (e.g. $identity_id)
+  const rawFocusIdentity = landscapeOptions.focusIdentity;
+  const focusIdentity = rawFocusIdentity ? replaceVariables(rawFocusIdentity) : undefined;
+
 
   const axisLabels = useMemo(() => {
     switch (landscapeOptions.mapName) {
@@ -148,25 +164,25 @@ export const DeveloperLandscapePanel: React.FC<Props> = ({ data, width, height, 
     );
   }
 
+  // Stable color mapping for identities and teams
+  const { identityColorMap, teamColorMap } = useMemo(() => {
+    const identities = Array.from(new Set(points.map((p) => p.label).filter(Boolean) as string[])).sort();
+    const teams = Array.from(new Set(points.map((p) => p.team).filter(Boolean) as string[])).sort();
+
+    const iMap = new Map<string, string>();
+    identities.forEach((id, index) => iMap.set(id, palette[index % palette.length]));
+
+    const tMap = new Map<string, string>();
+    teams.forEach((team, index) => tMap.set(team, palette[index % palette.length]));
+
+    return { identityColorMap: iMap, teamColorMap: tMap };
+  }, [points]);
+
   const padding = 32;
   const plotWidth = Math.max(0, width - padding * 2);
   const plotHeight = Math.max(0, height - padding * 2);
   const midX = padding + plotWidth * 0.5;
   const midY = padding + plotHeight * 0.5;
-
-  const teamColors = new Map<string, string>();
-  let paletteIndex = 0;
-
-  const getTeamColor = (team?: string) => {
-    if (!team) {
-      return '#7f8fa3';
-    }
-    if (!teamColors.has(team)) {
-      teamColors.set(team, palette[paletteIndex % palette.length]);
-      paletteIndex += 1;
-    }
-    return teamColors.get(team) ?? '#7f8fa3';
-  };
 
   return (
     <div className={styles.wrapper}>
@@ -192,36 +208,73 @@ export const DeveloperLandscapePanel: React.FC<Props> = ({ data, width, height, 
           {axisLabels.y}
         </text>
 
-        {points.map((point, index) => {
-          const x = padding + Math.min(1, Math.max(0, point.xNorm)) * plotWidth;
-          const y = padding + (1 - Math.min(1, Math.max(0, point.yNorm))) * plotHeight;
-          const color = landscapeOptions.colorByTeam ? getTeamColor(point.team) : '#7f8fa3';
-          const tooltip = [
-            point.label ? `ID: ${point.label}` : null,
-            point.team ? `Team: ${point.team}` : null,
-            point.asOf ? `As of: ${point.asOf}` : null,
-            `x_raw: ${Number.isFinite(point.xRaw) ? point.xRaw : 'n/a'}`,
-            `y_raw: ${Number.isFinite(point.yRaw) ? point.yRaw : 'n/a'}`,
-            `x_norm: ${point.xNorm.toFixed(2)}`,
-            `y_norm: ${point.yNorm.toFixed(2)}`,
-          ]
-            .filter(Boolean)
-            .join('\n');
+        {/* Render non-focused points first */}
+        {points
+          .filter((p) => (focusIdentity ? p.label !== focusIdentity : false))
+          .map((point, index) => renderPoint(point, index, false))}
 
-          return (
-            <g key={`${point.label ?? 'point'}-${index}`}>
-              <circle cx={x} cy={y} r={5} fill={color}>
-                <title>{tooltip}</title>
-              </circle>
-              {landscapeOptions.showLabels && point.label ? (
-                <text x={x + 6} y={y - 6} className={styles.label}>
-                  {point.label}
-                </text>
-              ) : null}
-            </g>
-          );
-        })}
+        {/* Render focused points last to ensure they are on top */}
+        {points
+          .filter((p) => (focusIdentity ? p.label === focusIdentity : true))
+          .map((point, index) => renderPoint(point, index, true))}
       </svg>
     </div>
   );
+
+  function renderPoint(point: any, index: number, isFocus: boolean) {
+    const x = padding + Math.min(1, Math.max(0, point.xNorm)) * plotWidth;
+    const y = padding + (1 - Math.min(1, Math.max(0, point.yNorm))) * plotHeight;
+
+    const color = landscapeOptions.colorByTeam
+      ? (point.team ? teamColorMap.get(point.team) : '#7f8fa3')
+      : (point.label ? identityColorMap.get(point.label) : '#7f8fa3');
+
+    const opacity = focusIdentity ? (isFocus ? 1 : 0.15) : 1;
+    const showLabel = focusIdentity ? isFocus : landscapeOptions.showLabels;
+
+    const tooltip = [
+      point.label ? `ID: ${point.label}` : null,
+      point.team ? `Team: ${point.team}` : null,
+      point.asOf ? `As of: ${point.asOf}` : null,
+      `x_raw: ${Number.isFinite(point.xRaw) ? point.xRaw : 'n/a'}`,
+      `y_raw: ${Number.isFinite(point.yRaw) ? point.yRaw : 'n/a'}`,
+      `x_norm: ${point.xNorm.toFixed(2)}`,
+      `y_norm: ${point.yNorm.toFixed(2)}`,
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    // Simple heuristic to get a "name" from an email or ID
+    const displayName = point.label
+      ? point.label.includes('@')
+        ? point.label
+            .split('@')[0]
+            .split(/[\._]/)
+            .map((s: string) => s.charAt(0).toUpperCase() + s.slice(1))
+            .join(' ')
+        : point.label
+      : '';
+
+    return (
+      <g key={`${point.label ?? 'point'}-${index}`} opacity={opacity}>
+        <circle cx={x} cy={y} r={isFocus ? 6 : 4} fill={color ?? '#7f8fa3'} stroke={isFocus ? '#fff' : 'none'} strokeWidth={1}>
+          <title>{tooltip}</title>
+        </circle>
+        {showLabel && point.label ? (
+          <text
+            x={x + 8}
+            y={y + 4}
+            className={styles.label}
+            style={{
+              fontWeight: isFocus ? 'bold' : 'normal',
+              fontSize: isFocus ? '13px' : '11px',
+              fill: isFocus ? '#fff' : '#dbe2ea',
+            }}
+          >
+            {displayName}
+          </text>
+        ) : null}
+      </g>
+    );
+  }
 };
