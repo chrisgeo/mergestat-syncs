@@ -166,7 +166,7 @@ const config = async (env): Promise<Configuration> => {
           rules: [
             {
               search: /\%VERSION\%/g,
-              replace: getPackageJson().version,
+              replace: process.env.PLUGIN_VERSION || getPackageJson().version,
             },
             {
               search: /\%TODAY\%/g,

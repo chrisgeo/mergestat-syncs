@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=68", "wheel", "setuptools_scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "dev-health-ops"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Open Source Development Team Operation Analytics"
 readme = "README.md"
 authors = [{name = "Chris Geo", email = "chris@example.com"}]
@@ -58,6 +58,10 @@ Issues = "https://github.com/chrisgeo/dev-health-ops/issues"
 [project.scripts]
 dev-health-ops = "cli:main"
 dev-hops = "cli:main"
+
+[tool.setuptools_scm]
+version_scheme = "post-release"
+local_scheme = "dirty-tag"
 
 [tool.setuptools]
 packages = [
