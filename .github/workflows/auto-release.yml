@@ -1,0 +1,65 @@
+name: Auto Release Tag
+
+on:
+  pull_request:
+    types: [closed]
+  workflow_dispatch:
+
+jobs:
+  tag-and-release:
+    if: (github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'pre-release')) || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      new_tag: ${{ steps.version.outputs.new_tag }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Determine Next Version
+        id: version
+        run: python scripts/auto_tag.py
+        
+      - name: Create Tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          TAG=${{ steps.version.outputs.new_tag }}
+          
+          # Check if tag exists
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists. Skipping creation."
+          else
+            echo "Creating tag $TAG"
+            git tag $TAG
+            git push origin $TAG
+          fi
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.new_tag }}
+          generate_release_notes: true
+          prerelease: true
+
+  call-publish:
+    needs: tag-and-release
+    uses: ./.github/workflows/publish.yml
+    with:
+      tag: ${{ needs.tag-and-release.outputs.new_tag }}
+    secrets: inherit
+
+  call-release-plugin:
+    needs: tag-and-release
+    uses: ./.github/workflows/release-grafana-plugin.yml
+    with:
+      tag: ${{ needs.tag-and-release.outputs.new_tag }}
+    secrets: inherit
