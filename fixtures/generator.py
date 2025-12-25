@@ -58,6 +58,8 @@ class SyntheticDataGenerator:
             ("Olivia Gray", "olivia@example.com"),
             ("Pat Lime", "pat@example.com"),
         ]
+        # Randomize authors order to vary team composition
+        random.shuffle(self.authors)
         self.files = [
             "src/main.py",
             "src/utils.py",
@@ -182,7 +184,7 @@ class SyntheticDataGenerator:
                     GitCommit(
                         repo_id=self.repo_id,
                         hash=commit_hash,
-                        message=f"Synthetic commit: {random.choice(['fix typo', 'add feature', 'update docs', 'refactor code'])}",
+                        message=f"Synthetic commit: {random.choice(['fix typo', 'add feature', 'update docs', 'refactor code', 'optimize performance', 'fix security vulnerability', 'bump dependencies', 'revert change', 'add tests', 'improve logging'])}",
                         author_name=author_name,
                         author_email=author_email,
                         author_when=commit_time,
@@ -199,10 +201,18 @@ class SyntheticDataGenerator:
     def generate_commit_stats(self, commits: List[GitCommit]) -> List[GitCommitStat]:
         stats = []
         for commit in commits:
-            # Each commit touches 1-3 files
-            files_to_touch = random.sample(self.files, random.randint(1, 3))
+            # Each commit touches 1-5 files
+            files_to_touch = random.sample(self.files, random.randint(1, min(5, len(self.files))))
             for file_path in files_to_touch:
-                additions = random.randint(1, 100)
+                # 80% small changes, 15% medium, 5% large
+                change_type = random.random()
+                if change_type < 0.8:
+                    additions = random.randint(1, 50)
+                elif change_type < 0.95:
+                    additions = random.randint(50, 200)
+                else:
+                    additions = random.randint(200, 1000)
+                
                 deletions = random.randint(0, additions)
                 stats.append(
                     GitCommitStat(
@@ -257,7 +267,7 @@ class SyntheticDataGenerator:
                 "pr": GitPullRequest(
                     repo_id=self.repo_id,
                     number=i,
-                    title=f"Synthetic PR #{i}: {random.choice(['Feature X', 'Fix Bug Y', 'Cleanup Z'])}",
+                    title=f"Synthetic PR #{i}: {random.choice(['Implement User Auth', 'Fix NPE in Service', 'Refactor DB Layer', 'Update API Docs', 'Add Integration Tests', 'Bump version', 'Optimize Startup', 'Remove Legacy Code', 'Feature X', 'Fix Bug Y', 'Cleanup Z'])}",
                     state=state,
                     author_name=author_name,
                     author_email=author_email,
@@ -299,7 +309,7 @@ class SyntheticDataGenerator:
                 started_at = queued_at + timedelta(minutes=random.randint(1, 30))
                 duration_minutes = random.randint(5, 60)
                 finished_at = started_at + timedelta(minutes=duration_minutes)
-                status = random.choice(["success", "success", "failed"])
+                status = random.choices(["success", "failed", "canceled"], weights=[0.7, 0.2, 0.1], k=1)[0]
 
                 run_index += 1
                 runs.append(
@@ -333,7 +343,7 @@ class SyntheticDataGenerator:
                 duration_minutes = random.randint(5, 90)
                 finished_at = started_at + timedelta(minutes=duration_minutes)
                 deployed_at = finished_at + timedelta(minutes=random.randint(0, 15))
-                status = random.choice(["success", "success", "failed"])
+                status = random.choices(["success", "failed"], weights=[0.8, 0.2], k=1)[0]
                 environment = random.choice(["production", "staging"])
                 merged_at = started_at - timedelta(hours=random.randint(1, 72))
                 pr_number = None
@@ -373,7 +383,7 @@ class SyntheticDataGenerator:
                     minutes=random.randint(0, 60 * 20)
                 )
                 resolved_at = started_at + timedelta(hours=random.randint(1, 12))
-                status = random.choice(["resolved", "resolved", "open"])
+                status = random.choices(["resolved", "open"], weights=[0.8, 0.2], k=1)[0]
                 if status == "open":
                     resolved_at = None
 
