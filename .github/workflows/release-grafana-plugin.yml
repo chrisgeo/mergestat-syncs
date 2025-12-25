@@ -152,7 +152,9 @@ jobs:
 
           # Generate MD5 for consistency with previous workflow
           md5sum $ZIP_FILE > $ZIP_FILE.md5
+          sha1sum $ZIP_FILE > $ZIP_FILE.sha1
           echo "MD5_PATH=$ZIP_FILE.md5" >> $GITHUB_ENV
+          echo "SHA1_PATH=$ZIP_FILE.sha1" >> $GITHUB_ENV
 
       - name: Upload Release Assets
         uses: softprops/action-gh-release@v1
@@ -161,3 +163,4 @@ jobs:
           files: |
             grafana/plugins/dev-health-panels/${{ env.ARTIFACT_PATH }}
             grafana/plugins/dev-health-panels/${{ env.MD5_PATH }}
+            grafana/plugins/dev-health-panels/${{ env.SHA1_PATH }}
