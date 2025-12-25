@@ -1,5 +1,7 @@
 name: Release Grafana Plugin
 
+permissions: read-all
+
 on:
   release:
     types: [ published ]
@@ -44,119 +46,172 @@ jobs:
             fi
           fi
 
-  release-plugin:
+  release:
     name: Build, Sign and Release Plugin
     needs: check-changes
     if: needs.check-changes.outputs.plugin_changed == 'true'
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: write
-      attestations: write
     defaults:
       run:
         working-directory: grafana/plugins/dev-health-panels
-
+    env:
+      GRAFANA_ACCESS_POLICY_TOKEN: ${{ secrets.GRAFANA_ACCESS_POLICY_TOKEN }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Extract Version
-        id: get_version
-        run: |
-          # Install semver for parsing
-          npm install semver
-
-          # Use node to parse version logic
-          node -e '
-            const semver = require("semver");
-            const ref = process.env.GITHUB_REF;
-            let raw = "";
-            
-            if (ref.startsWith("refs/tags/")) {
-              raw = ref.replace("refs/tags/", "");
-            } else {
-              // Fallback to package.json version if not a tag
-              raw = require("./grafana/plugins/dev-health-panels/package.json").version;
-            }
-
-            // 1. Try clean (handles v1.2.3, 1.2.3-beta) - preserves prerelease
-            let ver = semver.clean(raw);
-
-            // 2. If invalid, try coerce (handles 1.2 -> 1.2.0, 1.2.3.4 -> 1.2.3)
-            // Note: coerce strips prerelease tags from invalid strings (e.g. v1.2-beta -> 1.2.0)
-            if (!ver) {
-              const coerced = semver.coerce(raw);
-              if (coerced) ver = coerced.version;
-            }
-
-            // 3. Fail if still null
-            if (!ver) {
-              console.error(`Could not parse a valid SemVer from "${raw}"`);
-              process.exit(1);
-            }
-
-            console.log(`Parsed version: ${ver}`);
-            // Write to GITHUB_ENV
-            const fs = require("fs");
-            fs.appendFileSync(process.env.GITHUB_ENV, `VERSION=${ver}\n`);
-          '
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
         with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: grafana/plugins/dev-health-panels/package-lock.json
+          persist-credentials: false
+      # - name: Setup Node.js environment
+      #   uses: actions/setup-node@v6
+      #   with:
+      #     node-version: "22"
+      #     cache: "npm"
+      # - name: Check types
+      #   run: npm run typecheck
+      # - name: Lint
+      #   run: npm run lint
+      # - name: Unit tests
+      #   run: npm run test:ci
+      # - name: Build frontend
+      #   run: npm run build
+      # - name: Sign plugin
+      #   run: npm run sign
+      #   if: ${{ env.GRAFANA_ACCESS_POLICY_TOKEN != '' }}
+      # - name: Get plugin metadata
+      #   id: metadata
+      #   run: |
+      #     sudo apt-get install jq
 
-      - name: Install dependencies
-        run: npm ci
+      #     export GRAFANA_PLUGIN_ID=$(cat dist/plugin.json | jq -r .id)
+      #     export GRAFANA_PLUGIN_VERSION=$(cat dist/plugin.json | jq -r .info.version)
+      #     export GRAFANA_PLUGIN_ARTIFACT=${GRAFANA_PLUGIN_ID}-${GRAFANA_PLUGIN_VERSION}.zip
 
-      - name: Update package.json version
-        run: npm version ${{ env.VERSION }} --no-git-tag-version --allow-same-version
+      #     echo "plugin-id=${GRAFANA_PLUGIN_ID}" >> $GITHUB_OUTPUT
+      #     echo "plugin-version=${GRAFANA_PLUGIN_VERSION}" >> $GITHUB_OUTPUT
+      #     echo "archive=${GRAFANA_PLUGIN_ARTIFACT}" >> $GITHUB_OUTPUT
 
-      - name: Lint
-        run: npm run lint
+      # - name: Package plugin
+      #   id: package-plugin
+      #   run: |
+      #     mv dist ${PLUGIN_ID}
+      #     zip ${ARCHIVE} ${PLUGIN_ID} -r
+      #   env:
+      #     ARCHIVE: ${{ steps.metadata.outputs.archive }}
+      #     PLUGIN_ID: ${{ steps.metadata.outputs.plugin-id }}
 
-      - name: Typecheck
-        run: npm run typecheck
+      # - name: Check plugin.json
+      #   run: |
+      #     npm run validate ${ARCHIVE}
+      #   env:
+      #     ARCHIVE: ${{ steps.metadata.outputs.archive }}
 
-      - name: Run Tests
-        run: npm run test:ci
+      # - name: Archive Build
+      #   uses: actions/upload-artifact@v5
+      #   with:
+      #     name: ${{ steps.metadata.outputs.plugin-id }}-${{ steps.metadata.outputs.plugin-version }}
+      #     path: ${{ steps.metadata.outputs.plugin-id }}
+      #     retention-days: 5
 
-      - name: Build and Sign Plugin
+      - name: Build & Release
         uses: grafana/plugin-actions/build-plugin@build-plugin/v1.0.2
         with:
           policy_token: ${{ secrets.GRAFANA_ACCESS_POLICY_TOKEN }}
-          attestation: true
-          node-version: '20'
 
-      - name: Locate Build Artifacts
-        id: locate
-        run: |
-          # The action creates the zip in the plugin directory (or check where it puts it)
-          # It typically names it <plugin-id>-<version>.zip
-
-          # Find the zip file
-          ZIP_FILE=$(find . -maxdepth 1 -name "*.zip" | head -n 1)
-
-          if [ -z "$ZIP_FILE" ]; then
-            echo "No zip file found!"
-            ls -la
-            exit 1
-          fi
-
-          echo "Found artifact: $ZIP_FILE"
-          echo "ARTIFACT_PATH=$ZIP_FILE" >> $GITHUB_ENV
-
-          # Generate MD5 for consistency with previous workflow
-          md5sum $ZIP_FILE > $ZIP_FILE.md5
-          echo "MD5_PATH=$ZIP_FILE.md5" >> $GITHUB_ENV
-
-      - name: Upload Release Assets
-        uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/')
-        with:
-          files: |
-            grafana/plugins/dev-health-panels/${{ env.ARTIFACT_PATH }}
-            grafana/plugins/dev-health-panels/${{ env.MD5_PATH }}
+#      - name: Extract Version
+#        id: get_version
+#        run: |
+#          # Install semver for parsing
+#          npm install semver
+#
+#          # Use node to parse version logic
+#          node -e '
+#            const semver = require("semver");
+#            const ref = process.env.GITHUB_REF;
+#            let raw = "";
+#
+#            if (ref.startsWith("refs/tags/")) {
+#              raw = ref.replace("refs/tags/", "");
+#            } else {
+#              // Fallback to package.json version if not a tag
+#              raw = require("./grafana/plugins/dev-health-panels/package.json").version;
+#            }
+#
+#            // 1. Try clean (handles v1.2.3, 1.2.3-beta) - preserves prerelease
+#            let ver = semver.clean(raw);
+#
+#            // 2. If invalid, try coerce (handles 1.2 -> 1.2.0, 1.2.3.4 -> 1.2.3)
+#            // Note: coerce strips prerelease tags from invalid strings (e.g. v1.2-beta -> 1.2.0)
+#            if (!ver) {
+#              const coerced = semver.coerce(raw);
+#              if (coerced) ver = coerced.version;
+#            }
+#
+#            // 3. Fail if still null
+#            if (!ver) {
+#              console.error(`Could not parse a valid SemVer from "${raw}"`);
+#              process.exit(1);
+#            }
+#
+#            console.log(`Parsed version: ${ver}`);
+#            // Write to GITHUB_ENV
+#            const fs = require("fs");
+#            fs.appendFileSync(process.env.GITHUB_ENV, `VERSION=${ver}\n`);
+#          '
+#
+#      - name: Setup Node.js
+#        uses: actions/setup-node@v4
+#        with:
+#          node-version: '20'
+#          cache: 'npm'
+#          cache-dependency-path: grafana/plugins/dev-health-panels/package-lock.json
+#
+#      - name: Install dependencies
+#        run: npm ci
+#
+#      - name: Update package.json version
+#        run: npm version ${{ env.VERSION }} --no-git-tag-version --allow-same-version
+#
+#      - name: Lint
+#        run: npm run lint
+#
+#      - name: Typecheck
+#        run: npm run typecheck
+#
+#      - name: Run Tests
+#        run: npm run test:ci
+#
+#      - name: Build and Sign Plugin
+#        uses: grafana/plugin-actions/build-plugin@build-plugin/v1.0.2
+#        with:
+#          policy_token: ${{ secrets.GRAFANA_ACCESS_POLICY_TOKEN }}
+#          attestation: true
+#          node-version: '20'
+#
+#      - name: Locate Build Artifacts
+#        id: locate
+#        run: |
+#          # The action creates the zip in the plugin directory (or check where it puts it)
+#          # It typically names it <plugin-id>-<version>.zip
+#
+#          # Find the zip file
+#          ZIP_FILE=$(find . -maxdepth 1 -name "*.zip" | head -n 1)
+#
+#          if [ -z "$ZIP_FILE" ]; then
+#            echo "No zip file found!"
+#            ls -la
+#            exit 1
+#          fi
+#
+#          echo "Found artifact: $ZIP_FILE"
+#          echo "ARTIFACT_PATH=$ZIP_FILE" >> $GITHUB_ENV
+#
+#          # Generate MD5 for consistency with previous workflow
+#          md5sum $ZIP_FILE > $ZIP_FILE.md5
+#          echo "MD5_PATH=$ZIP_FILE.md5" >> $GITHUB_ENV
+#
+#      - name: Upload Release Assets
+#        uses: softprops/action-gh-release@v1
+#        if: startsWith(github.ref, 'refs/tags/')
+#        with:
+#          files: |
+#            grafana/plugins/dev-health-panels/${{ env.ARTIFACT_PATH }}
+#            grafana/plugins/dev-health-panels/${{ env.MD5_PATH }}
