@@ -35,7 +35,7 @@ This provides the `dev-hops` command in your terminal.
 dev-hops --help
 ```
 
-*Note: In the documentation below, you can replace `python cli.py` with `dev-hops` if you have installed the package.*
+*Note: In the documentation below, you can replace `dev-hops` with `dev-hops` if you have installed the package.*
 
 ## Private Repository Support ✅
 
@@ -128,7 +128,7 @@ This repo can compute daily “developer health” metrics and provision Grafana
 - **Git + PR/MR facts** (from GitHub/GitLab/local syncs)
 - **Work tracking items** (Jira issues, GitHub issues/Projects, GitLab issues)
 
-Jira is **not** a replacement for pull request data — it’s used to track associated project work (throughput, WIP, work-item cycle/lead times). PR metrics still come from the Git provider data (e.g., GitHub PRs / GitLab MRs) synced by the CLI (`python cli.py sync <target> --provider ...`).
+Jira is **not** a replacement for pull request data — it’s used to track associated project work (throughput, WIP, work-item cycle/lead times). PR metrics still come from the Git provider data (e.g., GitHub PRs / GitLab MRs) synced by the CLI (`dev-hops sync <target> --provider ...`).
 
 **Docs**
 
@@ -142,33 +142,33 @@ Jira is **not** a replacement for pull request data — it’s used to track ass
 1) Start ClickHouse + Grafana:
 
 ```bash
-python cli.py grafana up
+dev-hops grafana up
 ```
 
 1) Sync Git data into ClickHouse (choose one):
 
 ```bash
 # Local repo (commits + stats)
-python cli.py sync git --provider local --db "clickhouse://localhost:8123/default" --repo-path .
+dev-hops sync git --provider local --db "clickhouse://localhost:8123/default" --repo-path .
 
 # GitHub repo (commits + stats)
-python cli.py sync git --provider github --db "clickhouse://localhost:8123/default" --owner <owner> --repo <repo>
+dev-hops sync git --provider github --db "clickhouse://localhost:8123/default" --owner <owner> --repo <repo>
 
 # GitLab project (commits + stats)
-python cli.py sync git --provider gitlab --db "clickhouse://localhost:8123/default" --project-id <id>
+dev-hops sync git --provider gitlab --db "clickhouse://localhost:8123/default" --project-id <id>
 ```
 
 1) Compute derived metrics (Git + Work Items):
 
 ```bash
 # (Optional) Sync work items from provider APIs (recommended)
-python cli.py sync work-items --provider all --date 2025-02-01 --backfill 30 --db "clickhouse://localhost:8123/default"
+dev-hops sync work-items --provider all --date 2025-02-01 --backfill 30 --db "clickhouse://localhost:8123/default"
 
 # One day (derived Git metrics; enriches IC metrics from already-synced work items when available)
-python cli.py metrics daily --date 2025-02-01 --db "clickhouse://localhost:8123/default"
+dev-hops metrics daily --date 2025-02-01 --db "clickhouse://localhost:8123/default"
 
 # Backfill last 30 days ending at date
-python cli.py metrics daily --date 2025-02-01 --backfill 30 --db "clickhouse://localhost:8123/default"
+dev-hops metrics daily --date 2025-02-01 --backfill 30 --db "clickhouse://localhost:8123/default"
 ```
 
 1) Open Grafana:
@@ -181,7 +181,7 @@ python cli.py metrics daily --date 2025-02-01 --backfill 30 --db "clickhouse://l
 Work items are fetched from provider APIs via a dedicated sync command. This is separate from PR ingestion:
 
 - Configure credentials + mapping (see `docs/task_trackers.md`)
-- Sync work items: `python cli.py sync work-items --provider jira|github|gitlab|all ...` (use `-s` to filter repos; `--auth` for GitHub/GitLab token override)
+- Sync work items: `dev-hops sync work-items --provider jira|github|gitlab|all ...` (use `-s` to filter repos; `--auth` for GitHub/GitLab token override)
 - `metrics daily` does not need `--provider` unless you want backward-compatible "sync-then-compute" behavior in one step.
 
 `cli.py` automatically loads a local `.env` file from the repo root (without overriding already-set environment variables). Disable with `DISABLE_DOTENV=1`.
@@ -192,13 +192,13 @@ You can sync team definitions into the database from multiple sources. This allo
 
 ```bash
 # Sync from a local YAML config (default)
-python cli.py sync teams --db "sqlite+aiosqlite:///mergestat.db" --path config/teams.yaml
+dev-hops sync teams --db "sqlite+aiosqlite:///stats.db" --path config/teams.yaml
 
 # Sync from Jira Projects (uses JIRA_* env vars)
-python cli.py sync teams --db "sqlite+aiosqlite:///mergestat.db" --provider jira
+dev-hops sync teams --db "sqlite+aiosqlite:///stats.db" --provider jira
 
 # Generate synthetic teams for testing
-python cli.py sync teams --db "sqlite+aiosqlite:///mergestat.db" --provider synthetic
+dev-hops sync teams --db "sqlite+aiosqlite:///stats.db" --provider synthetic
 ```
 
 ## Database Configuration
@@ -207,9 +207,9 @@ This project supports PostgreSQL, MongoDB, SQLite, and ClickHouse as storage bac
 
 ### Environment Variables
 
-- **`DB_CONN_STRING` / `DATABASE_URL`** (optional): Default DB URI for `python cli.py metrics daily --db ...` and for Alembic migrations.
+- **`DB_CONN_STRING` / `DATABASE_URL`** (optional): Default DB URI for `dev-hops metrics daily --db ...` and for Alembic migrations.
 - **`DB_ECHO`** (optional): Enable SQL query logging for PostgreSQL and SQLite. Set to `true`, `1`, or `yes` (case-insensitive) to enable. Any other value (including `false`, `0`, `no`, or unset) disables it. Default: `false`. Note: Enabling this in production can expose sensitive data and impact performance.
-- **`MONGO_DB_NAME`** (optional): The name of the MongoDB database to use. If not specified, the script will use the database specified in the connection string, or default to `mergestat`.
+- **`MONGO_DB_NAME`** (optional): The name of the MongoDB database to use. If not specified, the script will use the database specified in the connection string, or default to `stats`.
 - **`REPO_UUID`** (optional): UUID for the repository. If not provided, a deterministic UUID will be derived from the git repository's remote URL (or repository path if no remote exists). This ensures the same repository always gets the same UUID across runs.
 - **`MAX_WORKERS`** (optional): Number of parallel workers for processing git blame data. Higher values can speed up processing but use more CPU and memory. Default: `4`
 - **`LOG_LEVEL`** (optional): Logging level (e.g. `INFO`, `DEBUG`). Default: `INFO`
@@ -255,40 +255,40 @@ Example usage:
 
 ```bash
 # Using PostgreSQL (auto-detected from URL)
-python cli.py sync git --provider local --db "postgresql+asyncpg://user:pass@localhost:5432/mergestat"
+dev-hops sync git --provider local --db "postgresql+asyncpg://user:pass@localhost:5432/stats"
 
 # Using MongoDB (auto-detected from URL)
-python cli.py sync git --provider local --db "mongodb://localhost:27017"
+dev-hops sync git --provider local --db "mongodb://localhost:27017"
 
 # Local repo filtered to recent activity
-python cli.py sync git --provider local \
-  --db "sqlite+aiosqlite:///mergestat.db" \
+dev-hops sync git --provider local \
+  --db "sqlite+aiosqlite:///stats.db" \
   --repo-path /path/to/repo \
   --since 2024-01-01
 # Commits and stats are limited to changes on/after this date.
 
 # Using SQLite (file-based, auto-detected)
-python cli.py sync git --provider local --db "sqlite+aiosqlite:///mergestat.db"
+dev-hops sync git --provider local --db "sqlite+aiosqlite:///stats.db"
 
 # Using SQLite (in-memory)
-python cli.py sync git --provider local --db "sqlite+aiosqlite:///:memory:"
+dev-hops sync git --provider local --db "sqlite+aiosqlite:///:memory:"
 
 # GitHub repository with unified auth
-python cli.py sync git --provider github \
-  --db "postgresql+asyncpg://user:pass@localhost:5432/mergestat" \
+dev-hops sync git --provider github \
+  --db "postgresql+asyncpg://user:pass@localhost:5432/stats" \
   --auth "$GITHUB_TOKEN" \
   --owner torvalds \
   --repo linux
 
 # GitLab project with unified auth
-python cli.py sync git --provider gitlab \
+dev-hops sync git --provider gitlab \
   --db "mongodb://localhost:27017" \
   --auth "$GITLAB_TOKEN" \
   --project-id 278964
 
 # Batch process repositories matching a pattern (GitHub)
-python cli.py sync git --provider github \
-  --db "sqlite+aiosqlite:///mergestat.db" \
+dev-hops sync git --provider github \
+  --db "sqlite+aiosqlite:///stats.db" \
   --auth "$GITHUB_TOKEN" \
   -s "chrisgeo/dev-health-*" \
   --group "chrisgeo" \
@@ -298,8 +298,8 @@ python cli.py sync git --provider github \
   --use-async
 
 # Batch process projects matching a pattern (GitLab)
-python cli.py sync git --provider gitlab \
-  --db "sqlite+aiosqlite:///mergestat.db" \
+dev-hops sync git --provider gitlab \
+  --db "sqlite+aiosqlite:///stats.db" \
   --auth "$GITLAB_TOKEN" \
   --gitlab-url "https://gitlab.com" \
   --group "mygroup" \
@@ -352,14 +352,14 @@ The script includes several configuration options to optimize performance:
 
 ```bash
 export MAX_WORKERS=8
-python cli.py sync git --provider local --db "sqlite+aiosqlite:///mergestat.db" --repo-path .
+dev-hops sync git --provider local --db "sqlite+aiosqlite:///stats.db" --repo-path .
 ```
 
 **Example for resource-constrained environments:**
 
 ```bash
 export MAX_WORKERS=2
-python cli.py sync git --provider local --db "sqlite+aiosqlite:///mergestat.db" --repo-path .
+dev-hops sync git --provider local --db "sqlite+aiosqlite:///stats.db" --repo-path .
 ```
 
 ## Performance Optimizations
@@ -429,7 +429,7 @@ For a typical repository with 1000 files and 10,000 commits:
   alembic upgrade head
 
   # Sync a local repo
-  python cli.py sync git --provider local --db "$DB_CONN_STRING" --repo-path .
+  dev-hops sync git --provider local --db "$DB_CONN_STRING" --repo-path .
   ```
 
 #### Using MongoDB
@@ -443,8 +443,8 @@ For a typical repository with 1000 files and 10,000 commits:
   # Start MongoDB with Docker Compose
   docker compose up mongo -d
 
-  export MONGO_DB_NAME="mergestat" # optional if not in URI
-  python cli.py sync git --provider local --db "mongodb://localhost:27017" --repo-path .
+  export MONGO_DB_NAME="stats" # optional if not in URI
+  dev-hops sync git --provider local --db "mongodb://localhost:27017" --repo-path .
   ```
 
 #### Using SQLite
@@ -456,13 +456,13 @@ For a typical repository with 1000 files and 10,000 commits:
 - Example setup:
 
   ```bash
-  python cli.py sync git --provider local --db "sqlite+aiosqlite:///mergestat.db" --repo-path .
+  dev-hops sync git --provider local --db "sqlite+aiosqlite:///stats.db" --repo-path .
   ```
 
-  Or for in-memory database (data lost when process exits):
+  Or for an in-memory database (data lost when process exits):
 
   ```bash
-  python cli.py sync git --provider local --db "sqlite+aiosqlite:///:memory:" --repo-path .
+  dev-hops sync git --provider local --db "sqlite+aiosqlite:///:memory:" --repo-path .
   ```
 
 #### Using ClickHouse
@@ -472,7 +472,7 @@ For a typical repository with 1000 files and 10,000 commits:
 - Example setup:
 
   ```bash
-  python cli.py sync git --provider local --db "clickhouse://default:@localhost:8123/default" --repo-path .
+  dev-hops sync git --provider local --db "clickhouse://default:@localhost:8123/default" --repo-path .
   ```
 
 #### Switching Between Databases
@@ -491,4 +491,23 @@ For a typical repository with 1000 files and 10,000 commits:
 - Some PRs may be missed entirely if they don't match expected patterns
 - The accuracy depends heavily on repository history and commit message conventions
 
-This behavior is different from GitHub/GitLab connectors which provide accurate PR data directly from the provider API.
+This behavior is different from GitHub/GitLab connectors, which provide accurate PR data directly from the provider API.
+
+
+## Sample Dashboards
+<img width="1807" height="1080" alt="Advanced Work Tracking Phase 2" src="https://github.com/user-attachments/assets/f635d1ec-2c0f-41c6-b57c-e3687f090007" />
+<img width="1807" height="1080" alt="CI CD Pipelines Dashboard" src="https://github.com/user-attachments/assets/ba8a03bc-fa4c-4241-9a3b-ab312c9e9f23" />
+<img width="1807" height="1080" alt="Code Hotspots Dashboard" src="https://github.com/user-attachments/assets/3ba27599-ec82-424d-a616-330b946ac37b" />
+<img width="1080" height="1441" alt="Collaboration Developer Health Dashboard" src="https://github.com/user-attachments/assets/61e09239-07de-4a54-ad47-6ab50641c137" />
+<img width="1807" height="1080" alt="Complexity Hotspots Dashboard" src="https://github.com/user-attachments/assets/6958338e-cae7-4f19-8dae-e543f461f811" />
+<img width="1807" height="1080" alt="Deployments Dashboard" src="https://github.com/user-attachments/assets/a6cc37c8-ab92-42f4-8d33-2ad85c7a12d6" />
+<img width="1807" height="1080" alt="Developer Landscape Dashboard" src="https://github.com/user-attachments/assets/811ee083-80b4-4543-9267-e8afb1efc5e6" />
+<img width="1080" height="1137" alt="IC Drilldown Developer Health" src="https://github.com/user-attachments/assets/4223f663-2e10-4119-aa4b-2f187928bebc" />
+<img width="1807" height="1080" alt="Incidents Dashboard" src="https://github.com/user-attachments/assets/341ff259-1c97-4c2f-a144-2a26714b7c1c" />
+<img width="1807" height="1080" alt="Investment Areas Dashboard" src="https://github.com/user-attachments/assets/87292edd-26f8-4c09-9047-f8a6317a2b90" />
+<img width="1807" height="1080" alt="Issue Types - Developer Health" src="https://github.com/user-attachments/assets/c80c4e43-fc02-4ca1-9191-e6fefc268c02" />
+<img width="1080" height="1593" alt="Quality   Risk Dashboard" src="https://github.com/user-attachments/assets/5b398dd3-8c42-4f95-b77b-145f4ff71e27" />
+<img width="1080" height="1289" alt="Repo Health Dashboard" src="https://github.com/user-attachments/assets/e7e31df3-a073-476c-a76a-9830147bbdbd" />
+<img width="1807" height="1080" alt="Well-being Team Level Dashboard" src="https://github.com/user-attachments/assets/830f84e3-b356-4499-be89-7967a1537576" />
+<img width="1080" height="1669" alt="Work Tracking Developer Health Dashboard" src="https://github.com/user-attachments/assets/7bb42ae9-bcd3-437b-b60d-6064b9f9ee81" />
+
