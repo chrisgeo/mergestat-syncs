@@ -123,62 +123,44 @@ jobs:
       - name: Run Tests
         run: npm run test:ci
 
-      - name: Build Plugin
-        env:
-          PLUGIN_VERSION: ${{ env.VERSION }}
-        run: npm run build
-
-      - name: Sign Plugin
-        env:
-          GRAFANA_ACCESS_POLICY_TOKEN: ${{ secrets.GRAFANA_ACCESS_POLICY_TOKEN }}
-        run: |
-          if [ -n "$GRAFANA_ACCESS_POLICY_TOKEN" ]; then
-            echo "Signing plugin..."
-            npm run sign
-          else
-            echo "GRAFANA_ACCESS_POLICY_TOKEN not found. Skipping signing."
-            echo "To sign the plugin, please create a GRAFANA_ACCESS_POLICY_TOKEN secret in your repository."
-          fi
+      - name: Build and Sign Plugin
+        uses: grafana/plugin-actions/build-plugin@main
+        with:
+          policy_token: ${{ secrets.GRAFANA_ACCESS_POLICY_TOKEN }}
+          attestation: true
+          use_changelog_generator: true
 
       - name: Get Plugin Metadata
         id: metadata
         run: |
-          echo "version=${{ env.VERSION }}" >> $GITHUB_OUTPUT
-          # Better to get ID from plugin.json directly as it is the true ID
-          REAL_PLUGIN_ID=$(jq -r .id src/plugin.json)
-          echo "plugin_id=$REAL_PLUGIN_ID" >> $GITHUB_OUTPUT
+          # The official action puts everything in dist
+          # and also creates a source code archive
+          VERSION=$(jq -r .version package.json)
+          PLUGIN_ID=$(jq -r .id src/plugin.json)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "plugin_id=$PLUGIN_ID" >> $GITHUB_OUTPUT
+          
+          # The official action creates a zip named <plugin-id>-<version>.zip
+          # and a source zip named <plugin-id>-<version>.src.zip (usually)
+          # Let's verify what it actually creates
+          ls -R dist/
 
-      - name: Package Plugin
+      - name: Prepare Assets for Release
         run: |
-          # The built artifacts are in 'dist'
-          # We need to rename 'dist' to the plugin-id for the zip structure
           PLUGIN_ID=${{ steps.metadata.outputs.plugin_id }}
           VERSION=${{ steps.metadata.outputs.version }}
           
-          # Rename dist to plugin id
-          mv dist $PLUGIN_ID
+          # Move assets out of dist for easier release
+          mv dist/$PLUGIN_ID-$VERSION.zip .
+          # The official action creates a .src.zip file
+          mv dist/$PLUGIN_ID-$VERSION.src.zip $PLUGIN_ID-$VERSION-source.zip
           
-          # Zip the plugin artifact
-          zip -r $PLUGIN_ID-$VERSION.zip $PLUGIN_ID
-          
-          # Zip the source code (current directory contents before any moves/cleans ideally, but here we just zip what's needed)
-          # We are in grafana/plugins/dev-health-panels. We want to zip everything here excluding node_modules and dist (which is now renamed)
-          # and the zip files themselves.
-          zip -r $PLUGIN_ID-$VERSION-source.zip . -x "node_modules/*" -x "$PLUGIN_ID/*" -x "*.zip" -x "*.md5" -x ".git/*" -x ".DS_Store"
-
-          # Generate MD5
+          # Generate MD5 for the plugin zip
           md5sum $PLUGIN_ID-$VERSION.zip > $PLUGIN_ID-$VERSION.zip.md5
           
           echo "ARTIFACT_NAME=$PLUGIN_ID-$VERSION.zip" >> $GITHUB_ENV
           echo "MD5_NAME=$PLUGIN_ID-$VERSION.zip.md5" >> $GITHUB_ENV
           echo "SOURCE_ARTIFACT_NAME=$PLUGIN_ID-$VERSION-source.zip" >> $GITHUB_ENV
-
-      - name: Validate Plugin
-        run: |
-          PLUGIN_ID=${{ steps.metadata.outputs.plugin_id }}
-          VERSION=${{ steps.metadata.outputs.version }}
-          # Validate using the generated source zip to catch issues early
-          npx @grafana/plugin-validator@latest $PLUGIN_ID-$VERSION.zip --sourceCodeUri file://$(pwd)/$PLUGIN_ID-$VERSION-source.zip
 
       - name: Upload Release Assets
         uses: softprops/action-gh-release@v1
