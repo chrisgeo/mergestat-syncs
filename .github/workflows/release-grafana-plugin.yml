@@ -158,20 +158,27 @@ jobs:
           # Rename dist to plugin id
           mv dist $PLUGIN_ID
           
-          # Zip it
+          # Zip the plugin artifact
           zip -r $PLUGIN_ID-$VERSION.zip $PLUGIN_ID
           
+          # Zip the source code (current directory contents before any moves/cleans ideally, but here we just zip what's needed)
+          # We are in grafana/plugins/dev-health-panels. We want to zip everything here excluding node_modules and dist (which is now renamed)
+          # and the zip files themselves.
+          zip -r $PLUGIN_ID-$VERSION-source.zip . -x "node_modules/*" -x "$PLUGIN_ID/*" -x "*.zip" -x "*.md5" -x ".git/*" -x ".DS_Store"
+
           # Generate MD5
           md5sum $PLUGIN_ID-$VERSION.zip > $PLUGIN_ID-$VERSION.zip.md5
           
           echo "ARTIFACT_NAME=$PLUGIN_ID-$VERSION.zip" >> $GITHUB_ENV
           echo "MD5_NAME=$PLUGIN_ID-$VERSION.zip.md5" >> $GITHUB_ENV
+          echo "SOURCE_ARTIFACT_NAME=$PLUGIN_ID-$VERSION-source.zip" >> $GITHUB_ENV
 
       - name: Validate Plugin
         run: |
           PLUGIN_ID=${{ steps.metadata.outputs.plugin_id }}
           VERSION=${{ steps.metadata.outputs.version }}
-          npx @grafana/plugin-validator@latest $PLUGIN_ID-$VERSION.zip
+          # Validate using the generated source zip to catch issues early
+          npx @grafana/plugin-validator@latest $PLUGIN_ID-$VERSION.zip --sourceCodeUri file://$(pwd)/$PLUGIN_ID-$VERSION-source.zip
 
       - name: Upload Release Assets
         uses: softprops/action-gh-release@v1
@@ -180,3 +187,4 @@ jobs:
           files: |
             grafana/plugins/dev-health-panels/${{ env.ARTIFACT_NAME }}
             grafana/plugins/dev-health-panels/${{ env.MD5_NAME }}
+            grafana/plugins/dev-health-panels/${{ env.SOURCE_ARTIFACT_NAME }}

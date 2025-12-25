@@ -22,6 +22,9 @@ coverage
 
 # Compiled binary addons (https://nodejs.org/api/addons.html)
 dist/
+chrisgeorge-devhealth-panel/
+*.zip
+*.md5
 artifacts/
 work/
 ci/
