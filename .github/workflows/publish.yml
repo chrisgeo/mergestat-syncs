@@ -30,8 +30,8 @@ jobs:
             echo "python_changed=true" >> $GITHUB_OUTPUT
           else
             echo "Comparing changes between $PREV_TAG and $CURRENT_TAG"
-            # Check for changes in files NOT in the grafana/ directory
-            CHANGED_FILES=$(git diff --name-only $PREV_TAG $CURRENT_TAG | grep -v "^grafana/" || true)
+            # Check for changes in files NOT in the grafana/ directory AND NOT the Grafana release workflow
+            CHANGED_FILES=$(git diff --name-only $PREV_TAG $CURRENT_TAG | grep -vE "^grafana/|^.github/workflows/release-grafana-plugin.yml" || true)
             
             if [ -n "$CHANGED_FILES" ]; then
               echo "Python changes detected:"
