@@ -121,6 +121,9 @@ jobs:
             exit 1
           fi
 
+          # Strip leading ./
+          ZIP_FILE=${ZIP_FILE#./}
+
           echo "Found artifact: $ZIP_FILE"
           echo "ARTIFACT_PATH=$ZIP_FILE" >> $GITHUB_ENV
 
