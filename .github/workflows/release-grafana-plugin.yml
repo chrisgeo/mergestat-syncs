@@ -2,8 +2,9 @@ name: Release Grafana Plugin
 
 on:
   release:
-    types: [published]
+    types: [ published ]
   workflow_dispatch:
+
 
 jobs:
   check-changes:
@@ -21,10 +22,10 @@ jobs:
         run: |
           CURRENT_TAG=${GITHUB_REF#refs/tags/}
           echo "Current tag: $CURRENT_TAG"
-          
+
           # Try to find the previous tag reachable from the current tag's parent
           PREV_TAG=$(git describe --abbrev=0 --tags ${CURRENT_TAG}^ 2>/dev/null || echo "")
-          
+
           if [ -z "$PREV_TAG" ]; then
             echo "No previous tag found. Triggering release."
             echo "plugin_changed=true" >> $GITHUB_OUTPUT
@@ -124,7 +125,7 @@ jobs:
         run: npm run test:ci
 
       - name: Build and Sign Plugin
-        uses: grafana/plugin-actions/build-plugin@v1
+        uses: grafana/plugin-actions/build-plugin@build-plugin/v1.0.2
         with:
           policy_token: ${{ secrets.GRAFANA_ACCESS_POLICY_TOKEN }}
           path: grafana/plugins/dev-health-panels
@@ -134,19 +135,19 @@ jobs:
         run: |
           # The action creates the zip in the plugin directory (or check where it puts it)
           # It typically names it <plugin-id>-<version>.zip
-          
+
           # Find the zip file
           ZIP_FILE=$(find . -maxdepth 1 -name "*.zip" | head -n 1)
-          
+
           if [ -z "$ZIP_FILE" ]; then
             echo "No zip file found!"
             ls -la
             exit 1
           fi
-          
+
           echo "Found artifact: $ZIP_FILE"
           echo "ARTIFACT_PATH=$ZIP_FILE" >> $GITHUB_ENV
-          
+
           # Generate MD5 for consistency with previous workflow
           md5sum $ZIP_FILE > $ZIP_FILE.md5
           echo "MD5_PATH=$ZIP_FILE.md5" >> $GITHUB_ENV
