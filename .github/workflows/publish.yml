@@ -2,8 +2,9 @@ name: Publish to PyPI
 
 on:
   release:
-    types: [published]
+    types: [ published ]
   workflow_dispatch:
+
 
 jobs:
   check-changes:
@@ -12,7 +13,7 @@ jobs:
       python_changed: ${{ steps.check.outputs.python_changed }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -21,10 +22,10 @@ jobs:
         run: |
           CURRENT_TAG=${GITHUB_REF#refs/tags/}
           echo "Current tag: $CURRENT_TAG"
-          
+
           # Try to find the previous tag reachable from the current tag's parent
           PREV_TAG=$(git describe --abbrev=0 --tags ${CURRENT_TAG}^ 2>/dev/null || echo "")
-          
+
           if [ -z "$PREV_TAG" ]; then
             echo "No previous tag found. Triggering release."
             echo "python_changed=true" >> $GITHUB_OUTPUT
@@ -53,11 +54,11 @@ jobs:
       url: https://pypi.org/p/dev-health-ops
     permissions:
       contents: read
-      id-token: write  # Mandatory for trusted publishing
+      id-token: write # Mandatory for trusted publishing
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 

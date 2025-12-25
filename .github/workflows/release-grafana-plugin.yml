@@ -128,7 +128,8 @@ jobs:
         uses: grafana/plugin-actions/build-plugin@build-plugin/v1.0.2
         with:
           policy_token: ${{ secrets.GRAFANA_ACCESS_POLICY_TOKEN }}
-          path: grafana/plugins/dev-health-panels
+          attestation: true
+          node_version: '20'
 
       - name: Locate Build Artifacts
         id: locate
