@@ -129,7 +129,7 @@ jobs:
         with:
           policy_token: ${{ secrets.GRAFANA_ACCESS_POLICY_TOKEN }}
           attestation: true
-          node_version: '20'
+          node-version: '20'
 
       - name: Locate Build Artifacts
         id: locate
