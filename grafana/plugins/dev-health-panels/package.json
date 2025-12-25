@@ -1,6 +1,6 @@
 {
   "name": "dev-health-panels",
-  "version": "0.1.1",
+  "version": "v0.1.1-beta.1",
   "description": "Opinionated developer health panels for grafana",
   "scripts": {
     "build": "webpack -c ./.config/webpack/webpack.config.ts --env production",
