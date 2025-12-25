@@ -1,6 +1,6 @@
 {
   "name": "dev-health-panels",
-  "version": "1.0.0",
+  "version": "0.1.1-beta.1",
   "description": "Opinionated developer health panels for grafana",
   "scripts": {
     "build": "webpack -c ./.config/webpack/webpack.config.ts --env production",
@@ -12,6 +12,7 @@
     "lint:fix": "npm run lint -- --fix",
     "e2e": "playwright test",
     "server": "docker-compose up --build",
+    "validate": "npx @grafana/plugin-validator@latest -analyzer=metadatavalid",
     "sign": "npx --yes @grafana/sign-plugin@latest --rootUrls https://chrisgeorge.grafana.net/"
   },
   "author": "Devhealth",

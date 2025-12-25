@@ -48,7 +48,7 @@ jobs:
         id: metadata
         run: |
           PLUGIN_ID=$(jq -r .id src/plugin.json)
-          VERSION=$(npm pkg get version | tr -d '"')
+          VERSION=$(cat dist/plugin.json | jq -r .info.version)
           echo "plugin_id=$PLUGIN_ID" >> $GITHUB_OUTPUT
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 

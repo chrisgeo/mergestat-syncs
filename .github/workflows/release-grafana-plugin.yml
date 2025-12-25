@@ -1,9 +1,12 @@
 name: Release Grafana Plugin
 
+permissions: read-all
+
 on:
   release:
-    types: [published]
+    types: [ published ]
   workflow_dispatch:
+
 
 jobs:
   check-changes:
@@ -12,7 +15,7 @@ jobs:
       plugin_changed: ${{ steps.check.outputs.plugin_changed }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -21,10 +24,10 @@ jobs:
         run: |
           CURRENT_TAG=${GITHUB_REF#refs/tags/}
           echo "Current tag: $CURRENT_TAG"
-          
+
           # Try to find the previous tag reachable from the current tag's parent
           PREV_TAG=$(git describe --abbrev=0 --tags ${CURRENT_TAG}^ 2>/dev/null || echo "")
-          
+
           if [ -z "$PREV_TAG" ]; then
             echo "No previous tag found. Triggering release."
             echo "plugin_changed=true" >> $GITHUB_OUTPUT
@@ -43,63 +46,36 @@ jobs:
             fi
           fi
 
-  release-plugin:
+  release:
     name: Build, Sign and Release Plugin
     needs: check-changes
     if: needs.check-changes.outputs.plugin_changed == 'true'
     runs-on: ubuntu-latest
-    permissions:
-      contents: write # Needed for uploading release assets
-
     defaults:
       run:
         working-directory: grafana/plugins/dev-health-panels
-
+    env:
+      GRAFANA_ACCESS_POLICY_TOKEN: ${{ secrets.GRAFANA_ACCESS_POLICY_TOKEN }}
+    permissions:
+      id-token: write
+      contents: write
+      attestations: write
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
+      - uses: actions/checkout@v6
       - name: Extract Version
         id: get_version
         run: |
-          # Install semver for parsing
-          npm install semver
-
-          # Use node to parse version logic
-          node -e '
-            const semver = require("semver");
-            const ref = process.env.GITHUB_REF;
-            let raw = "";
-            
-            if (ref.startsWith("refs/tags/")) {
-              raw = ref.replace("refs/tags/", "");
-            } else {
-              // Fallback to package.json version if not a tag
-              raw = require("./grafana/plugins/dev-health-panels/package.json").version;
-            }
-
-            // 1. Try clean (handles v1.2.3, 1.2.3-beta) - preserves prerelease
-            let ver = semver.clean(raw);
-
-            // 2. If invalid, try coerce (handles 1.2 -> 1.2.0, 1.2.3.4 -> 1.2.3)
-            // Note: coerce strips prerelease tags from invalid strings (e.g. v1.2-beta -> 1.2.0)
-            if (!ver) {
-              const coerced = semver.coerce(raw);
-              if (coerced) ver = coerced.version;
-            }
-
-            // 3. Fail if still null
-            if (!ver) {
-              console.error(`Could not parse a valid SemVer from "${raw}"`);
-              process.exit(1);
-            }
-
-            console.log(`Parsed version: ${ver}`);
-            // Write to GITHUB_ENV
-            const fs = require("fs");
-            fs.appendFileSync(process.env.GITHUB_ENV, `VERSION=${ver}\n`);
-          '
-
+          if [[ $GITHUB_REF == refs/tags/* ]]; then
+            RAW_VERSION=${GITHUB_REF#refs/tags/}
+          else
+            RAW_VERSION=$(jq -r .version package.json)
+          fi
+          
+          # Clean version: remove leading 'v', then ensure it is valid semver (though tags should be)
+          VERSION=${RAW_VERSION#v}
+          
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "Parsed version: $VERSION"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -113,70 +89,60 @@ jobs:
 
       - name: Update package.json version
         run: npm version ${{ env.VERSION }} --no-git-tag-version --allow-same-version
-
-      - name: Lint
-        run: npm run lint
-
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Run Tests
-        run: npm run test:ci
-
       - name: Build Plugin
-        env:
-          PLUGIN_VERSION: ${{ env.VERSION }}
         run: npm run build
-
-      - name: Sign Plugin
-        env:
-          GRAFANA_ACCESS_POLICY_TOKEN: ${{ secrets.GRAFANA_ACCESS_POLICY_TOKEN }}
-        run: |
-          if [ -n "$GRAFANA_ACCESS_POLICY_TOKEN" ]; then
-            echo "Signing plugin..."
-            npm run sign
-          else
-            echo "GRAFANA_ACCESS_POLICY_TOKEN not found. Skipping signing."
-            echo "To sign the plugin, please create a GRAFANA_ACCESS_POLICY_TOKEN secret in your repository."
-          fi
-
       - name: Get Plugin Metadata
         id: metadata
         run: |
-          echo "version=${{ env.VERSION }}" >> $GITHUB_OUTPUT
-          # Better to get ID from plugin.json directly as it is the true ID
-          REAL_PLUGIN_ID=$(jq -r .id src/plugin.json)
-          echo "plugin_id=$REAL_PLUGIN_ID" >> $GITHUB_OUTPUT
+          PLUGIN_ID=$(jq -r .id src/plugin.json)
+          VERSION=$(cat dist/plugin.json | jq -r .info.version)
+          echo "plugin_id=$PLUGIN_ID" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-      - name: Package Plugin
+      - name: Package Plugin for Validation
         run: |
-          # The built artifacts are in 'dist'
-          # We need to rename 'dist' to the plugin-id for the zip structure
           PLUGIN_ID=${{ steps.metadata.outputs.plugin_id }}
           VERSION=${{ steps.metadata.outputs.version }}
           
-          # Rename dist to plugin id
+          # Create source zip before moving dist
+          zip -r $PLUGIN_ID-$VERSION-src.zip . -x "node_modules/*" "dist/*" ".git/*" "*.zip"
+          echo "SOURCE_ASSET=$PLUGIN_ID-$VERSION-src.zip" >> $GITHUB_ENV
+          
+          # Package plugin
           mv dist $PLUGIN_ID
-          
-          # Zip it
           zip -r $PLUGIN_ID-$VERSION.zip $PLUGIN_ID
-          
-          # Generate MD5
-          md5sum $PLUGIN_ID-$VERSION.zip > $PLUGIN_ID-$VERSION.zip.md5
-          
-          echo "ARTIFACT_NAME=$PLUGIN_ID-$VERSION.zip" >> $GITHUB_ENV
-          echo "MD5_NAME=$PLUGIN_ID-$VERSION.zip.md5" >> $GITHUB_ENV
+          echo "PLUGIN_ASSET=$PLUGIN_ID-$VERSION.zip" >> $GITHUB_ENV
 
-      - name: Validate Plugin
+      - name: Locate Build Artifacts
+        id: locate
         run: |
-          PLUGIN_ID=${{ steps.metadata.outputs.plugin_id }}
-          VERSION=${{ steps.metadata.outputs.version }}
-          npx @grafana/plugin-validator@latest $PLUGIN_ID-$VERSION.zip
+          ZIP_FILE=${{ env.PLUGIN_ASSET }}
 
+          if [ ! -f "$ZIP_FILE" ]; then
+            echo "Plugin zip file not found: $ZIP_FILE"
+            ls -la
+            exit 1
+          fi
+
+          echo "Found artifact: $ZIP_FILE"
+          echo "ARTIFACT_PATH=$ZIP_FILE" >> $GITHUB_ENV
+
+          # Generate MD5 for consistency with previous workflow
+          md5sum $ZIP_FILE > $ZIP_FILE.md5
+          sha1sum $ZIP_FILE > $ZIP_FILE.sha1
+          echo "MD5_PATH=$ZIP_FILE.md5" >> $GITHUB_ENV
+          echo "SHA1_PATH=$ZIP_FILE.sha1" >> $GITHUB_ENV
+      - name: Generate artifact attestation
+        id: attestation
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: grafana/plugins/dev-health-panels/${{ env.ARTIFACT_PATH }}
       - name: Upload Release Assets
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: |
-            grafana/plugins/dev-health-panels/${{ env.ARTIFACT_NAME }}
-            grafana/plugins/dev-health-panels/${{ env.MD5_NAME }}
+            grafana/plugins/dev-health-panels/${{ env.ARTIFACT_PATH }}
+            grafana/plugins/dev-health-panels/${{ env.MD5_PATH }}
+            grafana/plugins/dev-health-panels/${{ env.SHA1_PATH }}
+            grafana/plugins/dev-health-panels/${{ env.SOURCE_ASSET }}
