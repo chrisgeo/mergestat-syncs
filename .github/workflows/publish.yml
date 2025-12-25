@@ -6,8 +6,47 @@ on:
   workflow_dispatch:
 
 jobs:
+  check-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      python_changed: ${{ steps.check.outputs.python_changed }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for changes
+        id: check
+        run: |
+          CURRENT_TAG=${GITHUB_REF#refs/tags/}
+          echo "Current tag: $CURRENT_TAG"
+          
+          # Try to find the previous tag reachable from the current tag's parent
+          PREV_TAG=$(git describe --abbrev=0 --tags ${CURRENT_TAG}^ 2>/dev/null || echo "")
+          
+          if [ -z "$PREV_TAG" ]; then
+            echo "No previous tag found. Triggering release."
+            echo "python_changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "Comparing changes between $PREV_TAG and $CURRENT_TAG"
+            # Check for changes in files NOT in the grafana/ directory
+            CHANGED_FILES=$(git diff --name-only $PREV_TAG $CURRENT_TAG | grep -v "^grafana/" || true)
+            
+            if [ -n "$CHANGED_FILES" ]; then
+              echo "Python changes detected:"
+              echo "$CHANGED_FILES" | head -n 5
+              echo "python_changed=true" >> $GITHUB_OUTPUT
+            else
+              echo "No Python changes detected."
+              echo "python_changed=false" >> $GITHUB_OUTPUT
+            fi
+          fi
+
   build-and-publish:
     name: Build and publish to PyPI
+    needs: check-changes
+    if: needs.check-changes.outputs.python_changed == 'true'
     runs-on: ubuntu-latest
     environment:
       name: publishing
