@@ -13,7 +13,6 @@ on:
         required: false
         type: string
 
-
 jobs:
   check-changes:
     runs-on: ubuntu-latest
@@ -82,10 +81,10 @@ jobs:
           else
             RAW_VERSION=$(jq -r .version package.json)
           fi
-          
+
           # Clean version: remove leading 'v', then ensure it is valid semver (though tags should be)
           VERSION=${RAW_VERSION#v}
-          
+
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "Parsed version: $VERSION"
 
@@ -115,11 +114,11 @@ jobs:
         run: |
           PLUGIN_ID=${{ steps.metadata.outputs.plugin_id }}
           VERSION=${{ steps.metadata.outputs.version }}
-          
+
           # Create source zip before moving dist
           zip -r $PLUGIN_ID-$VERSION-src.zip . -x "node_modules/*" "dist/*" ".git/*" "*.zip"
           echo "SOURCE_ASSET=$PLUGIN_ID-$VERSION-src.zip" >> $GITHUB_ENV
-          
+
           # Package plugin
           mv dist $PLUGIN_ID
           zip -r $PLUGIN_ID-$VERSION.zip $PLUGIN_ID

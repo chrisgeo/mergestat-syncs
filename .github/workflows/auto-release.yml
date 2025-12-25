@@ -1,9 +1,13 @@
 name: Auto Release Tag
-
+permissions:
+  id-token: write
+  contents: write
+  attestations: write
 on:
   pull_request:
-    types: [closed]
+    types: [ closed ]
   workflow_dispatch:
+
 
 jobs:
   tag-and-release:
@@ -27,13 +31,13 @@ jobs:
       - name: Determine Next Version
         id: version
         run: python scripts/auto_tag.py
-        
+
       - name: Create Tag
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           TAG=${{ steps.version.outputs.new_tag }}
-          
+
           # Check if tag exists
           if git rev-parse "$TAG" >/dev/null 2>&1; then
             echo "Tag $TAG already exists. Skipping creation."
