@@ -15,7 +15,7 @@ jobs:
       plugin_changed: ${{ steps.check.outputs.plugin_changed }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -61,7 +61,7 @@ jobs:
       contents: write
       attestations: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
       - name: Extract Version
         id: get_version
         run: |
@@ -87,8 +87,6 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Update package.json version
-        run: npm version ${{ env.VERSION }} --no-git-tag-version --allow-same-version
       - name: Build Plugin
         run: npm run build
       - name: Get Plugin Metadata
