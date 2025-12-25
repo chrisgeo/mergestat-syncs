@@ -61,47 +61,21 @@ jobs:
       contents: write
       attestations: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: Extract Version
         id: get_version
         run: |
-          # Install semver for parsing
-          npm install semver
-
-          # Use node to parse version logic
-          node -e '
-            const semver = require("semver");
-            const ref = process.env.GITHUB_REF;
-            let raw = "";
-
-            if (ref.startsWith("refs/tags/")) {
-              raw = ref.replace("refs/tags/", "");
-            } else {
-              // Fallback to package.json version if not a tag
-              raw = require("./grafana/plugins/dev-health-panels/package.json").version;
-            }
-
-            // 1. Try clean (handles v1.2.3, 1.2.3-beta) - preserves prerelease
-            let ver = semver.clean(raw);
-
-            // 2. If invalid, try coerce (handles 1.2 -> 1.2.0, 1.2.3.4 -> 1.2.3)
-            // Note: coerce strips prerelease tags from invalid strings (e.g. v1.2-beta -> 1.2.0)
-            if (!ver) {
-              const coerced = semver.coerce(raw);
-              if (coerced) ver = coerced.version;
-            }
-
-            // 3. Fail if still null
-            if (!ver) {
-              console.error(`Could not parse a valid SemVer from "${raw}"`);
-              process.exit(1);
-            }
-
-            console.log(`Parsed version: ${ver}`);
-            // Write to GITHUB_ENV
-            const fs = require("fs");
-            fs.appendFileSync(process.env.GITHUB_ENV, `VERSION=${ver}\n`);
-          '
+          if [[ $GITHUB_REF == refs/tags/* ]]; then
+            RAW_VERSION=${GITHUB_REF#refs/tags/}
+          else
+            RAW_VERSION=$(jq -r .version package.json)
+          fi
+          
+          # Clean version: remove leading 'v', then ensure it is valid semver (though tags should be)
+          VERSION=${RAW_VERSION#v}
+          
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "Parsed version: $VERSION"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -155,9 +129,13 @@ jobs:
           sha1sum $ZIP_FILE > $ZIP_FILE.sha1
           echo "MD5_PATH=$ZIP_FILE.md5" >> $GITHUB_ENV
           echo "SHA1_PATH=$ZIP_FILE.sha1" >> $GITHUB_ENV
-
+      - name: Generate artifact attestation
+        id: attestation
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: grafana/plugins/dev-health-panels/${{ env.ARTIFACT_PATH }}
       - name: Upload Release Assets
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: |
