@@ -7,10 +7,23 @@ on:
   release:
     types: [ published ]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release'
+        required: false
+        type: string
+      source_branch:
+        description: 'Branch to commit version bump to (pre-release only)'
+        required: false
+        type: string
   workflow_call:
     inputs:
       tag:
         description: 'Tag to release'
+        required: false
+        type: string
+      source_branch:
+        description: 'Branch to commit version bump to (pre-release only)'
         required: false
         type: string
 
@@ -34,6 +47,20 @@ jobs:
             CURRENT_TAG=${GITHUB_REF#refs/tags/}
           fi
           echo "Current tag: $CURRENT_TAG"
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ inputs.tag }}" ]; then
+            VERSION=${CURRENT_TAG#v}
+            PLUGIN_ID=$(jq -r .id grafana/plugins/dev-health-panels/src/plugin.json)
+            ASSET_NAME="$PLUGIN_ID-$VERSION.zip"
+
+            if GH_TOKEN="${{ github.token }}" gh api "repos/${{ github.repository }}/releases/tags/$CURRENT_TAG" --jq '.assets[].name' > /tmp/release_assets 2>/dev/null; then
+              if grep -qx "$ASSET_NAME" /tmp/release_assets; then
+                echo "Release asset already exists: $ASSET_NAME. Skipping build."
+                echo "plugin_changed=false" >> $GITHUB_OUTPUT
+                exit 0
+              fi
+            fi
+          fi
 
           # Try to find the previous tag reachable from the current tag's parent
           PREV_TAG=$(git describe --abbrev=0 --tags ${CURRENT_TAG}^ 2>/dev/null || echo "")
@@ -72,6 +99,16 @@ jobs:
       attestations: write
     steps:
       - uses: actions/checkout@v6
+      - name: Checkout source branch
+        if: inputs.source_branch != ''
+        run: |
+          if ! git ls-remote --heads origin "${{ inputs.source_branch }}" | grep -q .; then
+            echo "Source branch does not exist on origin. Skipping checkout."
+            exit 0
+          fi
+
+          git fetch origin "${{ inputs.source_branch }}" --depth=1
+          git checkout "${{ inputs.source_branch }}"
       - name: Extract Version
         id: get_version
         run: |
@@ -101,6 +138,33 @@ jobs:
 
       - name: Update package.json version
         run: npm version ${{ env.VERSION }} --no-git-tag-version --allow-same-version
+      - name: Commit version bump
+        run: |
+          if [[ "${{ env.VERSION }}" != *-* ]]; then
+            echo "Stable version detected. Skipping version bump commit."
+            exit 0
+          fi
+
+          if [ -z "${{ inputs.source_branch }}" ]; then
+            echo "No source branch provided. Skipping version bump commit."
+            exit 0
+          fi
+
+          if ! git ls-remote --heads origin "${{ inputs.source_branch }}" | grep -q .; then
+            echo "Source branch does not exist on origin. Skipping version bump commit."
+            exit 0
+          fi
+
+          if git diff --quiet; then
+            echo "No version changes to commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json
+          git commit -m "chore(release): bump plugin version to ${{ env.VERSION }}"
+          git push origin HEAD:${{ inputs.source_branch }}
       - name: Build Plugin
         run: npm run build
       - name: Get Plugin Metadata
