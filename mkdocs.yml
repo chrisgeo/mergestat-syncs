@@ -1,0 +1,45 @@
+site_name: dev-health-ops
+site_description: Developer health and operations analytics platform
+
+repo_name: dev-health-ops
+repo_url: https://github.com/chrisgeo/dev-health-ops
+edit_uri: ""
+
+theme:
+  name: material
+  features:
+    - navigation.instant
+    - navigation.sections
+    - navigation.tracking
+    - search.highlight
+    - search.suggest
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - Architecture: architecture.md
+  - CLI: cli.md
+  - Connectors:
+      - Usage: CONNECTOR_USAGE.md
+      - Private Repos: PRIVATE_REPO_TESTING.md
+  - Metrics:
+      - Overview: metrics.md
+      - Inventory: metrics-inventory.md
+  - Grafana: grafana.md
+  - Task Trackers: task_trackers.md
+  - Roadmap: roadmap.md
+  - Project Plan: project.md
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - footnotes
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
