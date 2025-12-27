@@ -2,6 +2,7 @@ tqdm
 sqlalchemy
 clickhouse-connect
 fastapi
+httpx
 psycopg2-binary
 asyncpg
 aiosqlite
