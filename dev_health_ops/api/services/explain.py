@@ -1,14 +1,14 @@
 from __future__ import annotations
 
+from datetime import date, timedelta
 from typing import List
 
-from ..models.filters import MetricFilter
 from ..models.schemas import Contributor, ExplainResponse
 from ..queries.client import clickhouse_client
 from ..queries.explain import fetch_metric_contributors, fetch_metric_driver_delta
 from ..queries.metrics import fetch_metric_value
+from ..queries.scopes import build_scope_filter, resolve_repo_id
 from .cache import TTLCache
-from .filtering import filter_cache_key, scope_filter_for_metric, time_window
 
 
 _METRIC_CONFIG = {
@@ -95,6 +95,14 @@ _METRIC_CONFIG = {
 }
 
 
+def _window(range_days: int, compare_days: int):
+    end_day = date.today() + timedelta(days=1)
+    start_day = end_day - timedelta(days=range_days)
+    compare_end = start_day
+    compare_start = compare_end - timedelta(days=compare_days)
+    return start_day, end_day, compare_start, compare_end
+
+
 def _delta_pct(current: float, previous: float) -> float:
     if previous == 0:
         return 0.0
@@ -105,21 +113,38 @@ async def build_explain_response(
     *,
     db_url: str,
     metric: str,
-    filters: MetricFilter,
+    scope_type: str,
+    scope_id: str,
+    range_days: int,
+    compare_days: int,
     cache: TTLCache,
 ) -> ExplainResponse:
-    cache_key = filter_cache_key("explain", filters, extra={"metric": metric})
+    cache_key = f"explain:{metric}:{scope_type}:{scope_id}:{range_days}:{compare_days}"
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
 
     config = _METRIC_CONFIG.get(metric, _METRIC_CONFIG["cycle_time"])
-    start_day, end_day, compare_start, compare_end = time_window(filters)
+    start_day, end_day, compare_start, compare_end = _window(
+        range_days, compare_days
+    )
 
     async with clickhouse_client(db_url) as client:
-        scope_filter, scope_params = await scope_filter_for_metric(
-            client, metric_scope=config["scope"], filters=filters
-        )
+        scope_value = scope_id
+        if scope_type == "repo" and scope_id:
+            resolved = await resolve_repo_id(client, scope_id)
+            if resolved:
+                scope_value = resolved
+
+        scope_filter, scope_params = "", {}
+        if config["scope"] == "team" and scope_type == "team":
+            scope_filter, scope_params = build_scope_filter(
+                scope_type, scope_value, team_column="team_id"
+            )
+        elif config["scope"] == "repo" and scope_type == "repo":
+            scope_filter, scope_params = build_scope_filter(
+                scope_type, scope_value, repo_column="repo_id"
+            )
 
         current_value = await fetch_metric_value(
             client,
@@ -177,8 +202,7 @@ async def build_explain_response(
                 delta_pct=float(row.get("delta_pct") or 0.0),
                 evidence_link=(
                     f"/api/v1/drilldown/prs?metric={metric}"
-                    f"&scope_type={filters.scope.level}"
-                    f"&scope_id={_primary_scope_id(filters)}"
+                    f"&scope_type={scope_type}&scope_id={scope_id}"
                 ),
             )
         )
@@ -193,8 +217,7 @@ async def build_explain_response(
                 delta_pct=0.0,
                 evidence_link=(
                     f"/api/v1/drilldown/prs?metric={metric}"
-                    f"&scope_type={filters.scope.level}"
-                    f"&scope_id={_primary_scope_id(filters)}"
+                    f"&scope_type={scope_type}&scope_id={scope_id}"
                 ),
             )
         )
@@ -215,9 +238,3 @@ async def build_explain_response(
 
     cache.set(cache_key, response)
     return response
-
-
-def _primary_scope_id(filters: MetricFilter) -> str:
-    if filters.scope.ids:
-        return filters.scope.ids[0]
-    return ""

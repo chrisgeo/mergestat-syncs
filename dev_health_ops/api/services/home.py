@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from datetime import date, datetime
-from typing import Any, Dict, List
+from datetime import date, datetime, timedelta
+from typing import Any, Dict, List, Optional, Tuple
 
-from ..models.filters import MetricFilter
 from ..models.schemas import (
     ConstraintCard,
     ConstraintEvidence,
@@ -19,7 +18,7 @@ from ..queries.client import clickhouse_client
 from ..queries.explain import fetch_metric_driver_delta
 from ..queries.freshness import fetch_coverage, fetch_last_ingested_at
 from ..queries.metrics import fetch_blocked_hours, fetch_metric_series, fetch_metric_value
-from .filtering import filter_cache_key, scope_filter_for_metric, time_window
+from ..queries.scopes import build_scope_filter, resolve_repo_id
 from .cache import TTLCache
 
 
@@ -107,6 +106,14 @@ _METRICS = [
 ]
 
 
+def _window(range_days: int, compare_days: int) -> Tuple[date, date, date, date]:
+    end_day = date.today() + timedelta(days=1)
+    start_day = end_day - timedelta(days=range_days)
+    compare_end = start_day
+    compare_start = compare_end - timedelta(days=compare_days)
+    return start_day, end_day, compare_start, compare_end
+
+
 def _delta_pct(current: float, previous: float) -> float:
     if previous == 0:
         return 0.0
@@ -135,7 +142,8 @@ def _format_delta(delta_pct: float) -> str:
 
 async def _metric_deltas(
     client: Any,
-    filters: MetricFilter,
+    scope_type: str,
+    scope_id: str,
     start_day: date,
     end_day: date,
     compare_start: date,
@@ -143,10 +151,22 @@ async def _metric_deltas(
 ) -> List[MetricDelta]:
     deltas: List[MetricDelta] = []
 
+    scope_repo_id = scope_id
+    if scope_type == "repo" and scope_id:
+        resolved = await resolve_repo_id(client, scope_id)
+        if resolved:
+            scope_repo_id = resolved
+
     for metric in _METRICS:
-        scope_filter, scope_params = await scope_filter_for_metric(
-            client, metric_scope=metric["scope"], filters=filters
-        )
+        scope_filter, scope_params = "", {}
+        if metric["scope"] == "team" and scope_type == "team":
+            scope_filter, scope_params = build_scope_filter(
+                scope_type, scope_id, team_column="team_id"
+            )
+        elif metric["scope"] == "repo" and scope_type == "repo":
+            scope_filter, scope_params = build_scope_filter(
+                scope_type, scope_repo_id, repo_column="repo_id"
+            )
 
         if metric["metric"] == "blocked_work":
             current_value, current_series = await fetch_blocked_hours(
@@ -228,22 +248,28 @@ def _select_constraint(deltas: List[MetricDelta]) -> MetricDelta:
 async def build_home_response(
     *,
     db_url: str,
-    filters: MetricFilter,
+    scope_type: str,
+    scope_id: str,
+    range_days: int,
+    compare_days: int,
     cache: TTLCache,
 ) -> HomeResponse:
-    cache_key = filter_cache_key("home", filters)
+    cache_key = f"home:{scope_type}:{scope_id}:{range_days}:{compare_days}"
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
 
-    start_day, end_day, compare_start, compare_end = time_window(filters)
+    start_day, end_day, compare_start, compare_end = _window(
+        range_days, compare_days
+    )
 
     async with clickhouse_client(db_url) as client:
         last_ingested = await fetch_last_ingested_at(client)
         coverage = await fetch_coverage(client, start_day=start_day, end_day=end_day)
         deltas = await _metric_deltas(
             client,
-            filters,
+            scope_type,
+            scope_id,
             start_day,
             end_day,
             compare_start,
@@ -260,9 +286,20 @@ async def build_home_response(
         summary_sentences: List[SummarySentence] = []
         top_delta = max(deltas, key=lambda d: abs(d.delta_pct), default=None)
         if top_delta:
-            scope_filter, scope_params = await scope_filter_for_metric(
-                client, metric_scope=_metric_scope(top_delta.metric), filters=filters
-            )
+            scope_filter, scope_params = "", {}
+            scope_value = scope_id
+            if scope_type == "repo" and scope_id:
+                resolved = await resolve_repo_id(client, scope_id)
+                if resolved:
+                    scope_value = resolved
+            if _metric_scope(top_delta.metric) == "team" and scope_type == "team":
+                scope_filter, scope_params = build_scope_filter(
+                    scope_type, scope_value, team_column="team_id"
+                )
+            elif _metric_scope(top_delta.metric) == "repo" and scope_type == "repo":
+                scope_filter, scope_params = build_scope_filter(
+                    scope_type, scope_value, repo_column="repo_id"
+                )
 
             driver_rows = await fetch_metric_driver_delta(
                 client,
@@ -291,10 +328,8 @@ async def build_home_response(
                     ),
                     evidence_link=(
                         f"/api/v1/explain?metric={top_delta.metric}"
-                        f"&scope_type={filters.scope.level}"
-                        f"&scope_id={_primary_scope_id(filters)}"
-                        f"&range_days={filters.time.range_days}"
-                        f"&compare_days={filters.time.compare_days}"
+                        f"&scope_type={scope_type}&scope_id={scope_id}"
+                        f"&range_days={range_days}&compare_days={compare_days}"
                     ),
                 )
             )
@@ -304,17 +339,15 @@ async def build_home_response(
             title=f"This week's constraint: {constraint_metric.label}",
             claim=(
                 f"{constraint_metric.label} {_direction(constraint_metric.delta_pct)} "
-                f"{_format_delta(constraint_metric.delta_pct)} over the last {filters.time.range_days} days."
+                f"{_format_delta(constraint_metric.delta_pct)} over the last {range_days} days."
             ),
             evidence=[
                 ConstraintEvidence(
                     label=f"Drill into {constraint_metric.label}",
                     link=(
                         f"/api/v1/explain?metric={constraint_metric.metric}"
-                        f"&scope_type={filters.scope.level}"
-                        f"&scope_id={_primary_scope_id(filters)}"
-                        f"&range_days={filters.time.range_days}"
-                        f"&compare_days={filters.time.compare_days}"
+                        f"&scope_type={scope_type}&scope_id={scope_id}"
+                        f"&range_days={range_days}&compare_days={compare_days}"
                     ),
                 )
             ],
@@ -333,14 +366,12 @@ async def build_home_response(
                         type="regression" if delta.delta_pct > 0 else "spike",
                         text=(
                             f"{delta.label} shifted {delta.delta_pct:.0f}% "
-                            f"over the last {filters.time.range_days} days."
+                            f"over the last {range_days} days."
                         ),
                         link=(
                             f"/api/v1/explain?metric={delta.metric}"
-                            f"&scope_type={filters.scope.level}"
-                            f"&scope_id={_primary_scope_id(filters)}"
-                            f"&range_days={filters.time.range_days}"
-                            f"&compare_days={filters.time.compare_days}"
+                            f"&scope_type={scope_type}&scope_id={scope_id}"
+                            f"&range_days={range_days}&compare_days={compare_days}"
                         ),
                     )
                 )
@@ -409,9 +440,3 @@ def _metric_scope(metric: str) -> str:
     if metric in {"cycle_time", "throughput", "wip_saturation", "blocked_work"}:
         return "team"
     return "repo"
-
-
-def _primary_scope_id(filters: MetricFilter) -> str:
-    if filters.scope.ids:
-        return filters.scope.ids[0]
-    return ""

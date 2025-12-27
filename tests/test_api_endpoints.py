@@ -17,7 +17,6 @@ from dev_health_ops.api.models.schemas import (
     ExplainResponse,
     Contributor,
 )
-from dev_health_ops.api.models.filters import MetricFilter
 
 
 def _validate(model, payload):
@@ -88,117 +87,6 @@ def test_home_endpoint_schema(client, monkeypatch):
     response = client.get("/api/v1/home")
     assert response.status_code == 200
     _validate(HomeResponse, response.json())
-    assert response.headers.get("X-DevHealth-Deprecated") == "use POST with filters"
-
-
-def test_home_post_uses_filters(client, monkeypatch):
-    captured = {}
-
-    async def _fake_home(**kwargs):
-        captured["filters"] = kwargs["filters"]
-        return HomeResponse(
-            freshness=Freshness(
-                last_ingested_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
-                sources={"github": "ok", "gitlab": "ok", "jira": "ok", "ci": "ok"},
-                coverage=Coverage(
-                    repos_covered_pct=90.0,
-                    prs_linked_to_issues_pct=80.0,
-                    issues_with_cycle_states_pct=70.0,
-                ),
-            ),
-            deltas=[],
-            summary=[],
-            tiles={},
-            constraint=ConstraintCard(
-                title="Constraint",
-                claim="Review congestion.",
-                evidence=[],
-                experiments=[],
-            ),
-            events=[],
-        )
-
-    monkeypatch.setattr("dev_health_ops.api.main.build_home_response", _fake_home)
-
-    response = client.post(
-        "/api/v1/home",
-        json={
-            "filters": {
-                "time": {"range_days": 21, "compare_days": 7},
-                "scope": {"level": "team", "ids": ["team-a"]},
-                "who": {},
-                "what": {},
-                "why": {},
-                "how": {},
-            }
-        },
-    )
-    assert response.status_code == 200
-    filters: MetricFilter = captured["filters"]
-    assert filters.time.range_days == 21
-    assert filters.time.compare_days == 7
-    assert filters.scope.level == "team"
-    assert filters.scope.ids == ["team-a"]
-
-
-def test_home_query_translation_matches_post(client, monkeypatch):
-    captured = {"get": None, "post": None}
-
-    async def _fake_home(**kwargs):
-        if captured["get"] is None:
-            captured["get"] = kwargs["filters"]
-        else:
-            captured["post"] = kwargs["filters"]
-        return HomeResponse(
-            freshness=Freshness(
-                last_ingested_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
-                sources={"github": "ok", "gitlab": "ok", "jira": "ok", "ci": "ok"},
-                coverage=Coverage(
-                    repos_covered_pct=90.0,
-                    prs_linked_to_issues_pct=80.0,
-                    issues_with_cycle_states_pct=70.0,
-                ),
-            ),
-            deltas=[],
-            summary=[],
-            tiles={},
-            constraint=ConstraintCard(
-                title="Constraint",
-                claim="Review congestion.",
-                evidence=[],
-                experiments=[],
-            ),
-            events=[],
-        )
-
-    monkeypatch.setattr("dev_health_ops.api.main.build_home_response", _fake_home)
-
-    response = client.get(
-        "/api/v1/home",
-        params={
-            "scope_type": "repo",
-            "scope_id": "org/api",
-            "range_days": 10,
-            "compare_days": 5,
-        },
-    )
-    assert response.status_code == 200
-
-    response = client.post(
-        "/api/v1/home",
-        json={
-            "filters": {
-                "time": {"range_days": 10, "compare_days": 5},
-                "scope": {"level": "repo", "ids": ["org/api"]},
-                "who": {},
-                "what": {},
-                "why": {},
-                "how": {},
-            }
-        },
-    )
-    assert response.status_code == 200
-    assert captured["get"] == captured["post"]
 
 
 def test_explain_endpoint_schema(client, monkeypatch):
@@ -237,4 +125,3 @@ def test_explain_endpoint_schema(client, monkeypatch):
     response = client.get("/api/v1/explain", params={"metric": "cycle_time"})
     assert response.status_code == 200
     _validate(ExplainResponse, response.json())
-    assert response.headers.get("X-DevHealth-Deprecated") == "use POST with filters"

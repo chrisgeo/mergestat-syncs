@@ -25,11 +25,12 @@ async def clickhouse_client(dsn: str) -> AsyncIterator[Any]:
         yield client
     finally:
         close = getattr(client, "close", None)
-        if close is not None:
-            if inspect.iscoroutinefunction(close):
-                await close()
-            else:
-                close()
+        if close is None:
+            return
+        if inspect.iscoroutinefunction(close):
+            await close()
+        else:
+            close()
 
 
 async def query_dicts(client: Any, query: str, params: Dict[str, Any]) -> List[Dict[str, Any]]:

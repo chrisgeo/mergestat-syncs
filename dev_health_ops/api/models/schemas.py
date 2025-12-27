@@ -5,11 +5,6 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
-try:
-    from pydantic import ConfigDict
-except ImportError:  # pragma: no cover - pydantic v1 fallback
-    ConfigDict = None
-
 
 class Coverage(BaseModel):
     repos_covered_pct: float
@@ -130,11 +125,6 @@ class OpportunitiesResponse(BaseModel):
     items: List[OpportunityCard]
 
 
-class HealthResponse(BaseModel):
-    status: str
-    services: Dict[str, str]
-
-
 class InvestmentCategory(BaseModel):
     key: str
     name: str
@@ -146,11 +136,8 @@ class InvestmentSubtype(BaseModel):
     value: float
     parent_key: str = Field(alias="parentKey")
 
-    if ConfigDict is not None:
-        model_config = ConfigDict(validate_by_name=True)
-    else:
-        class Config:
-            allow_population_by_field_name = True
+    class Config:
+        allow_population_by_field_name = True
 
 
 class InvestmentResponse(BaseModel):
