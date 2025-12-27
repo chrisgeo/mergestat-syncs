@@ -69,6 +69,7 @@ local_scheme = "dirty-tag"
 [tool.setuptools]
 packages = [
   "analytics",
+  "dev_health_ops",
   "dev_health_ops.api",
   "dev_health_ops.api.models",
   "dev_health_ops.api.queries",
