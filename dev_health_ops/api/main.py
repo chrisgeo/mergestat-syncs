@@ -110,11 +110,11 @@ async def home_post(payload: HomeRequest) -> HomeResponse:
 
 @app.get("/api/v1/home", response_model=HomeResponse)
 async def home(
+    response: Response,
     scope_type: str = "org",
     scope_id: str = "",
     range_days: int = 14,
     compare_days: int = 14,
-    response: Response | None = None,
 ) -> HomeResponse:
     try:
         filters = _filters_from_query(scope_type, scope_id, range_days, compare_days)
@@ -145,12 +145,12 @@ async def explain_post(payload: ExplainRequest) -> ExplainResponse:
 
 @app.get("/api/v1/explain", response_model=ExplainResponse)
 async def explain(
+    response: Response,
     metric: str,
     scope_type: str = "org",
     scope_id: str = "",
     range_days: int = 14,
     compare_days: int = 14,
-    response: Response | None = None,
 ) -> ExplainResponse:
     try:
         filters = _filters_from_query(scope_type, scope_id, range_days, compare_days)
@@ -190,10 +190,10 @@ async def drilldown_prs_post(payload: DrilldownRequest) -> DrilldownResponse:
 
 @app.get("/api/v1/drilldown/prs", response_model=DrilldownResponse)
 async def drilldown_prs(
+    response: Response,
     scope_type: str = "org",
     scope_id: str = "",
     range_days: int = 14,
-    response: Response | None = None,
 ) -> DrilldownResponse:
     try:
         filters = _filters_from_query(scope_type, scope_id, range_days, range_days)
@@ -239,10 +239,10 @@ async def drilldown_issues_post(payload: DrilldownRequest) -> DrilldownResponse:
 
 @app.get("/api/v1/drilldown/issues", response_model=DrilldownResponse)
 async def drilldown_issues(
+    response: Response,
     scope_type: str = "org",
     scope_id: str = "",
     range_days: int = 14,
-    response: Response | None = None,
 ) -> DrilldownResponse:
     try:
         filters = _filters_from_query(scope_type, scope_id, range_days, range_days)
@@ -267,11 +267,11 @@ async def drilldown_issues(
 
 @app.get("/api/v1/opportunities", response_model=OpportunitiesResponse)
 async def opportunities(
+    response: Response,
     scope_type: str = "org",
     scope_id: str = "",
     range_days: int = 14,
     compare_days: int = 14,
-    response: Response | None = None,
 ) -> OpportunitiesResponse:
     try:
         filters = _filters_from_query(scope_type, scope_id, range_days, compare_days)
@@ -301,10 +301,10 @@ async def opportunities_post(payload: HomeRequest) -> OpportunitiesResponse:
 
 @app.get("/api/v1/investment", response_model=InvestmentResponse)
 async def investment(
+    response: Response,
     scope_type: str = "org",
     scope_id: str = "",
     range_days: int = 30,
-    response: Response | None = None,
 ) -> InvestmentResponse:
     try:
         filters = _filters_from_query(scope_type, scope_id, range_days, range_days)
