@@ -1,33 +1,33 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
 from typing import Dict, List
 
+from ..models.filters import MetricFilter
 from ..models.schemas import InvestmentCategory, InvestmentResponse, InvestmentSubtype
 from ..queries.client import clickhouse_client
 from ..queries.investment import fetch_investment_breakdown, fetch_investment_edges
-from ..queries.scopes import build_scope_filter
-
-
-def _window(range_days: int):
-    end_day = date.today() + timedelta(days=1)
-    start_day = end_day - timedelta(days=range_days)
-    return start_day, end_day
+from ..queries.scopes import build_scope_filter_multi
+from .filtering import resolve_repo_filter_ids, time_window
 
 
 async def build_investment_response(
     *,
     db_url: str,
-    scope_type: str,
-    scope_id: str,
-    range_days: int,
+    filters: MetricFilter,
 ) -> InvestmentResponse:
-    start_day, end_day = _window(range_days)
+    start_day, end_day, _, _ = time_window(filters)
 
     async with clickhouse_client(db_url) as client:
-        scope_filter, scope_params = build_scope_filter(
-            scope_type, scope_id, team_column="team_id"
-        )
+        scope_filter, scope_params = "", {}
+        if filters.scope.level == "team":
+            scope_filter, scope_params = build_scope_filter_multi(
+                "team", filters.scope.ids, team_column="team_id"
+            )
+        elif filters.scope.level == "repo":
+            repo_ids = await resolve_repo_filter_ids(client, filters)
+            scope_filter, scope_params = build_scope_filter_multi(
+                "repo", repo_ids, repo_column="repo_id"
+            )
         rows = await fetch_investment_breakdown(
             client,
             start_day=start_day,
