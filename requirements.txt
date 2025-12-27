@@ -1,6 +1,7 @@
 tqdm
 sqlalchemy
 clickhouse-connect
+fastapi
 psycopg2-binary
 asyncpg
 aiosqlite
@@ -21,4 +22,5 @@ typing_extensions
 jira
 alembic
 motor
+uvicorn
 radon
