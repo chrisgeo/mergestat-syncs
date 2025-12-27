@@ -6,16 +6,18 @@ from typing import Optional
 from datetime import date, timedelta
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from .models.schemas import (
     DrilldownResponse,
     ExplainResponse,
+    HealthResponse,
     HomeResponse,
     InvestmentResponse,
     OpportunitiesResponse,
 )
-from .queries.client import clickhouse_client
+from .queries.client import clickhouse_client, query_dicts
 from .queries.drilldown import fetch_issues, fetch_pull_requests
 from .queries.scopes import build_scope_filter, resolve_repo_id
 from .services.cache import TTLCache
@@ -56,6 +58,28 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"]
 )
+
+
+@app.get("/api/v1/health", response_model=HealthResponse)
+async def health() -> HealthResponse | JSONResponse:
+    services = {}
+    try:
+        async with clickhouse_client(_db_url()) as client:
+            rows = await query_dicts(client, "SELECT 1 AS ok", {})
+        services["clickhouse"] = "ok" if rows else "down"
+    except Exception:
+        services["clickhouse"] = "down"
+
+    status = "ok" if all(state == "ok" for state in services.values()) else "down"
+    response = HealthResponse(status=status, services=services)
+    if status != "ok":
+        content = (
+            response.model_dump()
+            if hasattr(response, "model_dump")
+            else response.dict()
+        )
+        return JSONResponse(status_code=503, content=content)
+    return response
 
 
 @app.get("/api/v1/home", response_model=HomeResponse)
