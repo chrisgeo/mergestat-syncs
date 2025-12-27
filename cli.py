@@ -931,6 +931,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
     fix_gen.set_defaults(func=_cmd_fixtures_generate)
 
+    # ---- api ----
+    api = sub.add_parser("api", help="Run the Dev Health Ops API server.")
+    api.add_argument(
+        "--db",
+        default=os.getenv("CLICKHOUSE_DSN") or os.getenv("DB_CONN_STRING"),
+        help="ClickHouse DSN (overrides CLICKHOUSE_DSN).",
+    )
+    api.add_argument("--host", default="127.0.0.1", help="Bind host.")
+    api.add_argument("--port", type=int, default=8000, help="Bind port.")
+    api.add_argument(
+        "--reload",
+        action="store_true",
+        help="Enable auto-reload for local development.",
+    )
+    api.set_defaults(func=_cmd_api)
+
     return parser
 
 
@@ -1362,6 +1378,21 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
                 )
 
     asyncio.run(_run_with_store(ns.db, db_type, _handler))
+    return 0
+
+
+def _cmd_api(ns: argparse.Namespace) -> int:
+    import uvicorn
+
+    if ns.db:
+        os.environ["CLICKHOUSE_DSN"] = ns.db
+
+    uvicorn.run(
+        "dev_health_ops.api.main:app",
+        host=ns.host,
+        port=ns.port,
+        reload=ns.reload,
+    )
     return 0
 
 

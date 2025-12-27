@@ -176,6 +176,16 @@ dev-hops metrics daily --date 2025-02-01 --backfill 30 --db "clickhouse://localh
 - <http://localhost:3000> (default `admin` / `admin`)
 - Dashboards are provisioned under the “Developer Health” folder.
 
+### API (FastAPI)
+
+Run the Developer Health Ops API for the web app:
+
+```bash
+dev-hops api --db "clickhouse://localhost:8123/default" --reload
+```
+
+OpenAPI docs are available at <http://localhost:8000/docs>.
+
 ### “Download” work tracking data (Jira/GitHub/GitLab)
 
 Work items are fetched from provider APIs via a dedicated sync command. This is separate from PR ingestion:
@@ -510,4 +520,3 @@ This behavior is different from GitHub/GitLab connectors, which provide accurate
 <img width="1080" height="1289" alt="Repo Health Dashboard" src="https://github.com/user-attachments/assets/e7e31df3-a073-476c-a76a-9830147bbdbd" />
 <img width="1807" height="1080" alt="Well-being Team Level Dashboard" src="https://github.com/user-attachments/assets/830f84e3-b356-4499-be89-7967a1537576" />
 <img width="1080" height="1669" alt="Work Tracking Developer Health Dashboard" src="https://github.com/user-attachments/assets/7bb42ae9-bcd3-437b-b60d-6064b9f9ee81" />
-
