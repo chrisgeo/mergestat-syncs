@@ -1175,8 +1175,8 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
                     end_day = computed_at.date()
                     start_day = end_day - timedelta(days=max(1, int(ns.days)) - 1)
 
-                    for i in range(max(1, int(ns.days))):
-                        day = start_day + timedelta(days=i)
+                    for day_index in range(max(1, int(ns.days))):
+                        day = start_day + timedelta(days=day_index)
 
                         start_dt = datetime.combine(day, time.min, tzinfo=timezone.utc)
                         end_dt = start_dt + timedelta(days=1)
