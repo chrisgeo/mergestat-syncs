@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from datetime import date, datetime
 import os
 
@@ -32,7 +33,7 @@ from .models.schemas import (
     PersonSearchResult,
     PersonSummaryResponse,
 )
-from .queries.client import clickhouse_client, query_dicts
+from .queries.client import clickhouse_client, query_dicts, close_global_client
 from .queries.drilldown import fetch_issues, fetch_pull_requests
 from .queries.filters import fetch_filter_options
 from .services.cache import TTLCache
@@ -108,11 +109,18 @@ def _bounded_limit_param(limit: int, max_limit: int) -> int:
     return min(max(limit, 1), max_limit)
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+    await close_global_client()
+
+
 app = FastAPI(
     title="Dev Health Ops API",
     version="1.0.0",
     docs_url="/docs",
     openapi_url="/openapi.json",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
