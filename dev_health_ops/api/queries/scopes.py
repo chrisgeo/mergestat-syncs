@@ -44,6 +44,22 @@ async def resolve_repo_ids(client: Any, repo_refs: Iterable[str]) -> List[str]:
     return resolved
 
 
+async def resolve_repo_ids_for_teams(
+    client: Any,
+    team_ids: Iterable[str],
+) -> List[str]:
+    team_list = [team_id for team_id in team_ids if team_id]
+    if not team_list:
+        return []
+    query = """
+        SELECT distinct repo_id AS id
+        FROM user_metrics_daily
+        WHERE team_id IN %(team_ids)s
+    """
+    rows = await query_dicts(client, query, {"team_ids": team_list})
+    return [str(row.get("id")) for row in rows if row.get("id")]
+
+
 def build_scope_filter(
     scope_type: str,
     scope_id: str,

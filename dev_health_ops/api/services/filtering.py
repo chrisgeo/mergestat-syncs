@@ -5,24 +5,41 @@ from datetime import date, timedelta
 from typing import Any, Dict, List, Tuple
 
 from ..models.filters import MetricFilter
-from ..queries.scopes import build_scope_filter_multi, resolve_repo_ids
+from ..queries.scopes import (
+    build_scope_filter_multi,
+    resolve_repo_ids,
+    resolve_repo_ids_for_teams,
+)
 
 
-def filter_cache_key(prefix: str, filters: MetricFilter, extra: Dict[str, Any] | None = None) -> str:
-    payload = (
-        filters.model_dump() if hasattr(filters, "model_dump") else filters.dict()
-    )
+def filter_cache_key(
+    prefix: str, filters: MetricFilter, extra: Dict[str, Any] | None = None
+) -> str:
+    if hasattr(filters, "model_dump"):
+        try:
+            payload = filters.model_dump(mode="json")
+        except TypeError:
+            payload = filters.model_dump()
+    else:
+        payload = filters.dict()
     if extra:
         payload = {**payload, **extra}
-    serialized = json.dumps(payload, sort_keys=True)
+    serialized = json.dumps(payload, sort_keys=True, default=str)
     return f"{prefix}:{serialized}"
 
 
 def time_window(filters: MetricFilter) -> Tuple[date, date, date, date]:
-    end_day = date.today() + timedelta(days=1)
     range_days = max(1, filters.time.range_days)
     compare_days = max(1, filters.time.compare_days)
-    start_day = end_day - timedelta(days=range_days)
+    end_date = filters.time.end_date or date.today()
+    start_date = filters.time.start_date
+    end_day = end_date + timedelta(days=1)
+    if start_date:
+        start_day = start_date
+        if start_day >= end_day:
+            start_day = end_day - timedelta(days=1)
+    else:
+        start_day = end_day - timedelta(days=range_days)
     compare_end = start_day
     compare_start = compare_end - timedelta(days=compare_days)
     return start_day, end_day, compare_start, compare_end
@@ -34,6 +51,9 @@ async def resolve_repo_filter_ids(client: Any, filters: MetricFilter) -> List[st
         repo_refs.extend(filters.scope.ids)
     if filters.what.repos:
         repo_refs.extend(filters.what.repos)
+    if filters.scope.level == "team" and filters.scope.ids:
+        team_repo_ids = await resolve_repo_ids_for_teams(client, filters.scope.ids)
+        repo_refs.extend(team_repo_ids)
     return await resolve_repo_ids(client, repo_refs)
 
 

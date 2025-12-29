@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import List, Literal, Optional
+from datetime import date
 
 from pydantic import BaseModel, Field
 
@@ -8,6 +9,8 @@ from pydantic import BaseModel, Field
 class TimeFilter(BaseModel):
     range_days: int = 14
     compare_days: int = 14
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
 
 
 class ScopeFilter(BaseModel):

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from datetime import date, datetime
 import os
 
 
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -19,10 +20,16 @@ from .models.filters import (
 from .models.schemas import (
     DrilldownResponse,
     ExplainResponse,
+    FlameResponse,
     HealthResponse,
+    HeatmapResponse,
     HomeResponse,
     InvestmentResponse,
     OpportunitiesResponse,
+    PersonDrilldownResponse,
+    PersonMetricResponse,
+    PersonSearchResult,
+    PersonSummaryResponse,
 )
 from .queries.client import clickhouse_client, query_dicts
 from .queries.drilldown import fetch_issues, fetch_pull_requests
@@ -33,9 +40,28 @@ from .services.filtering import scope_filter_for_metric, time_window
 from .services.home import build_home_response
 from .services.investment import build_investment_response
 from .services.opportunities import build_opportunities_response
+from .services.people import (
+    build_person_drilldown_issues_response,
+    build_person_drilldown_prs_response,
+    build_person_metric_response,
+    build_person_summary_response,
+    search_people_response,
+)
+from .services.heatmap import build_heatmap_response
+from .services.flame import build_flame_response
 
 HOME_CACHE = TTLCache(ttl_seconds=60)
 EXPLAIN_CACHE = TTLCache(ttl_seconds=120)
+
+_FORBIDDEN_QUERY_PARAMS = {
+    "compare_to",
+    "rank",
+    "percentile",
+    "score",
+    "leaderboard",
+    "top",
+    "bottom",
+}
 
 
 def _db_url() -> str:
@@ -51,11 +77,33 @@ def _filters_from_query(
     scope_id: str,
     range_days: int,
     compare_days: int,
+    start_date: date | None = None,
+    end_date: date | None = None,
 ) -> MetricFilter:
     return MetricFilter(
-        time=TimeFilter(range_days=range_days, compare_days=compare_days),
+        time=TimeFilter(
+            range_days=range_days,
+            compare_days=compare_days,
+            start_date=start_date,
+            end_date=end_date,
+        ),
         scope=ScopeFilter(level=scope_type, ids=[scope_id] if scope_id else []),
     )
+
+
+def _reject_comparative_params(request: Request) -> None:
+    for key in request.query_params.keys():
+        if key in _FORBIDDEN_QUERY_PARAMS:
+            raise HTTPException(
+                status_code=400,
+                detail="Comparative parameters are not supported.",
+            )
+
+
+def _bounded_limit_param(limit: int, max_limit: int) -> int:
+    if limit <= 0:
+        return min(50, max_limit)
+    return min(max(limit, 1), max_limit)
 
 
 app = FastAPI(
@@ -115,9 +163,13 @@ async def home(
     scope_id: str = "",
     range_days: int = 14,
     compare_days: int = 14,
+    start_date: date | None = None,
+    end_date: date | None = None,
 ) -> HomeResponse:
     try:
-        filters = _filters_from_query(scope_type, scope_id, range_days, compare_days)
+        filters = _filters_from_query(
+            scope_type, scope_id, range_days, compare_days, start_date, end_date
+        )
         result = await build_home_response(
             db_url=_db_url(),
             filters=filters,
@@ -151,9 +203,13 @@ async def explain(
     scope_id: str = "",
     range_days: int = 14,
     compare_days: int = 14,
+    start_date: date | None = None,
+    end_date: date | None = None,
 ) -> ExplainResponse:
     try:
-        filters = _filters_from_query(scope_type, scope_id, range_days, compare_days)
+        filters = _filters_from_query(
+            scope_type, scope_id, range_days, compare_days, start_date, end_date
+        )
         result = await build_explain_response(
             db_url=_db_url(),
             metric=metric,
@@ -163,6 +219,60 @@ async def explain(
         if response is not None:
             response.headers["X-DevHealth-Deprecated"] = "use POST with filters"
         return result
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Data unavailable") from exc
+
+
+@app.get("/api/v1/heatmap", response_model=HeatmapResponse)
+async def heatmap(
+    request: Request,
+    type: str,
+    metric: str,
+    scope_type: str = "org",
+    scope_id: str = "",
+    range_days: int = 14,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    x: str = "",
+    y: str = "",
+    limit: int = 50,
+) -> HeatmapResponse:
+    _reject_comparative_params(request)
+    try:
+        return await build_heatmap_response(
+            db_url=_db_url(),
+            type=type,
+            metric=metric,
+            scope_type=scope_type,
+            scope_id=scope_id,
+            range_days=range_days,
+            start_date=start_date,
+            end_date=end_date,
+            x=x or None,
+            y=y or None,
+            limit=_bounded_limit_param(limit, 200),
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Data unavailable") from exc
+
+
+@app.get("/api/v1/flame", response_model=FlameResponse)
+async def flame(
+    request: Request,
+    entity_type: str,
+    entity_id: str,
+) -> FlameResponse:
+    _reject_comparative_params(request)
+    try:
+        return await build_flame_response(
+            db_url=_db_url(),
+            entity_type=entity_type,
+            entity_id=entity_id,
+        )
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Data unavailable") from exc
 
@@ -194,9 +304,13 @@ async def drilldown_prs(
     scope_type: str = "org",
     scope_id: str = "",
     range_days: int = 14,
+    start_date: date | None = None,
+    end_date: date | None = None,
 ) -> DrilldownResponse:
     try:
-        filters = _filters_from_query(scope_type, scope_id, range_days, range_days)
+        filters = _filters_from_query(
+            scope_type, scope_id, range_days, range_days, start_date, end_date
+        )
         start_day, end_day, _, _ = time_window(filters)
         async with clickhouse_client(_db_url()) as client:
             scope_filter, scope_params = await scope_filter_for_metric(
@@ -243,9 +357,13 @@ async def drilldown_issues(
     scope_type: str = "org",
     scope_id: str = "",
     range_days: int = 14,
+    start_date: date | None = None,
+    end_date: date | None = None,
 ) -> DrilldownResponse:
     try:
-        filters = _filters_from_query(scope_type, scope_id, range_days, range_days)
+        filters = _filters_from_query(
+            scope_type, scope_id, range_days, range_days, start_date, end_date
+        )
         start_day, end_day, _, _ = time_window(filters)
         async with clickhouse_client(_db_url()) as client:
             scope_filter, scope_params = await scope_filter_for_metric(
@@ -265,6 +383,121 @@ async def drilldown_issues(
         raise HTTPException(status_code=503, detail="Data unavailable") from exc
 
 
+@app.get("/api/v1/people", response_model=list[PersonSearchResult])
+async def people_search(
+    request: Request,
+    q: str = "",
+    limit: int = 20,
+) -> list[PersonSearchResult]:
+    _reject_comparative_params(request)
+    try:
+        return await search_people_response(
+            db_url=_db_url(),
+            query=q,
+            limit=_bounded_limit_param(limit, 50),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Data unavailable") from exc
+
+
+@app.get("/api/v1/people/{person_id}/summary", response_model=PersonSummaryResponse)
+async def people_summary(
+    person_id: str,
+    request: Request,
+    range_days: int = 14,
+    compare_days: int = 14,
+) -> PersonSummaryResponse:
+    _reject_comparative_params(request)
+    try:
+        return await build_person_summary_response(
+            db_url=_db_url(),
+            person_id=person_id,
+            range_days=range_days,
+            compare_days=compare_days,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Person not found") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Data unavailable") from exc
+
+
+@app.get("/api/v1/people/{person_id}/metric", response_model=PersonMetricResponse)
+async def people_metric(
+    person_id: str,
+    metric: str,
+    request: Request,
+    range_days: int = 14,
+    compare_days: int = 14,
+) -> PersonMetricResponse:
+    _reject_comparative_params(request)
+    try:
+        return await build_person_metric_response(
+            db_url=_db_url(),
+            person_id=person_id,
+            metric=metric,
+            range_days=range_days,
+            compare_days=compare_days,
+        )
+    except ValueError as exc:
+        detail = "Metric not supported" if str(exc) == "metric not supported" else "Person not found"
+        status = 400 if detail == "Metric not supported" else 404
+        raise HTTPException(status_code=status, detail=detail) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Data unavailable") from exc
+
+
+@app.get(
+    "/api/v1/people/{person_id}/drilldown/prs",
+    response_model=PersonDrilldownResponse,
+)
+async def people_drilldown_prs(
+    person_id: str,
+    request: Request,
+    range_days: int = 14,
+    limit: int = 50,
+    cursor: datetime | None = None,
+) -> PersonDrilldownResponse:
+    _reject_comparative_params(request)
+    try:
+        return await build_person_drilldown_prs_response(
+            db_url=_db_url(),
+            person_id=person_id,
+            range_days=range_days,
+            limit=_bounded_limit_param(limit, 200),
+            cursor=cursor,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Person not found") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Data unavailable") from exc
+
+
+@app.get(
+    "/api/v1/people/{person_id}/drilldown/issues",
+    response_model=PersonDrilldownResponse,
+)
+async def people_drilldown_issues(
+    person_id: str,
+    request: Request,
+    range_days: int = 14,
+    limit: int = 50,
+    cursor: datetime | None = None,
+) -> PersonDrilldownResponse:
+    _reject_comparative_params(request)
+    try:
+        return await build_person_drilldown_issues_response(
+            db_url=_db_url(),
+            person_id=person_id,
+            range_days=range_days,
+            limit=_bounded_limit_param(limit, 200),
+            cursor=cursor,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Person not found") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Data unavailable") from exc
+
+
 @app.get("/api/v1/opportunities", response_model=OpportunitiesResponse)
 async def opportunities(
     response: Response,
@@ -272,9 +505,13 @@ async def opportunities(
     scope_id: str = "",
     range_days: int = 14,
     compare_days: int = 14,
+    start_date: date | None = None,
+    end_date: date | None = None,
 ) -> OpportunitiesResponse:
     try:
-        filters = _filters_from_query(scope_type, scope_id, range_days, compare_days)
+        filters = _filters_from_query(
+            scope_type, scope_id, range_days, compare_days, start_date, end_date
+        )
         result = await build_opportunities_response(
             db_url=_db_url(),
             filters=filters,
@@ -305,9 +542,13 @@ async def investment(
     scope_type: str = "org",
     scope_id: str = "",
     range_days: int = 30,
+    start_date: date | None = None,
+    end_date: date | None = None,
 ) -> InvestmentResponse:
     try:
-        filters = _filters_from_query(scope_type, scope_id, range_days, range_days)
+        filters = _filters_from_query(
+            scope_type, scope_id, range_days, range_days, start_date, end_date
+        )
         result = await build_investment_response(db_url=_db_url(), filters=filters)
         if response is not None:
             response.headers["X-DevHealth-Deprecated"] = "use POST with filters"

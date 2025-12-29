@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
@@ -157,3 +157,148 @@ class InvestmentResponse(BaseModel):
     categories: List[InvestmentCategory]
     subtypes: List[InvestmentSubtype]
     edges: Optional[List[Dict[str, Any]]] = None
+
+
+class PersonIdentity(BaseModel):
+    provider: str
+    handle: str
+
+
+class PersonSummaryPerson(BaseModel):
+    person_id: str
+    display_name: str
+    identities: List[PersonIdentity]
+
+
+class PersonSearchResult(PersonSummaryPerson):
+    active: bool
+
+
+class PersonDelta(BaseModel):
+    metric: str
+    label: str
+    value: float
+    unit: str
+    delta_pct: float
+    spark: List[SparkPoint]
+
+
+class WorkMixItem(BaseModel):
+    key: str
+    name: str
+    value: float
+
+
+class FlowStageItem(BaseModel):
+    stage: str
+    value: float
+    unit: str
+
+
+class CollaborationItem(BaseModel):
+    label: str
+    value: float
+
+
+class CollaborationSection(BaseModel):
+    review_load: List[CollaborationItem]
+    handoff_points: List[CollaborationItem]
+
+
+class PersonSummarySections(BaseModel):
+    work_mix: List[WorkMixItem]
+    flow_breakdown: List[FlowStageItem]
+    collaboration: CollaborationSection
+
+
+class PersonSummaryResponse(BaseModel):
+    person: PersonSummaryPerson
+    freshness: Freshness
+    identity_coverage_pct: float
+    deltas: List[PersonDelta]
+    narrative: List[SummarySentence]
+    sections: PersonSummarySections
+
+
+class MetricDefinition(BaseModel):
+    description: str
+    interpretation: str
+
+
+class MetricTimeseriesPoint(BaseModel):
+    day: date
+    value: float
+
+
+class MetricBreakdownItem(BaseModel):
+    label: str
+    value: float
+
+
+class PersonMetricBreakdowns(BaseModel):
+    by_repo: List[MetricBreakdownItem]
+    by_work_type: List[MetricBreakdownItem]
+    by_stage: List[MetricBreakdownItem]
+
+
+class DriverStatement(BaseModel):
+    text: str
+    link: str
+
+
+class PersonMetricResponse(BaseModel):
+    metric: str
+    label: str
+    definition: MetricDefinition
+    timeseries: List[MetricTimeseriesPoint]
+    breakdowns: PersonMetricBreakdowns
+    drivers: List[DriverStatement]
+
+
+class PersonDrilldownResponse(BaseModel):
+    items: List[Any]
+    next_cursor: Optional[datetime] = None
+
+
+class HeatmapAxes(BaseModel):
+    x: List[str]
+    y: List[str]
+
+
+class HeatmapCell(BaseModel):
+    x: str
+    y: str
+    value: float
+
+
+class HeatmapLegend(BaseModel):
+    unit: str
+    scale: str
+
+
+class HeatmapResponse(BaseModel):
+    axes: HeatmapAxes
+    cells: List[HeatmapCell]
+    legend: HeatmapLegend
+    evidence: Optional[List[Dict[str, Any]]] = None
+
+
+class FlameTimeline(BaseModel):
+    start: datetime
+    end: datetime
+
+
+class FlameFrame(BaseModel):
+    id: str
+    parent_id: Optional[str]
+    label: str
+    start: datetime
+    end: datetime
+    state: str
+    category: str
+
+
+class FlameResponse(BaseModel):
+    entity: Dict[str, Any]
+    timeline: FlameTimeline
+    frames: List[FlameFrame]
