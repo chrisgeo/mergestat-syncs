@@ -18,7 +18,28 @@ async def fetch_filter_options(client: Any) -> Dict[str, List[str]]:
 
     team_rows = await query_dicts(
         client,
-        "SELECT distinct id AS value FROM teams WHERE id != '' ORDER BY id",
+        """
+        SELECT DISTINCT value
+        FROM (
+            SELECT id AS value
+            FROM teams
+            WHERE id != ''
+
+            UNION ALL
+
+            SELECT team_id AS value
+            FROM user_metrics_daily
+            WHERE team_id != ''
+
+            UNION ALL
+
+            SELECT team_id AS value
+            FROM work_item_user_metrics_daily
+            WHERE team_id != ''
+        )
+        WHERE value != ''
+        ORDER BY value
+        """,
         {},
     )
     options["teams"] = [row["value"] for row in team_rows if row.get("value")]

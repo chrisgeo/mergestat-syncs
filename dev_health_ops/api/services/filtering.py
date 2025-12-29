@@ -5,7 +5,11 @@ from datetime import date, timedelta
 from typing import Any, Dict, List, Tuple
 
 from ..models.filters import MetricFilter
-from ..queries.scopes import build_scope_filter_multi, resolve_repo_ids
+from ..queries.scopes import (
+    build_scope_filter_multi,
+    resolve_repo_ids,
+    resolve_repo_ids_for_teams,
+)
 
 
 def filter_cache_key(prefix: str, filters: MetricFilter, extra: Dict[str, Any] | None = None) -> str:
@@ -34,6 +38,9 @@ async def resolve_repo_filter_ids(client: Any, filters: MetricFilter) -> List[st
         repo_refs.extend(filters.scope.ids)
     if filters.what.repos:
         repo_refs.extend(filters.what.repos)
+    if filters.scope.level == "team" and filters.scope.ids:
+        team_repo_ids = await resolve_repo_ids_for_teams(client, filters.scope.ids)
+        repo_refs.extend(team_repo_ids)
     return await resolve_repo_ids(client, repo_refs)
 
 
