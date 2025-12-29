@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 import os
 
 
@@ -77,9 +77,16 @@ def _filters_from_query(
     scope_id: str,
     range_days: int,
     compare_days: int,
+    start_date: date | None = None,
+    end_date: date | None = None,
 ) -> MetricFilter:
     return MetricFilter(
-        time=TimeFilter(range_days=range_days, compare_days=compare_days),
+        time=TimeFilter(
+            range_days=range_days,
+            compare_days=compare_days,
+            start_date=start_date,
+            end_date=end_date,
+        ),
         scope=ScopeFilter(level=scope_type, ids=[scope_id] if scope_id else []),
     )
 
@@ -156,9 +163,13 @@ async def home(
     scope_id: str = "",
     range_days: int = 14,
     compare_days: int = 14,
+    start_date: date | None = None,
+    end_date: date | None = None,
 ) -> HomeResponse:
     try:
-        filters = _filters_from_query(scope_type, scope_id, range_days, compare_days)
+        filters = _filters_from_query(
+            scope_type, scope_id, range_days, compare_days, start_date, end_date
+        )
         result = await build_home_response(
             db_url=_db_url(),
             filters=filters,
@@ -192,9 +203,13 @@ async def explain(
     scope_id: str = "",
     range_days: int = 14,
     compare_days: int = 14,
+    start_date: date | None = None,
+    end_date: date | None = None,
 ) -> ExplainResponse:
     try:
-        filters = _filters_from_query(scope_type, scope_id, range_days, compare_days)
+        filters = _filters_from_query(
+            scope_type, scope_id, range_days, compare_days, start_date, end_date
+        )
         result = await build_explain_response(
             db_url=_db_url(),
             metric=metric,
@@ -216,6 +231,8 @@ async def heatmap(
     scope_type: str = "org",
     scope_id: str = "",
     range_days: int = 14,
+    start_date: date | None = None,
+    end_date: date | None = None,
     x: str = "",
     y: str = "",
     limit: int = 50,
@@ -229,6 +246,8 @@ async def heatmap(
             scope_type=scope_type,
             scope_id=scope_id,
             range_days=range_days,
+            start_date=start_date,
+            end_date=end_date,
             x=x or None,
             y=y or None,
             limit=_bounded_limit_param(limit, 200),
@@ -285,9 +304,13 @@ async def drilldown_prs(
     scope_type: str = "org",
     scope_id: str = "",
     range_days: int = 14,
+    start_date: date | None = None,
+    end_date: date | None = None,
 ) -> DrilldownResponse:
     try:
-        filters = _filters_from_query(scope_type, scope_id, range_days, range_days)
+        filters = _filters_from_query(
+            scope_type, scope_id, range_days, range_days, start_date, end_date
+        )
         start_day, end_day, _, _ = time_window(filters)
         async with clickhouse_client(_db_url()) as client:
             scope_filter, scope_params = await scope_filter_for_metric(
@@ -334,9 +357,13 @@ async def drilldown_issues(
     scope_type: str = "org",
     scope_id: str = "",
     range_days: int = 14,
+    start_date: date | None = None,
+    end_date: date | None = None,
 ) -> DrilldownResponse:
     try:
-        filters = _filters_from_query(scope_type, scope_id, range_days, range_days)
+        filters = _filters_from_query(
+            scope_type, scope_id, range_days, range_days, start_date, end_date
+        )
         start_day, end_day, _, _ = time_window(filters)
         async with clickhouse_client(_db_url()) as client:
             scope_filter, scope_params = await scope_filter_for_metric(
@@ -478,9 +505,13 @@ async def opportunities(
     scope_id: str = "",
     range_days: int = 14,
     compare_days: int = 14,
+    start_date: date | None = None,
+    end_date: date | None = None,
 ) -> OpportunitiesResponse:
     try:
-        filters = _filters_from_query(scope_type, scope_id, range_days, compare_days)
+        filters = _filters_from_query(
+            scope_type, scope_id, range_days, compare_days, start_date, end_date
+        )
         result = await build_opportunities_response(
             db_url=_db_url(),
             filters=filters,
@@ -511,9 +542,13 @@ async def investment(
     scope_type: str = "org",
     scope_id: str = "",
     range_days: int = 30,
+    start_date: date | None = None,
+    end_date: date | None = None,
 ) -> InvestmentResponse:
     try:
-        filters = _filters_from_query(scope_type, scope_id, range_days, range_days)
+        filters = _filters_from_query(
+            scope_type, scope_id, range_days, range_days, start_date, end_date
+        )
         result = await build_investment_response(db_url=_db_url(), filters=filters)
         if response is not None:
             response.headers["X-DevHealth-Deprecated"] = "use POST with filters"

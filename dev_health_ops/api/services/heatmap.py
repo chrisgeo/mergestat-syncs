@@ -19,7 +19,7 @@ from ..queries.heatmap import (
     fetch_review_wait_evidence,
 )
 from ..queries.people import resolve_person_identity
-from .filtering import scope_filter_for_metric
+from .filtering import scope_filter_for_metric, time_window
 from .people_identity import (
     identity_variants,
     load_identity_aliases,
@@ -239,6 +239,8 @@ async def build_heatmap_response(
     scope_type: str,
     scope_id: str,
     range_days: int,
+    start_date: date | None = None,
+    end_date: date | None = None,
     x: Optional[str] = None,
     y: Optional[str] = None,
     limit: int = 50,
@@ -262,13 +264,17 @@ async def build_heatmap_response(
     range_days = _normalize_range_days(range_days)
     try:
         filters = MetricFilter(
-            time=TimeFilter(range_days=range_days, compare_days=range_days),
+            time=TimeFilter(
+                range_days=range_days,
+                compare_days=range_days,
+                start_date=start_date,
+                end_date=end_date,
+            ),
             scope=ScopeFilter(level=scope_type, ids=[scope_id] if scope_id else []),
         )
     except Exception as exc:
         raise HTTPException(status_code=400, detail="Invalid scope filter") from exc
-    end_day = date.today() + timedelta(days=1)
-    start_day = end_day - timedelta(days=range_days)
+    start_day, end_day, _, _ = time_window(filters)
     start_ts = datetime.combine(start_day, datetime.min.time())
     end_ts = datetime.combine(end_day, datetime.min.time())
 
