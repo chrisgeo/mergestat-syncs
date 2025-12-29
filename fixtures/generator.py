@@ -623,12 +623,22 @@ class SyntheticDataGenerator:
         
         if not investment_weights:
             investment_weights = {
-                "product": 0.6,
+                "product": 0.5,
                 "security": 0.1,
-                "infra": 0.1,
+                "infra": 0.15,
                 "quality": 0.1,
-                "docs": 0.1,
+                "docs": 0.05,
+                "data": 0.1,
             }
+
+        sub_categories_map = {
+            "product": ["feature", "ux", "onboarding", "mobile", "api", "growth", "monetization"],
+            "security": ["auth", "vulnerability", "compliance", "audit", "encryption", "access-control"],
+            "infra": ["k8s", "terraform", "ci-cd", "monitoring", "cost", "network", "database"],
+            "quality": ["testing", "flake", "coverage", "perf", "reliability", "automation"],
+            "docs": ["api-docs", "user-guide", "tutorial", "readme", "release-notes"],
+            "data": ["pipeline", "schema", "analytics", "warehouse", "etl", "visualization"],
+        }
 
         # Normalize weights
         total_weight = sum(investment_weights.values())
@@ -646,11 +656,15 @@ class SyntheticDataGenerator:
                 epic_id = f"{proj}-EPIC-{i+1}"
                 category = random.choices(categories, weights=weights, k=1)[0]
                 
+                # Pick a random sub-category for the epic
+                sub_cats = sub_categories_map.get(category, [])
+                sub_category = random.choice(sub_cats) if sub_cats else category
+
                 # Create the Epic item
                 epic = WorkItem(
                     work_item_id=epic_id,
                     provider=self.provider,
-                    title=f"Epic: {category.title()} Initiative {i+1}",
+                    title=f"Epic: {category.title()} - {sub_category.title()} Initiative {i+1}",
                     type="epic",
                     status="in_progress",  # Epics often stay open
                     status_raw="In Progress",
@@ -662,7 +676,7 @@ class SyntheticDataGenerator:
                     closed_at=None,
                     reporter=random.choice(self.authors)[1],
                     assignees=[random.choice(self.authors)[1]],
-                    labels=[category, "strategic"],
+                    labels=[category, sub_category, "strategic"],
                     story_points=None,
                 )
                 items.append(epic)
@@ -683,7 +697,12 @@ class SyntheticDataGenerator:
 
             # Determine Investment Category & Parent
             category = random.choices(categories, weights=weights, k=1)[0]
-            labels = [category]
+            
+            # Pick a random sub-category
+            sub_cats = sub_categories_map.get(category, [])
+            sub_category = random.choice(sub_cats) if sub_cats else category
+            
+            labels = [category, sub_category]
             
             # Link to an Epic if available (50% chance)
             parent_epic_id = None
@@ -692,8 +711,17 @@ class SyntheticDataGenerator:
                 # Inherit category from Epic if linked, or keep random? 
                 # Usually child items relate to Epic. Let's align them often.
                 if random.random() > 0.3:
-                    labels = list(parent_epic.labels)
-                    category = parent_epic.labels[0] # primary category
+                    # primary category is the first label
+                    category = parent_epic.labels[0]
+                    # Try to inherit sub-category or pick a related one
+                    if len(parent_epic.labels) > 1:
+                         sub_category = parent_epic.labels[1]
+                    else:
+                         sub_cats = sub_categories_map.get(category, [])
+                         sub_category = random.choice(sub_cats) if sub_cats else category
+                    
+                    labels = [category, sub_category]
+
                 parent_epic_id = parent_epic.work_item_id
 
             # Determine Type
@@ -727,7 +755,7 @@ class SyntheticDataGenerator:
                 WorkItem(
                     work_item_id=f"{project}-{i+100}",
                     provider=self.provider,
-                    title=f"[{project}] {category.title()} {item_type} {i}",
+                    title=f"[{project}] {category.title()}/{sub_category.title()} {item_type} {i}",
                     type=item_type,
                     status=status,
                     status_raw=status,
