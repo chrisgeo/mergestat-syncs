@@ -302,3 +302,44 @@ class FlameResponse(BaseModel):
     entity: Dict[str, Any]
     timeline: FlameTimeline
     frames: List[FlameFrame]
+
+
+class QuadrantAxis(BaseModel):
+    metric: str
+    label: str
+    unit: str
+
+
+class QuadrantAxes(BaseModel):
+    x: QuadrantAxis
+    y: QuadrantAxis
+
+
+class QuadrantPointTrajectory(BaseModel):
+    x: float
+    y: float
+    window: str
+
+
+class QuadrantPoint(BaseModel):
+    entity_id: str
+    entity_label: str
+    x: float
+    y: float
+    window_start: date
+    window_end: date
+    evidence_link: str
+    trajectory: Optional[List[QuadrantPointTrajectory]] = None
+
+
+class QuadrantAnnotation(BaseModel):
+    type: str
+    description: str
+    x_range: List[float]
+    y_range: List[float]
+
+
+class QuadrantResponse(BaseModel):
+    axes: QuadrantAxes
+    points: List[QuadrantPoint]
+    annotations: List[QuadrantAnnotation]

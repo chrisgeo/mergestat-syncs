@@ -26,6 +26,7 @@ from .models.schemas import (
     HomeResponse,
     InvestmentResponse,
     OpportunitiesResponse,
+    QuadrantResponse,
     PersonDrilldownResponse,
     PersonMetricResponse,
     PersonSearchResult,
@@ -49,6 +50,7 @@ from .services.people import (
 )
 from .services.heatmap import build_heatmap_response
 from .services.flame import build_flame_response
+from .services.quadrant import build_quadrant_response
 
 HOME_CACHE = TTLCache(ttl_seconds=60)
 EXPLAIN_CACHE = TTLCache(ttl_seconds=120)
@@ -270,6 +272,35 @@ async def flame(
             db_url=_db_url(),
             entity_type=entity_type,
             entity_id=entity_id,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Data unavailable") from exc
+
+
+@app.get("/api/v1/quadrant", response_model=QuadrantResponse)
+async def quadrant(
+    request: Request,
+    type: str,
+    scope_type: str = "org",
+    scope_id: str = "",
+    range_days: int = 30,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    bucket: str = "week",
+) -> QuadrantResponse:
+    _reject_comparative_params(request)
+    try:
+        return await build_quadrant_response(
+            db_url=_db_url(),
+            type=type,
+            scope_type=scope_type,
+            scope_id=scope_id,
+            range_days=range_days,
+            start_date=start_date,
+            end_date=end_date,
+            bucket=bucket,
         )
     except HTTPException:
         raise
