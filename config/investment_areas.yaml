@@ -27,6 +27,13 @@ rules:
     output:
       investment_area: "quality"
 
+  - id: "data_label"
+    priority: 38
+    match:
+      label: ["data", "analytics", "pipeline", "etl"]
+    output:
+      investment_area: "data"
+
   - id: "data_component"
     priority: 40
     match:
