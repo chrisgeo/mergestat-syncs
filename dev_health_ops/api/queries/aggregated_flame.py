@@ -153,9 +153,11 @@ async def fetch_throughput(
 
     where_clause = " AND ".join(filters)
 
-    # Query work_item_metrics_daily for aggregate counts by type and team
+    # Query work_item_metrics_daily for aggregate counts by team
+    # Note: No work_type available in this table, so we use 'All' as synthetic type
     query = f"""
         SELECT
+            'All' AS work_type,
             coalesce(nullIf(team_name, ''), 'Unassigned') AS team_name,
             sum(items_completed) AS items_completed,
             sum(items_started) AS items_started
@@ -187,7 +189,12 @@ async def fetch_throughput_by_type(
         "limit": limit,
     }
 
-    filters = ["day >= %(start_day)s", "day < %(end_day)s", "completed_at IS NOT NULL"]
+    # Filter by completed_at date range, not day column
+    filters = [
+        "completed_at >= toDateTime(%(start_day)s)",
+        "completed_at < toDateTime(%(end_day)s)",
+        "completed_at IS NOT NULL",
+    ]
     if team_id:
         filters.append("team_id = %(team_id)s")
         params["team_id"] = team_id
