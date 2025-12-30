@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+import logging
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..models.filters import MetricFilter, SankeyContext
 from ..models.schemas import SankeyLink, SankeyNode, SankeyResponse
-from ..queries.client import clickhouse_client
+from ..queries.client import clickhouse_client, query_dicts
 from ..queries.sankey import (
     fetch_expense_counts,
     fetch_hotspot_rows,
@@ -15,6 +16,8 @@ from ..queries.sankey import (
 )
 from ..queries.scopes import build_scope_filter_multi
 from .filtering import resolve_repo_filter_ids, time_window
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -123,6 +126,27 @@ def _links_from_edges(edges: Dict[Tuple[str, str], float]) -> List[SankeyLink]:
     return links
 
 
+async def _tables_present(client: Any, tables: List[str]) -> bool:
+    if not tables:
+        return True
+    rows = await query_dicts(
+        client,
+        """
+        SELECT name
+        FROM system.tables
+        WHERE database = currentDatabase()
+            AND name IN %(tables)s
+        """,
+        {"tables": tables},
+    )
+    present = {row.get("name") for row in rows}
+    missing = [table for table in tables if table not in present]
+    if missing:
+        logger.info("Sankey tables missing: %s", ", ".join(missing))
+        return False
+    return True
+
+
 async def _repo_scope_filter(
     client: Any,
     filters: MetricFilter,
@@ -141,6 +165,10 @@ async def _build_investment_flow(
     end_day: date,
     filters: MetricFilter,
 ) -> Tuple[List[SankeyNode], List[SankeyLink]]:
+    if not await _tables_present(
+        client, ["investment_classifications_daily", "work_items"]
+    ):
+        return [], []
     scope_filter, scope_params = await _repo_scope_filter(
         client, filters, repo_column="coalesce(inv.repo_id, wi.repo_id)"
     )
@@ -186,6 +214,8 @@ async def _build_expense_flow(
     end_day: date,
     filters: MetricFilter,
 ) -> Tuple[List[SankeyNode], List[SankeyLink]]:
+    if not await _tables_present(client, ["work_items"]):
+        return [], []
     scope_filter, scope_params = await _repo_scope_filter(client, filters)
     rows = await fetch_expense_counts(
         client,
@@ -223,6 +253,8 @@ async def _build_state_flow(
     end_day: date,
     filters: MetricFilter,
 ) -> Tuple[List[SankeyNode], List[SankeyLink]]:
+    if not await _tables_present(client, ["work_item_transitions"]):
+        return [], []
     scope_filter, scope_params = await _repo_scope_filter(client, filters)
     rows = await fetch_state_transitions(
         client,
@@ -254,6 +286,8 @@ async def _build_hotspot_flow(
     end_day: date,
     filters: MetricFilter,
 ) -> Tuple[List[SankeyNode], List[SankeyLink]]:
+    if not await _tables_present(client, ["git_commit_stats", "git_commits", "repos"]):
+        return [], []
     scope_filter, scope_params = await _repo_scope_filter(client, filters)
     rows = await fetch_hotspot_rows(
         client,

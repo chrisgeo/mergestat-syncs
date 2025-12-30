@@ -276,3 +276,29 @@ def test_sankey_endpoint_schema(client, monkeypatch):
     )
     assert response.status_code == 200
     _validate(SankeyResponse, response.json())
+
+
+def test_sankey_endpoint_get_schema(client, monkeypatch):
+    sample = SankeyResponse(
+        mode="investment",
+        nodes=[SankeyNode(name="Initiative A")],
+        links=[SankeyLink(source="Initiative A", target="Project B", value=12.0)],
+        unit="items",
+        label="Investment flow",
+        description=(
+            "Where effort allocates across initiatives, areas, issue types, and work items."
+        ),
+    )
+
+    async def _fake_sankey(**_):
+        return sample
+
+    monkeypatch.setattr("dev_health_ops.api.main.build_sankey_response", _fake_sankey)
+
+    response = client.get(
+        "/api/v1/sankey",
+        params={"mode": "investment", "scope_type": "team", "scope_id": "team-a"},
+    )
+    assert response.status_code == 200
+    _validate(SankeyResponse, response.json())
+    assert response.headers.get("X-DevHealth-Deprecated") == "use POST with filters"

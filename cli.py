@@ -92,7 +92,7 @@ async def _run_with_store(db_url: str, db_type: str, handler) -> None:
 
 def _cmd_sync_teams(ns: argparse.Namespace) -> int:
     from models.teams import Team
-    
+
     provider = (ns.provider or "config").lower()
     teams_data: List[Team] = []
 
@@ -129,13 +129,13 @@ def _cmd_sync_teams(ns: argparse.Namespace) -> int:
 
     elif provider == "jira":
         from providers.jira.client import JiraClient
-        
+
         try:
             client = JiraClient.from_env()
         except ValueError as e:
             logging.error(f"Jira configuration error: {e}")
             return 1
-            
+
         try:
             logging.info("Fetching projects from Jira...")
             projects = client.get_all_projects()
@@ -145,18 +145,18 @@ def _cmd_sync_teams(ns: argparse.Namespace) -> int:
                 name = p.get("name")
                 desc = p.get("description")
                 lead = p.get("lead", {})
-                
+
                 members = []
                 if lead and lead.get("accountId"):
                     members.append(lead.get("accountId"))
-                    
+
                 if key and name:
                     teams_data.append(
                         Team(
                             id=key,
                             name=name,
                             description=str(desc) if desc else f"Jira Project {key}",
-                            members=members
+                            members=members,
                         )
                     )
             logging.info(f"Fetched {len(teams_data)} projects from Jira.")
@@ -168,6 +168,7 @@ def _cmd_sync_teams(ns: argparse.Namespace) -> int:
 
     elif provider == "synthetic":
         from fixtures.generator import SyntheticDataGenerator
+
         generator = SyntheticDataGenerator()
         # Use 8 teams as requested for better visualization
         teams_data = generator.generate_teams(count=8)
@@ -240,7 +241,9 @@ def _cmd_sync_target(ns: argparse.Namespace) -> int:
         raise SystemExit("Provider must be one of: local, github, gitlab, synthetic.")
 
     if target not in {"git", "prs", "blame", "cicd", "deployments", "incidents"}:
-        raise SystemExit("Sync target must be git, prs, blame, cicd, deployments, or incidents.")
+        raise SystemExit(
+            "Sync target must be git, prs, blame, cicd, deployments, or incidents."
+        )
 
     # TODO: Add Jira Ops/Service Desk incident ingestion once project-to-repo or deployment mapping is defined.
     if provider == "local":
@@ -741,7 +744,9 @@ def build_parser() -> argparse.ArgumentParser:
         _add_sync_target_args(target_parser)
         target_parser.set_defaults(func=_cmd_sync_target, sync_target=target)
 
-    teams = sync_sub.add_parser("teams", help="Sync teams from config/teams.yaml, Jira, or Synthetic.")
+    teams = sync_sub.add_parser(
+        "teams", help="Sync teams from config/teams.yaml, Jira, or Synthetic."
+    )
     teams.add_argument("--db", required=True, help="Database connection string.")
     teams.add_argument(
         "--db-type",
@@ -754,7 +759,9 @@ def build_parser() -> argparse.ArgumentParser:
         default="config",
         help="Source of team data (default: config).",
     )
-    teams.add_argument("--path", help="Path to teams.yaml config (used if provider=config).")
+    teams.add_argument(
+        "--path", help="Path to teams.yaml config (used if provider=config)."
+    )
     teams.set_defaults(func=_cmd_sync_teams)
 
     wi = sync_sub.add_parser(
@@ -921,7 +928,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--db-type", help="Explicit DB type (postgres, clickhouse, etc)."
     )
     fix_gen.add_argument("--repo-name", default="acme/demo-app", help="Repo name.")
-    fix_gen.add_argument("--repo-count", type=int, default=1, help="Number of repos to generate.")
+    fix_gen.add_argument(
+        "--repo-count", type=int, default=1, help="Number of repos to generate."
+    )
     fix_gen.add_argument("--days", type=int, default=30, help="Number of days of data.")
     fix_gen.add_argument(
         "--commits-per-day", type=int, default=5, help="Avg commits per day."
@@ -959,13 +968,15 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
     async def _handler(store):
         repo_count = max(1, ns.repo_count)
         base_name = ns.repo_name
-        
+
         for i in range(repo_count):
             r_name = base_name
             if repo_count > 1:
                 r_name = f"{base_name}-{i+1}"
-                
-            logging.info(f"Generating fixture data for repo {i+1}/{repo_count}: {r_name}")
+
+            logging.info(
+                f"Generating fixture data for repo {i+1}/{repo_count}: {r_name}"
+            )
             generator = SyntheticDataGenerator(repo_name=r_name)
 
             # 1. Repo
@@ -1010,11 +1021,11 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
             blame_data = generator.generate_blame(commits)
             if blame_data:
                 await store.insert_blame_data(blame_data)
-            
+
             # 7. Work Items (Raw)
             work_items = generator.generate_work_items(days=ns.days)
             transitions = generator.generate_work_item_transitions(work_items)
-            
+
             if hasattr(store, "insert_work_items"):
                 await store.insert_work_items(work_items)
             if hasattr(store, "insert_work_item_transitions"):
@@ -1028,7 +1039,7 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
             # 8. Complexity Metrics (Always generate snapshots if sink available)
             # We need a sink for complexity snapshots. If metrics are disabled, we might not have one initialized.
             # But the user requested "complexity" be added.
-            
+
             # If with_metrics is on, we do full daily metrics.
             # If off, we only do raw data. Complexity snapshots are border-line.
             # Let's include them if with_metrics is True OR if we initialize a temporary sink just for them.
@@ -1048,11 +1059,12 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
                     sink = ClickHouseMetricsSink(ns.db)
                 elif db_type == "sqlite":
                     from metrics.job_daily import _normalize_sqlite_url
+
                     sink = SQLiteMetricsSink(_normalize_sqlite_url(ns.db))
 
                 if sink:
                     sink.ensure_tables()
-                    
+
                     # Generate and write complexity snapshots
                     if hasattr(sink, "write_file_complexity_snapshots"):
                         comp_data = generator.generate_complexity_metrics(days=ns.days)
@@ -1060,7 +1072,9 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
                             sink.write_file_complexity_snapshots(comp_data["snapshots"])
                         if comp_data["dailies"]:
                             sink.write_repo_complexity_daily(comp_data["dailies"])
-                        logging.info(f"- Complexity snapshots: {len(comp_data['snapshots'])}")
+                        logging.info(
+                            f"- Complexity snapshots: {len(comp_data['snapshots'])}"
+                        )
 
                     from metrics.compute import compute_daily_metrics
                     from metrics.compute_cicd import compute_cicd_metrics_daily
@@ -1072,7 +1086,9 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
                     from metrics.compute_work_item_state_durations import (
                         compute_work_item_state_durations_daily,
                     )
-                    from metrics.compute_work_items import compute_work_item_metrics_daily
+                    from metrics.compute_work_items import (
+                        compute_work_item_metrics_daily,
+                    )
                     from metrics.compute_ic import (
                         compute_ic_metrics_daily,
                         compute_ic_landscape_rolling,
@@ -1091,84 +1107,98 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
                         commit = commit_by_hash.get(stat.commit_hash)
                         if not commit:
                             continue
-                        commit_stat_rows.append({
-                            "repo_id": stat.repo_id,
-                            "commit_hash": stat.commit_hash,
-                            "author_email": commit.author_email,
-                            "author_name": commit.author_name,
-                            "committer_when": commit.committer_when,
-                            "file_path": stat.file_path,
-                            "additions": stat.additions,
-                            "deletions": stat.deletions,
-                        })
+                        commit_stat_rows.append(
+                            {
+                                "repo_id": stat.repo_id,
+                                "commit_hash": stat.commit_hash,
+                                "author_email": commit.author_email,
+                                "author_name": commit.author_name,
+                                "committer_when": commit.committer_when,
+                                "file_path": stat.file_path,
+                                "additions": stat.additions,
+                                "deletions": stat.deletions,
+                            }
+                        )
 
                     pull_request_rows = []
                     for pr in prs:
-                        pull_request_rows.append({
-                            "repo_id": pr.repo_id,
-                            "number": pr.number,
-                            "author_email": pr.author_email,
-                            "author_name": pr.author_name,
-                            "created_at": pr.created_at,
-                            "merged_at": pr.merged_at,
-                            "first_review_at": pr.first_review_at,
-                            "first_comment_at": pr.first_comment_at,
-                            "reviews_count": pr.reviews_count,
-                            "comments_count": pr.comments_count,
-                            "changes_requested_count": pr.changes_requested_count,
-                            "additions": pr.additions,
-                            "deletions": pr.deletions,
-                            "changed_files": pr.changed_files,
-                        })
+                        pull_request_rows.append(
+                            {
+                                "repo_id": pr.repo_id,
+                                "number": pr.number,
+                                "author_email": pr.author_email,
+                                "author_name": pr.author_name,
+                                "created_at": pr.created_at,
+                                "merged_at": pr.merged_at,
+                                "first_review_at": pr.first_review_at,
+                                "first_comment_at": pr.first_comment_at,
+                                "reviews_count": pr.reviews_count,
+                                "comments_count": pr.comments_count,
+                                "changes_requested_count": pr.changes_requested_count,
+                                "additions": pr.additions,
+                                "deletions": pr.deletions,
+                                "changed_files": pr.changed_files,
+                            }
+                        )
 
                     review_rows = []
                     for review in all_reviews:
-                        review_rows.append({
-                            "repo_id": review.repo_id,
-                            "number": review.number,
-                            "reviewer": review.reviewer,
-                            "submitted_at": review.submitted_at,
-                            "state": review.state,
-                        })
+                        review_rows.append(
+                            {
+                                "repo_id": review.repo_id,
+                                "number": review.number,
+                                "reviewer": review.reviewer,
+                                "submitted_at": review.submitted_at,
+                                "state": review.state,
+                            }
+                        )
 
                     pipeline_rows = []
                     for run in pipeline_runs:
-                        pipeline_rows.append({
-                            "repo_id": run.repo_id,
-                            "run_id": run.run_id,
-                            "status": run.status,
-                            "queued_at": run.queued_at,
-                            "started_at": run.started_at,
-                            "finished_at": run.finished_at,
-                        })
+                        pipeline_rows.append(
+                            {
+                                "repo_id": run.repo_id,
+                                "run_id": run.run_id,
+                                "status": run.status,
+                                "queued_at": run.queued_at,
+                                "started_at": run.started_at,
+                                "finished_at": run.finished_at,
+                            }
+                        )
 
                     deployment_rows = []
                     for deployment in deployments:
-                        deployment_rows.append({
-                            "repo_id": deployment.repo_id,
-                            "deployment_id": deployment.deployment_id,
-                            "status": deployment.status,
-                            "environment": deployment.environment,
-                            "started_at": deployment.started_at,
-                            "finished_at": deployment.finished_at,
-                            "deployed_at": deployment.deployed_at,
-                            "merged_at": deployment.merged_at,
-                            "pull_request_number": deployment.pull_request_number,
-                        })
+                        deployment_rows.append(
+                            {
+                                "repo_id": deployment.repo_id,
+                                "deployment_id": deployment.deployment_id,
+                                "status": deployment.status,
+                                "environment": deployment.environment,
+                                "started_at": deployment.started_at,
+                                "finished_at": deployment.finished_at,
+                                "deployed_at": deployment.deployed_at,
+                                "merged_at": deployment.merged_at,
+                                "pull_request_number": deployment.pull_request_number,
+                            }
+                        )
 
                     incident_rows = []
                     for incident in incidents:
-                        incident_rows.append({
-                            "repo_id": incident.repo_id,
-                            "incident_id": incident.incident_id,
-                            "status": incident.status,
-                            "started_at": incident.started_at,
-                            "resolved_at": incident.resolved_at,
-                        })
+                        incident_rows.append(
+                            {
+                                "repo_id": incident.repo_id,
+                                "incident_id": incident.incident_id,
+                                "status": incident.status,
+                                "started_at": incident.started_at,
+                                "resolved_at": incident.resolved_at,
+                            }
+                        )
 
                     # Provide stable team IDs for dashboards without requiring config.
                     team_assignment = generator.get_team_assignment(count=8)
-                    team_resolver = TeamResolver(member_to_team=team_assignment["member_map"])
+                    team_resolver = TeamResolver(
+                        member_to_team=team_assignment["member_map"]
+                    )
 
                     computed_at = datetime.now(timezone.utc)
 
@@ -1184,7 +1214,11 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
                         mttr_by_repo = {}
                         bug_times = {}
                         for item in work_items:
-                            if item.type == "bug" and item.completed_at and item.started_at:
+                            if (
+                                item.type == "bug"
+                                and item.completed_at
+                                and item.started_at
+                            ):
                                 start_item = item.started_at
                                 end_item = item.completed_at
                                 if start_item is None or end_item is None:
@@ -1245,17 +1279,21 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
                             computed_at=computed_at,
                         )
 
-                        wi_rows, wi_user_rows, cycle_rows = compute_work_item_metrics_daily(
-                            day=day,
-                            work_items=work_items,
-                            transitions=transitions,
-                            computed_at=computed_at,
-                            team_resolver=team_resolver,
+                        wi_rows, wi_user_rows, cycle_rows = (
+                            compute_work_item_metrics_daily(
+                                day=day,
+                                work_items=work_items,
+                                transitions=transitions,
+                                computed_at=computed_at,
+                                team_resolver=team_resolver,
+                            )
                         )
 
                         # Enrich User Metrics with IC fields
                         # Convert TeamResolver map to simple identity->team_id map
-                        team_map = {k: v[0] for k, v in team_assignment["member_map"].items()}
+                        team_map = {
+                            k: v[0] for k, v in team_assignment["member_map"].items()
+                        }
                         ic_metrics = compute_ic_metrics_daily(
                             git_metrics=repo_result.user_metrics,
                             wi_metrics=wi_user_rows,
@@ -1348,12 +1386,11 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
                                 sink.write_ic_landscape_rolling(landscape_recs)
                         except Exception as e:
                             logging.warning(
-                                "Failed to compute/write fixture landscape metrics: %s", e
+                                "Failed to compute/write fixture landscape metrics: %s",
+                                e,
                             )
 
-                    logging.info(
-                        "Generated fixtures metrics for %s", r_name
-                    )
+                    logging.info("Generated fixtures metrics for %s", r_name)
 
     asyncio.run(_run_with_store(ns.db, db_type, _handler))
     return 0

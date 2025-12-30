@@ -609,6 +609,36 @@ async def investment_post(payload: HomeRequest) -> InvestmentResponse:
         raise HTTPException(status_code=503, detail="Data unavailable") from exc
 
 
+@app.get("/api/v1/sankey", response_model=SankeyResponse)
+async def sankey_get(
+    response: Response,
+    mode: str = "investment",
+    scope_type: str = "org",
+    scope_id: str = "",
+    range_days: int = 30,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    window_start: date | None = None,
+    window_end: date | None = None,
+) -> SankeyResponse:
+    try:
+        filters = _filters_from_query(
+            scope_type, scope_id, range_days, range_days, start_date, end_date
+        )
+        result = await build_sankey_response(
+            db_url=_db_url(),
+            mode=mode,
+            filters=filters,
+            window_start=window_start,
+            window_end=window_end,
+        )
+        if response is not None:
+            response.headers["X-DevHealth-Deprecated"] = "use POST with filters"
+        return result
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Data unavailable") from exc
+
+
 @app.post("/api/v1/sankey", response_model=SankeyResponse)
 async def sankey_post(payload: SankeyRequest) -> SankeyResponse:
     try:
