@@ -1,0 +1,14 @@
+ALTER TABLE repos RENAME COLUMN IF EXISTS _mergestat_synced_at TO last_synced;
+ALTER TABLE git_refs RENAME COLUMN IF EXISTS _mergestat_synced_at TO last_synced;
+ALTER TABLE git_files RENAME COLUMN IF EXISTS _mergestat_synced_at TO last_synced;
+ALTER TABLE git_commits RENAME COLUMN IF EXISTS _mergestat_synced_at TO last_synced;
+ALTER TABLE git_commit_stats RENAME COLUMN IF EXISTS _mergestat_synced_at TO last_synced;
+ALTER TABLE git_blame RENAME COLUMN IF EXISTS _mergestat_synced_at TO last_synced;
+ALTER TABLE git_pull_requests RENAME COLUMN IF EXISTS _mergestat_synced_at TO last_synced;
+ALTER TABLE git_pull_request_reviews RENAME COLUMN IF EXISTS _mergestat_synced_at TO last_synced;
+ALTER TABLE ci_pipeline_runs RENAME COLUMN IF EXISTS _mergestat_synced_at TO last_synced;
+ALTER TABLE deployments RENAME COLUMN IF EXISTS _mergestat_synced_at TO last_synced;
+ALTER TABLE incidents RENAME COLUMN IF EXISTS _mergestat_synced_at TO last_synced;
+ALTER TABLE teams RENAME COLUMN IF EXISTS _mergestat_synced_at TO last_synced;
+ALTER TABLE work_items RENAME COLUMN IF EXISTS _mergestat_synced_at TO last_synced;
+ALTER TABLE work_item_transitions RENAME COLUMN IF EXISTS _mergestat_synced_at TO last_synced;

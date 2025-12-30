@@ -861,7 +861,7 @@ async def test_clickhouse_store_insert_git_file_data_calls_insert():
         "path",
         "executable",
         "contents",
-        "_mergestat_synced_at",
+        "last_synced",
     ]
 
 
