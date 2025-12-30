@@ -212,3 +212,82 @@ def test_aggregated_flame_filter_propagation():
     )
     assert response.meta.filters["repo_id"] == "abc-123"
     assert response.meta.filters["team_id"] == "team-alpha"
+
+
+def test_aggregated_flame_throughput_tree_structure():
+    """Verify throughput tree builds correctly with work types and teams/repos."""
+    from dev_health_ops.api.services.aggregated_flame import _build_throughput_tree
+
+    rows = [
+        {"work_type": "Feature", "team_id": "team1", "repo_id": None, "throughput": 10},
+        {"work_type": "Bug", "team_id": "team1", "repo_id": None, "throughput": 5},
+        {"work_type": "Feature", "team_id": "team2", "repo_id": None, "throughput": 8},
+    ]
+
+    root = _build_throughput_tree(rows)
+
+    assert root.name == "Work Delivered"
+    assert root.value == 23  # 10 + 5 + 8
+    assert len(root.children) == 2  # Feature, Bug
+
+    feature_node = next(n for n in root.children if n.name == "Feature")
+    assert feature_node.value == 18
+    assert len(feature_node.children) == 2  # team1, team2
+
+
+def test_aggregated_flame_milestone_approximation():
+    """Verify cycle_breakdown fallback to milestones when status durations are missing."""
+    import pytest
+    from unittest.mock import patch, MagicMock
+    from datetime import date
+    from dev_health_ops.api.services.aggregated_flame import (
+        build_aggregated_flame_response,
+    )
+
+    # Mock DB functions
+    async def mock_fetch_status_durations(*args, **kwargs):
+        return []  # No status data
+
+    async def mock_fetch_cycle_milestones(*args, **kwargs):
+        return [
+            {"milestone": "opened_to_started", "avg_hours": 24, "total_items": 10},
+            {"milestone": "started_to_merged", "avg_hours": 48, "total_items": 10},
+        ]
+
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def mock_clickhouse_client(db_url):
+        yield MagicMock()
+
+    with (
+        patch(
+            "dev_health_ops.api.services.aggregated_flame.fetch_cycle_breakdown",
+            side_effect=mock_fetch_status_durations,
+        ),
+        patch(
+            "dev_health_ops.api.services.aggregated_flame.fetch_cycle_milestones",
+            side_effect=mock_fetch_cycle_milestones,
+        ),
+        patch(
+            "dev_health_ops.api.services.aggregated_flame.clickhouse_client",
+            side_effect=mock_clickhouse_client,
+        ),
+    ):
+        # Test the approximation fallback
+        import anyio
+
+        async def run_test():
+            return await build_aggregated_flame_response(
+                db_url="mock://",
+                mode="cycle_breakdown",
+                start_day=date(2024, 1, 1),
+                end_day=date(2024, 1, 31),
+            )
+
+        response = anyio.run(run_test)
+
+        assert response.meta.approximation.used is True
+        assert response.meta.approximation.method == "milestones"
+        assert response.root.value > 0
+        assert any("approximation" in n.lower() for n in response.meta.notes)

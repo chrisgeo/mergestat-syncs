@@ -115,3 +115,139 @@ async def fetch_repo_names(
     """
     rows = await query_dicts(client, query, params)
     return {row["repo_id"]: row["repo_name"] for row in rows}
+
+
+async def fetch_throughput(
+    client: Any,
+    *,
+    start_day: date,
+    end_day: date,
+    team_id: Optional[str] = None,
+    repo_id: Optional[str] = None,
+    provider: Optional[str] = None,
+    work_scope_id: Optional[str] = None,
+    limit: int = 500,
+) -> List[Dict[str, Any]]:
+    """
+    Fetch throughput data for work items completed in window.
+
+    Returns rows with (type, repo_name, items_completed).
+    If work item type not available, falls back to 'unclassified'.
+    """
+    params: Dict[str, Any] = {
+        "start_day": start_day,
+        "end_day": end_day,
+        "limit": limit,
+    }
+
+    filters = ["day >= %(start_day)s", "day < %(end_day)s"]
+    if team_id:
+        filters.append("team_id = %(team_id)s")
+        params["team_id"] = team_id
+    if provider:
+        filters.append("provider = %(provider)s")
+        params["provider"] = provider
+    if work_scope_id:
+        filters.append("work_scope_id = %(work_scope_id)s")
+        params["work_scope_id"] = work_scope_id
+
+    where_clause = " AND ".join(filters)
+
+    # Query work_item_metrics_daily for aggregate counts by type and team
+    query = f"""
+        SELECT
+            coalesce(nullIf(team_name, ''), 'Unassigned') AS team_name,
+            sum(items_completed) AS items_completed,
+            sum(items_started) AS items_started
+        FROM work_item_metrics_daily
+        WHERE {where_clause}
+        GROUP BY team_name
+        HAVING items_completed > 0
+        ORDER BY items_completed DESC
+        LIMIT %(limit)s
+    """
+    return await query_dicts(client, query, params)
+
+
+async def fetch_throughput_by_type(
+    client: Any,
+    *,
+    start_day: date,
+    end_day: date,
+    team_id: Optional[str] = None,
+    repo_id: Optional[str] = None,
+    limit: int = 500,
+) -> List[Dict[str, Any]]:
+    """
+    Fetch throughput by work item type from work_item_cycle_times.
+    """
+    params: Dict[str, Any] = {
+        "start_day": start_day,
+        "end_day": end_day,
+        "limit": limit,
+    }
+
+    filters = ["day >= %(start_day)s", "day < %(end_day)s", "completed_at IS NOT NULL"]
+    if team_id:
+        filters.append("team_id = %(team_id)s")
+        params["team_id"] = team_id
+
+    where_clause = " AND ".join(filters)
+
+    query = f"""
+        SELECT
+            coalesce(nullIf(type, ''), 'unclassified') AS work_type,
+            coalesce(nullIf(team_name, ''), 'Unassigned') AS team_name,
+            count(*) AS items_completed
+        FROM work_item_cycle_times
+        WHERE {where_clause}
+        GROUP BY work_type, team_name
+        HAVING items_completed > 0
+        ORDER BY items_completed DESC
+        LIMIT %(limit)s
+    """
+    return await query_dicts(client, query, params)
+
+
+async def fetch_cycle_milestones(
+    client: Any,
+    *,
+    start_day: date,
+    end_day: date,
+    team_id: Optional[str] = None,
+    provider: Optional[str] = None,
+    work_scope_id: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Fetch aggregated cycle time by milestone as a fallback.
+    Returns (milestone, avg_hours, total_items).
+    """
+    params: Dict[str, Any] = {
+        "start_day": start_day,
+        "end_day": end_day,
+    }
+
+    filters = ["day >= %(start_day)s", "day < %(end_day)s"]
+    if team_id:
+        filters.append("team_id = %(team_id)s")
+        params["team_id"] = team_id
+    if provider:
+        filters.append("provider = %(provider)s")
+        params["provider"] = provider
+    if work_scope_id:
+        filters.append("work_scope_id = %(work_scope_id)s")
+        params["work_scope_id"] = work_scope_id
+
+    where_clause = " AND ".join(filters)
+
+    query = f"""
+        SELECT
+            milestone,
+            avg(duration_hours) AS avg_hours,
+            count(*) AS total_items
+        FROM work_item_cycle_milestones_daily
+        WHERE {where_clause}
+        GROUP BY milestone
+        ORDER BY avg_hours DESC
+    """
+    return await query_dicts(client, query, params)

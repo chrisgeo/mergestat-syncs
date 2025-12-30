@@ -9,12 +9,16 @@ from ..models.schemas import (
     AggregatedFlameMeta,
     AggregatedFlameNode,
     AggregatedFlameResponse,
+    ApproximationInfo,
 )
 from ..queries.client import clickhouse_client
 from ..queries.aggregated_flame import (
     fetch_code_hotspots,
     fetch_cycle_breakdown,
+    fetch_cycle_milestones,
     fetch_repo_names,
+    fetch_throughput,
+    fetch_throughput_by_type,
 )
 
 
@@ -227,10 +231,64 @@ def _build_code_hotspots_tree(
     )
 
 
+def _build_throughput_tree(
+    rows: List[Dict[str, Any]],
+) -> AggregatedFlameNode:
+    """
+    Build hierarchical tree for throughput.
+
+    Structure:
+    - root (total items)
+      - By Work Type (feature, bug, chore, etc.)
+        - By Team/Repo
+    """
+    # Group by work type
+    type_groups: Dict[str, List[Dict[str, Any]]] = {}
+    for row in rows:
+        w_type = row.get("work_type") or "unclassified"
+        if w_type not in type_groups:
+            type_groups[w_type] = []
+        type_groups[w_type].append(row)
+
+    type_nodes: List[AggregatedFlameNode] = []
+    for w_type, type_rows in type_groups.items():
+        children = [
+            AggregatedFlameNode(
+                name=_sanitize_label(
+                    row.get("team_name") or row.get("repo_name") or row.get("team_id")
+                ),
+                value=float(row.get("items_completed") or row.get("throughput") or 0),
+                children=[],
+            )
+            for row in sorted(
+                type_rows,
+                key=lambda r: -(r.get("items_completed") or r.get("throughput") or 0),
+            )
+        ]
+        type_value = sum(child.value for child in children)
+        type_nodes.append(
+            AggregatedFlameNode(
+                name=w_type.capitalize(),
+                value=type_value,
+                children=children,
+            )
+        )
+
+    # Sort types by value descending
+    type_nodes.sort(key=lambda n: -n.value)
+    root_value = sum(node.value for node in type_nodes)
+
+    return AggregatedFlameNode(
+        name="Work Delivered",
+        value=root_value,
+        children=type_nodes,
+    )
+
+
 async def build_aggregated_flame_response(
     *,
     db_url: str,
-    mode: Literal["cycle_breakdown", "code_hotspots"],
+    mode: Literal["cycle_breakdown", "code_hotspots", "throughput"],
     start_day: date,
     end_day: date,
     team_id: Optional[str] = None,
@@ -242,20 +300,10 @@ async def build_aggregated_flame_response(
 ) -> AggregatedFlameResponse:
     """
     Build an aggregated flame graph response for the given mode.
-
-    Args:
-        mode: "cycle_breakdown" or "code_hotspots"
-        start_day: Start of time window (inclusive)
-        end_day: End of time window (exclusive)
-        team_id: Filter by team ID
-        repo_id: Filter by repo ID (for code_hotspots)
-        provider: Filter by provider (for cycle_breakdown)
-        work_scope_id: Filter by work scope
-        limit: Max number of items to fetch
-        min_value: Minimum value threshold
     """
     notes: List[str] = []
     filters_used: Dict[str, Any] = {}
+    approximation = ApproximationInfo()
 
     async with clickhouse_client(db_url) as client:
         if mode == "cycle_breakdown":
@@ -269,8 +317,33 @@ async def build_aggregated_flame_response(
             )
 
             if not rows:
-                notes.append("No state duration data available for this window/scope.")
-                root = AggregatedFlameNode(name="Cycle Time", value=0, children=[])
+                # Approximation fallback: use milestones if state transition data is missing
+                rows = await fetch_cycle_milestones(
+                    client,
+                    start_day=start_day,
+                    end_day=end_day,
+                    team_id=team_id,
+                    provider=provider,
+                    work_scope_id=work_scope_id,
+                )
+                if rows:
+                    notes.append(
+                        "Detailed state transition data unavailable. Using milestone-based approximation."
+                    )
+                    approximation.used = True
+                    approximation.method = "milestones"
+                    # Map 'milestone' to 'status' for _build_cycle_breakdown_tree
+                    rows = [
+                        {
+                            "status": r["milestone"],
+                            "total_hours": float(r["avg_hours"] * r["total_items"]),
+                            "total_items": r["total_items"],
+                        }
+                        for r in rows
+                    ]
+                    root = _build_cycle_breakdown_tree(rows)
+                else:
+                    root = AggregatedFlameNode(name="Cycle Time", value=0, children=[])
             else:
                 root = _build_cycle_breakdown_tree(rows)
 
@@ -290,10 +363,11 @@ async def build_aggregated_flame_response(
                     window_end=end_day,
                     filters=filters_used,
                     notes=notes,
+                    approximation=approximation,
                 ),
             )
 
-        else:  # code_hotspots
+        elif mode == "code_hotspots":
             rows = await fetch_code_hotspots(
                 client,
                 start_day=start_day,
@@ -308,7 +382,6 @@ async def build_aggregated_flame_response(
                 root = AggregatedFlameNode(name="Code Churn", value=0, children=[])
                 repo_names = {}
             else:
-                # Fetch repo names for display
                 repo_ids: List[str] = [
                     str(row.get("repo_id")) for row in rows if row.get("repo_id")
                 ]
@@ -327,5 +400,56 @@ async def build_aggregated_flame_response(
                     window_end=end_day,
                     filters=filters_used,
                     notes=notes,
+                    approximation=approximation,
+                ),
+            )
+
+        else:  # throughput
+            rows = await fetch_throughput_by_type(
+                client,
+                start_day=start_day,
+                end_day=end_day,
+                team_id=team_id,
+                repo_id=repo_id,
+                limit=limit,
+            )
+
+            if not rows:
+                # Fallback to simple throughput if typed data missing
+                rows = await fetch_throughput(
+                    client,
+                    start_day=start_day,
+                    end_day=end_day,
+                    team_id=team_id,
+                    repo_id=repo_id,
+                    limit=limit,
+                )
+                notes.append(
+                    "Work type classification unavailable. Using team-based grouping."
+                )
+                approximation.used = True
+                approximation.method = "inferred"
+
+            if not rows:
+                notes.append("No throughput data available for this window/scope.")
+                root = AggregatedFlameNode(name="Work Delivered", value=0, children=[])
+            else:
+                root = _build_throughput_tree(rows)
+
+            if team_id:
+                filters_used["team_id"] = team_id
+            if repo_id:
+                filters_used["repo_id"] = repo_id
+
+            return AggregatedFlameResponse(
+                mode="throughput",
+                unit="items",
+                root=root,
+                meta=AggregatedFlameMeta(
+                    window_start=start_day,
+                    window_end=end_day,
+                    filters=filters_used,
+                    notes=notes,
+                    approximation=approximation,
                 ),
             )
