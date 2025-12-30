@@ -21,6 +21,7 @@ from .models.filters import (
     TimeFilter,
 )
 from .models.schemas import (
+    AggregatedFlameResponse,
     DrilldownResponse,
     ExplainResponse,
     FlameResponse,
@@ -54,6 +55,7 @@ from .services.people import (
 )
 from .services.heatmap import build_heatmap_response
 from .services.flame import build_flame_response
+from .services.aggregated_flame import build_aggregated_flame_response
 from .services.quadrant import build_quadrant_response
 from .services.sankey import build_sankey_response
 
@@ -75,6 +77,7 @@ def _sanitize_for_log(value: str) -> str:
     # Remove CR/LF explicitly, then strip remaining control chars
     text = text.replace("\r", "").replace("\n", "")
     return "".join(ch for ch in text if ch >= " " and ch != "\x7f")
+
 
 logger = logging.getLogger(__name__)
 
@@ -150,7 +153,7 @@ app.add_middleware(
     allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"]
+    allow_headers=["*"],
 )
 
 
@@ -302,6 +305,75 @@ async def flame(
             db_url=_db_url(),
             entity_type=entity_type,
             entity_id=entity_id,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Data unavailable") from exc
+
+
+@app.get("/api/v1/flame/aggregated", response_model=AggregatedFlameResponse)
+async def flame_aggregated(
+    request: Request,
+    mode: str,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    range_days: int = 30,
+    team_id: str = "",
+    repo_id: str = "",
+    provider: str = "",
+    work_scope_id: str = "",
+    limit: int = 500,
+    min_value: int = 1,
+) -> AggregatedFlameResponse:
+    """
+    Get an aggregated flame graph for cycle breakdown or code hotspots.
+
+    Args:
+        mode: "cycle_breakdown" or "code_hotspots"
+        start_date: Start of time window (defaults to range_days ago)
+        end_date: End of time window (defaults to today)
+        range_days: Number of days if dates not specified
+        team_id: Filter by team
+        repo_id: Filter by repo (for code_hotspots)
+        provider: Filter by provider (for cycle_breakdown)
+        work_scope_id: Filter by work scope
+        limit: Max number of items (default 500)
+        min_value: Minimum value threshold (default 1)
+    """
+    _reject_comparative_params(request)
+
+    if mode not in ("cycle_breakdown", "code_hotspots"):
+        raise HTTPException(
+            status_code=400,
+            detail="mode must be 'cycle_breakdown' or 'code_hotspots'",
+        )
+
+    # Calculate date window
+    from datetime import timedelta
+
+    if end_date is None:
+        end_day = date.today()
+    else:
+        end_day = end_date
+
+    if start_date is None:
+        start_day = end_day - timedelta(days=range_days)
+    else:
+        start_day = start_date
+
+    try:
+        return await build_aggregated_flame_response(
+            db_url=_db_url(),
+            mode=mode,  # type: ignore
+            start_day=start_day,
+            end_day=end_day,
+            team_id=team_id or None,
+            repo_id=repo_id or None,
+            provider=provider or None,
+            work_scope_id=work_scope_id or None,
+            limit=min(max(limit, 1), 1000),
+            min_value=max(min_value, 0),
         )
     except HTTPException:
         raise
@@ -500,7 +572,11 @@ async def people_metric(
             compare_days=compare_days,
         )
     except ValueError as exc:
-        detail = "Metric not supported" if str(exc) == "metric not supported" else "Person not found"
+        detail = (
+            "Metric not supported"
+            if str(exc) == "metric not supported"
+            else "Person not found"
+        )
         status = 400 if detail == "Metric not supported" else 404
         raise HTTPException(status_code=status, detail=detail) from exc
     except Exception as exc:
