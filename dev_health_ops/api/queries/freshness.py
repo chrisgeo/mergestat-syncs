@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from datetime import date
-from typing import Any, Dict, Optional
+from datetime import date, datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional
 
 from .client import query_dicts
+from .sql_loader import load_sql
 
 
 async def fetch_last_ingested_at(client: Any) -> Optional[str]:
@@ -77,3 +78,19 @@ async def fetch_coverage(
         "prs_linked_to_issues_pct": prs_linked_pct,
         "issues_with_cycle_states_pct": issues_cycle_pct,
     }
+
+
+async def fetch_home_sources_present(
+    client: Any,
+    *,
+    start_day: date,
+    end_day: date,
+    lookback_days: int = 90,
+) -> List[Dict[str, Any]]:
+    sql = load_sql("home_sources_present.sql")
+    cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+    return await query_dicts(
+        client,
+        sql,
+        {"start_day": start_day, "end_day": end_day, "cutoff": cutoff},
+    )

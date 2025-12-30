@@ -17,9 +17,16 @@ class Coverage(BaseModel):
     issues_with_cycle_states_pct: float
 
 
+class SourceStatus(BaseModel):
+    key: str
+    label: str
+    last_seen_at: Optional[datetime]
+    status: str
+
+
 class Freshness(BaseModel):
     last_ingested_at: Optional[datetime]
-    sources: Dict[str, str]
+    sources: List[SourceStatus]
     coverage: Coverage
 
 

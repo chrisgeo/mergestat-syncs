@@ -23,6 +23,7 @@ from dev_health_ops.api.models.schemas import (
     PersonSummaryResponse,
     PersonSummarySections,
     SparkPoint,
+    SourceStatus,
     SummarySentence,
     WorkMixItem,
 )
@@ -70,7 +71,32 @@ def test_people_summary_schema(client, monkeypatch):
         ),
         freshness=Freshness(
             last_ingested_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
-            sources={"github": "ok", "gitlab": "ok", "jira": "ok", "ci": "ok"},
+            sources=[
+                SourceStatus(
+                    key="github",
+                    label="GitHub",
+                    last_seen_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+                    status="ok",
+                ),
+                SourceStatus(
+                    key="gitlab",
+                    label="GitLab",
+                    last_seen_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+                    status="ok",
+                ),
+                SourceStatus(
+                    key="jira",
+                    label="Jira",
+                    last_seen_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+                    status="ok",
+                ),
+                SourceStatus(
+                    key="ci",
+                    label="CI",
+                    last_seen_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+                    status="ok",
+                ),
+            ],
             coverage=Coverage(
                 repos_covered_pct=90.0,
                 prs_linked_to_issues_pct=80.0,
@@ -192,7 +218,32 @@ def test_people_responses_do_not_include_forbidden_fields(client, monkeypatch):
         ),
         freshness=Freshness(
             last_ingested_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
-            sources={"github": "ok", "gitlab": "ok", "jira": "ok", "ci": "ok"},
+            sources=[
+                SourceStatus(
+                    key="github",
+                    label="GitHub",
+                    last_seen_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+                    status="ok",
+                ),
+                SourceStatus(
+                    key="gitlab",
+                    label="GitLab",
+                    last_seen_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+                    status="ok",
+                ),
+                SourceStatus(
+                    key="jira",
+                    label="Jira",
+                    last_seen_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+                    status="ok",
+                ),
+                SourceStatus(
+                    key="ci",
+                    label="CI",
+                    last_seen_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+                    status="ok",
+                ),
+            ],
             coverage=Coverage(
                 repos_covered_pct=90.0,
                 prs_linked_to_issues_pct=80.0,
