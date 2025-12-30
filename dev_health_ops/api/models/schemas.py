@@ -149,6 +149,7 @@ class InvestmentSubtype(BaseModel):
     if ConfigDict is not None:
         model_config = ConfigDict(validate_by_name=True)
     else:
+
         class Config:
             allow_population_by_field_name = True
 
@@ -364,3 +365,40 @@ class SankeyResponse(BaseModel):
     unit: Optional[str] = None
     label: Optional[str] = None
     description: Optional[str] = None
+
+
+# Aggregated flame graph models (hierarchical tree format)
+
+
+class AggregatedFlameNode(BaseModel):
+    """A node in a hierarchical flame graph tree."""
+
+    name: str
+    value: float
+    children: List["AggregatedFlameNode"] = []
+
+
+class ApproximationInfo(BaseModel):
+    """Info about data approximation when exact data unavailable."""
+
+    used: bool = False
+    method: Optional[str] = None
+
+
+class AggregatedFlameMeta(BaseModel):
+    """Metadata for an aggregated flame response."""
+
+    window_start: date
+    window_end: date
+    filters: Dict[str, Any] = {}
+    notes: List[str] = []
+    approximation: ApproximationInfo = Field(default_factory=ApproximationInfo)
+
+
+class AggregatedFlameResponse(BaseModel):
+    """Response for aggregated flame graph modes."""
+
+    mode: Literal["cycle_breakdown", "code_hotspots", "throughput"]
+    unit: str
+    root: AggregatedFlameNode
+    meta: AggregatedFlameMeta
