@@ -946,6 +946,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Enable auto-reload for local development.",
     )
+    api.add_argument(
+        "--log-level",
+        default=None,
+        help="Logging level (DEBUG, INFO, WARNING, ERROR).",
+    )
     api.set_defaults(func=_cmd_api)
 
     return parser
@@ -1365,11 +1370,13 @@ def _cmd_api(ns: argparse.Namespace) -> int:
     if ns.db:
         os.environ["CLICKHOUSE_DSN"] = ns.db
 
+    log_level = str(getattr(ns, "log_level", "") or "info").lower()
     uvicorn.run(
         "dev_health_ops.api.main:app",
         host=ns.host,
         port=ns.port,
         reload=ns.reload,
+        log_level=log_level,
     )
     return 0
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import logging
 from datetime import date, datetime
 import os
 
@@ -163,6 +164,7 @@ async def home_post(payload: HomeRequest) -> HomeResponse:
             cache=HOME_CACHE,
         )
     except Exception as exc:
+        logging.exception("Home POST failed")
         raise HTTPException(status_code=503, detail="Data unavailable") from exc
 
 
@@ -189,6 +191,7 @@ async def home(
             response.headers["X-DevHealth-Deprecated"] = "use POST with filters"
         return result
     except Exception as exc:
+        logging.exception("Home GET failed")
         raise HTTPException(status_code=503, detail="Data unavailable") from exc
 
 

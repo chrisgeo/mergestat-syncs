@@ -75,10 +75,10 @@ WITH
       FROM ci_pipeline_runs
       WHERE started_at >= start_ts AND started_at < end_ts
       UNION ALL
-      SELECT coalesce(deployed_at, started_at, finished_at) AS event_at
+      SELECT ifNull(deployed_at, ifNull(started_at, finished_at)) AS event_at
       FROM deployments
-      WHERE coalesce(deployed_at, started_at, finished_at) >= start_ts
-        AND coalesce(deployed_at, started_at, finished_at) < end_ts
+      WHERE ifNull(deployed_at, ifNull(started_at, finished_at)) >= start_ts
+        AND ifNull(deployed_at, ifNull(started_at, finished_at)) < end_ts
       UNION ALL
       SELECT started_at AS event_at
       FROM incidents
@@ -95,12 +95,20 @@ WITH
     SELECT 'ci' AS key, 'CI' AS label
   )
 SELECT
-  sources.key,
-  sources.label,
-  coalesce(
-    greatest(source_sync.last_sync, source_range.last_seen),
-    source_sync.last_sync,
-    source_range.last_seen
+  sources.key AS key,
+  sources.label AS label,
+  if(
+    isNull(source_sync.last_sync),
+    source_range.last_seen,
+    if(
+      isNull(source_range.last_seen),
+      source_sync.last_sync,
+      if(
+        source_sync.last_sync >= source_range.last_seen,
+        source_sync.last_sync,
+        source_range.last_seen
+      )
+    )
   ) AS last_seen_at,
   'ok' AS status
 FROM sources

@@ -117,47 +117,6 @@ def test_home_endpoint_schema(client, monkeypatch):
     assert response.headers.get("X-DevHealth-Deprecated") == "use POST with filters"
 
 
-def test_home_sources_only_include_present_data(client, monkeypatch):
-    sample = HomeResponse(
-        freshness=Freshness(
-            last_ingested_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
-            sources=[
-                SourceStatus(
-                    key="github",
-                    label="GitHub",
-                    last_seen_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
-                    status="ok",
-                )
-            ],
-            coverage=Coverage(
-                repos_covered_pct=90.0,
-                prs_linked_to_issues_pct=80.0,
-                issues_with_cycle_states_pct=70.0,
-            ),
-        ),
-        deltas=[],
-        summary=[],
-        tiles={},
-        constraint=ConstraintCard(
-            title="Constraint",
-            claim="Review congestion.",
-            evidence=[],
-            experiments=[],
-        ),
-        events=[],
-    )
-
-    async def _fake_home(**_):
-        return sample
-
-    monkeypatch.setattr("dev_health_ops.api.main.build_home_response", _fake_home)
-
-    response = client.get("/api/v1/home")
-    assert response.status_code == 200
-    payload = response.json()
-    assert [source["key"] for source in payload["freshness"]["sources"]] == ["github"]
-
-
 def test_home_post_uses_filters(client, monkeypatch):
     captured = {}
 

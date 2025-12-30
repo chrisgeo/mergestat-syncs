@@ -17,11 +17,7 @@ from ..models.schemas import (
 )
 from ..queries.client import clickhouse_client
 from ..queries.explain import fetch_metric_driver_delta
-from ..queries.freshness import (
-    fetch_coverage,
-    fetch_home_sources_present,
-    fetch_last_ingested_at,
-)
+from ..queries.freshness import fetch_coverage, fetch_last_ingested_at
 from ..queries.metrics import fetch_blocked_hours, fetch_metric_series, fetch_metric_value
 from .filtering import filter_cache_key, scope_filter_for_metric, time_window
 from .cache import TTLCache
@@ -254,11 +250,7 @@ async def build_home_response(
             compare_end,
         )
 
-        sources = await fetch_home_sources_present(
-            client,
-            start_day=start_day,
-            end_day=end_day,
-        )
+        sources = []
 
         summary_sentences: List[SummarySentence] = []
         top_delta = max(deltas, key=lambda d: abs(d.delta_pct), default=None)

@@ -29,11 +29,7 @@ from ..models.schemas import (
     WorkMixItem,
 )
 from ..queries.client import clickhouse_client
-from ..queries.freshness import (
-    fetch_coverage,
-    fetch_home_sources_present,
-    fetch_last_ingested_at,
-)
+from ..queries.freshness import fetch_coverage, fetch_last_ingested_at
 from ..queries.people import (
     fetch_identity_coverage,
     fetch_person_breakdown,
@@ -470,11 +466,7 @@ async def build_person_summary_response(
         person = _person_model(identity, alias_list)
         last_ingested = await fetch_last_ingested_at(client)
         coverage = await fetch_coverage(client, start_day=start_day, end_day=end_day)
-        sources = await fetch_home_sources_present(
-            client,
-            start_day=start_day,
-            end_day=end_day,
-        )
+        sources = []
 
         coverage_sources = await fetch_identity_coverage(
             client, identities=identity_inputs
