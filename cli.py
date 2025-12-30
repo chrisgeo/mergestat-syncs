@@ -14,7 +14,7 @@ from processors.github import process_github_repo, process_github_repos_batch
 from processors.gitlab import process_gitlab_project, process_gitlab_projects_batch
 from processors.local import process_local_blame, process_local_repo
 from storage import create_store, detect_db_type
-from utils import _parse_since
+from utils import _parse_since, BATCH_SIZE, MAX_WORKERS
 
 REPO_ROOT = Path(__file__).resolve().parent
 
@@ -976,6 +976,32 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
             logging.info(
                 "Inserted %d synthetic teams.", len(team_assignment["teams"])
             )
+        from storage import SQLAlchemyStore
+
+        allow_parallel_inserts = not isinstance(store, SQLAlchemyStore)
+        insert_semaphore = asyncio.Semaphore(MAX_WORKERS)
+
+        async def _insert_batches(insert_fn, items, batch_size: int = BATCH_SIZE) -> None:
+            if not items:
+                return
+            batches = [
+                items[i : i + batch_size]
+                for i in range(0, len(items), batch_size)
+            ]
+            if (
+                not allow_parallel_inserts
+                or MAX_WORKERS <= 1
+                or len(batches) == 1
+            ):
+                for batch in batches:
+                    await insert_fn(batch)
+                return
+
+            async def _run(batch):
+                async with insert_semaphore:
+                    await insert_fn(batch)
+
+            await asyncio.gather(*(_run(batch) for batch in batches))
 
         for i in range(repo_count):
             r_name = base_name
@@ -993,26 +1019,25 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
 
             # 2. Files
             files = generator.generate_files()
-            await store.insert_git_file_data(files)
+            await _insert_batches(store.insert_git_file_data, files)
 
             # 3. Commits & Stats
             commits = generator.generate_commits(
                 days=ns.days, commits_per_day=ns.commits_per_day
             )
-            await store.insert_git_commit_data(commits)
+            await _insert_batches(store.insert_git_commit_data, commits)
             stats = generator.generate_commit_stats(commits)
-            await store.insert_git_commit_stats(stats)
+            await _insert_batches(store.insert_git_commit_stats, stats)
 
             # 4. PRs & Reviews
             pr_data = generator.generate_prs(count=ns.pr_count)
             prs = [p["pr"] for p in pr_data]
-            await store.insert_git_pull_requests(prs)
+            await _insert_batches(store.insert_git_pull_requests, prs)
 
             all_reviews = []
             for p in pr_data:
                 all_reviews.extend(p["reviews"])
-            if all_reviews:
-                await store.insert_git_pull_request_reviews(all_reviews)
+            await _insert_batches(store.insert_git_pull_request_reviews, all_reviews)
 
             # 5. CI/CD + Deployments + Incidents
             pr_numbers = [pr.number for pr in prs]
@@ -1021,23 +1046,22 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
                 days=ns.days, pr_numbers=pr_numbers
             )
             incidents = generator.generate_incidents(days=ns.days)
-            await store.insert_ci_pipeline_runs(pipeline_runs)
-            await store.insert_deployments(deployments)
-            await store.insert_incidents(incidents)
+            await _insert_batches(store.insert_ci_pipeline_runs, pipeline_runs)
+            await _insert_batches(store.insert_deployments, deployments)
+            await _insert_batches(store.insert_incidents, incidents)
 
             # 6. Blame Data
             blame_data = generator.generate_blame(commits)
-            if blame_data:
-                await store.insert_blame_data(blame_data)
+            await _insert_batches(store.insert_blame_data, blame_data)
 
             # 7. Work Items (Raw)
             work_items = generator.generate_work_items(days=ns.days)
             transitions = generator.generate_work_item_transitions(work_items)
 
             if hasattr(store, "insert_work_items"):
-                await store.insert_work_items(work_items)
+                await _insert_batches(store.insert_work_items, work_items)
             if hasattr(store, "insert_work_item_transitions"):
-                await store.insert_work_item_transitions(transitions)
+                await _insert_batches(store.insert_work_item_transitions, transitions)
 
             logging.info(f"Generated synthetic data for {r_name}")
             logging.info(f"- Commits: {len(commits)}")

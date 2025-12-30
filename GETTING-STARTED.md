@@ -17,3 +17,11 @@ Notes:
 - Synthetic teams are inserted automatically.
 - `--with-metrics` writes the same derived tables as `metrics daily`, plus
   complexity snapshots and hotspot risk metrics for demo dashboards.
+
+## Performance tuning
+
+Fixture generation uses batched inserts with concurrency for large datasets.
+Tune these environment variables when you need faster loads:
+
+- `BATCH_SIZE` (default: 1000) controls insert batch size.
+- `MAX_WORKERS` (default: 4) controls concurrent insert workers (non-SQL backends).
