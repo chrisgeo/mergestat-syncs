@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from datetime import date, datetime
+import logging
 import os
 
 
@@ -58,6 +59,8 @@ from .services.sankey import build_sankey_response
 
 HOME_CACHE = TTLCache(ttl_seconds=60)
 EXPLAIN_CACHE = TTLCache(ttl_seconds=120)
+
+logger = logging.getLogger(__name__)
 
 _FORBIDDEN_QUERY_PARAMS = {
     "compare_to",
@@ -636,6 +639,7 @@ async def sankey_get(
             response.headers["X-DevHealth-Deprecated"] = "use POST with filters"
         return result
     except Exception as exc:
+        logger.exception("Sankey GET failed for mode=%s", mode)
         raise HTTPException(status_code=503, detail="Data unavailable") from exc
 
 
@@ -651,6 +655,7 @@ async def sankey_post(payload: SankeyRequest) -> SankeyResponse:
             window_end=payload.window_end,
         )
     except Exception as exc:
+        logger.exception("Sankey POST failed for mode=%s", payload.mode)
         raise HTTPException(status_code=503, detail="Data unavailable") from exc
 
 

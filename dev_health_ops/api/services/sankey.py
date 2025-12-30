@@ -9,10 +9,11 @@ from ..models.filters import MetricFilter, SankeyContext
 from ..models.schemas import SankeyLink, SankeyNode, SankeyResponse
 from ..queries.client import clickhouse_client, query_dicts
 from ..queries.sankey import (
+    fetch_expense_abandoned,
     fetch_expense_counts,
     fetch_hotspot_rows,
     fetch_investment_flow_items,
-    fetch_state_transitions,
+    fetch_state_status_counts,
 )
 from ..queries.scopes import build_scope_filter_multi
 from .filtering import resolve_repo_filter_ids, time_window
@@ -53,7 +54,6 @@ SANKEY_DEFINITIONS: Dict[str, SankeyDefinition] = {
 }
 
 MAX_INVESTMENT_ITEMS = 60
-MAX_STATE_EDGES = 120
 MAX_HOTSPOT_ROWS = 150
 
 
@@ -86,12 +86,6 @@ def _normalize_label(value: Any, fallback: str) -> str:
         return fallback
     text = str(value).strip()
     return text or fallback
-
-
-def _trim_label(value: str, limit: int = 72) -> str:
-    if len(value) <= limit:
-        return value
-    return value[: limit - 3].rstrip() + "..."
 
 
 def _add_edge(
@@ -129,20 +123,56 @@ def _links_from_edges(edges: Dict[Tuple[str, str], float]) -> List[SankeyLink]:
 async def _tables_present(client: Any, tables: List[str]) -> bool:
     if not tables:
         return True
-    rows = await query_dicts(
-        client,
-        """
-        SELECT name
-        FROM system.tables
-        WHERE database = currentDatabase()
-            AND name IN %(tables)s
-        """,
-        {"tables": tables},
-    )
+    try:
+        rows = await query_dicts(
+            client,
+            """
+            SELECT name
+            FROM system.tables
+            WHERE database = currentDatabase()
+                AND name IN %(tables)s
+            """,
+            {"tables": tables},
+        )
+    except Exception as exc:
+        logger.warning("Sankey table lookup failed: %s", exc)
+        return False
     present = {row.get("name") for row in rows}
     missing = [table for table in tables if table not in present]
     if missing:
         logger.info("Sankey tables missing: %s", ", ".join(missing))
+        return False
+    return True
+
+
+async def _columns_present(
+    client: Any,
+    table: str,
+    columns: List[str],
+) -> bool:
+    if not columns:
+        return True
+    try:
+        rows = await query_dicts(
+            client,
+            """
+            SELECT name
+            FROM system.columns
+            WHERE database = currentDatabase()
+                AND table = %(table)s
+                AND name IN %(columns)s
+            """,
+            {"table": table, "columns": columns},
+        )
+    except Exception as exc:
+        logger.warning("Sankey column lookup failed for %s: %s", table, exc)
+        return False
+    present = {row.get("name") for row in rows}
+    missing = [column for column in columns if column not in present]
+    if missing:
+        logger.info(
+            "Sankey columns missing for %s: %s", table, ", ".join(missing)
+        )
         return False
     return True
 
@@ -158,6 +188,34 @@ async def _repo_scope_filter(
     return build_scope_filter_multi("repo", repo_ids, repo_column=repo_column)
 
 
+def _team_scope_filter(
+    filters: MetricFilter,
+    team_column: str = "team_id",
+) -> Tuple[str, Dict[str, Any]]:
+    if filters.scope.level != "team" or not filters.scope.ids:
+        return "", {}
+    return build_scope_filter_multi(
+        "team", filters.scope.ids, team_column=team_column
+    )
+
+
+def _work_scope_filter(
+    filters: MetricFilter,
+    work_scope_column: str = "work_scope_id",
+) -> Tuple[str, Dict[str, Any]]:
+    scope_ids: List[str] = []
+    if filters.scope.level == "repo":
+        scope_ids.extend(filters.scope.ids)
+    if filters.what.repos:
+        scope_ids.extend(filters.what.repos)
+    scope_ids = [scope_id for scope_id in scope_ids if scope_id]
+    if not scope_ids:
+        return "", {}
+    return f" AND {work_scope_column} IN %(work_scope_ids)s", {
+        "work_scope_ids": scope_ids
+    }
+
+
 async def _build_investment_flow(
     client: Any,
     *,
@@ -166,12 +224,30 @@ async def _build_investment_flow(
     filters: MetricFilter,
 ) -> Tuple[List[SankeyNode], List[SankeyLink]]:
     if not await _tables_present(
-        client, ["investment_classifications_daily", "work_items"]
+        client, ["investment_metrics_daily"]
     ):
         return [], []
-    scope_filter, scope_params = await _repo_scope_filter(
-        client, filters, repo_column="coalesce(inv.repo_id, wi.repo_id)"
+    if not await _columns_present(
+        client,
+        "investment_metrics_daily",
+        [
+            "investment_area",
+            "project_stream",
+            "day",
+            "delivery_units",
+            "team_id",
+            "repo_id",
+        ],
+    ):
+        return [], []
+    team_filter, team_params = _team_scope_filter(
+        filters, team_column="ifNull(nullIf(team_id, ''), 'unassigned')"
     )
+    repo_filter, repo_params = await _repo_scope_filter(
+        client, filters, repo_column="repo_id"
+    )
+    scope_filter = f"{team_filter}{repo_filter}"
+    scope_params = {**team_params, **repo_params}
     rows = await fetch_investment_flow_items(
         client,
         start_day=start_day,
@@ -183,26 +259,16 @@ async def _build_investment_flow(
     nodes: Dict[str, SankeyNode] = {}
     edges: Dict[Tuple[str, str], float] = {}
     for row in rows:
-        value = float(row.get("item_count") or 0.0)
+        value = float(row.get("value") or 0.0)
         if value <= 0:
             continue
-        area = _normalize_label(row.get("investment_area"), "Unassigned")
-        stream = _normalize_label(row.get("project_stream"), "Other")
-        issue_type = _normalize_label(row.get("issue_type"), "Unspecified")
-        item_label = _normalize_label(
-            row.get("title") or row.get("artifact_id"),
-            "Work item",
-        )
-        item_label = _trim_label(item_label)
+        source = _normalize_label(row.get("source"), "Unassigned")
+        target = _normalize_label(row.get("target"), "Other")
 
-        _touch_node(nodes, area, "initiative")
-        _touch_node(nodes, stream, "project")
-        _touch_node(nodes, issue_type, "issue_type")
-        _touch_node(nodes, item_label, "work_item")
+        _touch_node(nodes, source, "initiative")
+        _touch_node(nodes, target, "project")
 
-        _add_edge(edges, area, stream, value)
-        _add_edge(edges, stream, issue_type, value)
-        _add_edge(edges, issue_type, item_label, value)
+        _add_edge(edges, source, target, value)
 
     return list(nodes.values()), _links_from_edges(edges)
 
@@ -214,9 +280,36 @@ async def _build_expense_flow(
     end_day: date,
     filters: MetricFilter,
 ) -> Tuple[List[SankeyNode], List[SankeyLink]]:
-    if not await _tables_present(client, ["work_items"]):
+    if not await _tables_present(client, ["work_item_metrics_daily", "work_item_cycle_times"]):
         return [], []
-    scope_filter, scope_params = await _repo_scope_filter(client, filters)
+    if not await _columns_present(
+        client,
+        "work_item_metrics_daily",
+        [
+            "day",
+            "new_items_count",
+            "new_bugs_count",
+            "items_completed",
+            "bug_completed_ratio",
+            "team_id",
+            "work_scope_id",
+        ],
+    ):
+        return [], []
+    if not await _columns_present(
+        client,
+        "work_item_cycle_times",
+        ["day", "status", "team_id", "work_scope_id"],
+    ):
+        return [], []
+    team_filter, team_params = _team_scope_filter(
+        filters, team_column="ifNull(nullIf(team_id, ''), 'unassigned')"
+    )
+    work_scope_filter, work_scope_params = _work_scope_filter(
+        filters, work_scope_column="work_scope_id"
+    )
+    scope_filter = f"{team_filter}{work_scope_filter}"
+    scope_params = {**team_params, **work_scope_params}
     rows = await fetch_expense_counts(
         client,
         start_day=start_day,
@@ -227,9 +320,23 @@ async def _build_expense_flow(
     if not rows:
         return [], []
     row = rows[0]
-    unplanned = float(row.get("unplanned_items") or 0.0)
-    rework = float(row.get("rework_items") or 0.0)
-    abandoned = float(row.get("abandoned_items") or 0.0)
+    new_bugs = float(row.get("new_bugs") or 0.0)
+    bug_completed = float(row.get("bug_completed_estimate") or 0.0)
+
+    abandoned_rows = await fetch_expense_abandoned(
+        client,
+        start_day=start_day,
+        end_day=end_day,
+        scope_filter=scope_filter,
+        scope_params=scope_params,
+    )
+    canceled_items = 0.0
+    if abandoned_rows:
+        canceled_items = float(abandoned_rows[0].get("canceled_items") or 0.0)
+
+    unplanned = max(0.0, new_bugs)
+    rework = max(0.0, min(unplanned, bug_completed))
+    abandoned = max(0.0, min(rework, canceled_items))
 
     nodes: Dict[str, SankeyNode] = {}
     edges: Dict[Tuple[str, str], float] = {}
@@ -253,28 +360,80 @@ async def _build_state_flow(
     end_day: date,
     filters: MetricFilter,
 ) -> Tuple[List[SankeyNode], List[SankeyLink]]:
-    if not await _tables_present(client, ["work_item_transitions"]):
+    if not await _tables_present(client, ["work_item_state_durations_daily"]):
         return [], []
-    scope_filter, scope_params = await _repo_scope_filter(client, filters)
-    rows = await fetch_state_transitions(
+    if not await _columns_present(
+        client,
+        "work_item_state_durations_daily",
+        ["day", "status", "items_touched", "team_id", "work_scope_id"],
+    ):
+        return [], []
+    team_filter, team_params = _team_scope_filter(
+        filters, team_column="ifNull(nullIf(team_id, ''), 'unassigned')"
+    )
+    work_scope_filter, work_scope_params = _work_scope_filter(
+        filters, work_scope_column="work_scope_id"
+    )
+    scope_filter = f"{team_filter}{work_scope_filter}"
+    scope_params = {**team_params, **work_scope_params}
+    rows = await fetch_state_status_counts(
         client,
         start_day=start_day,
         end_day=end_day,
         scope_filter=scope_filter,
         scope_params=scope_params,
-        limit=MAX_STATE_EDGES,
     )
     nodes: Dict[str, SankeyNode] = {}
     edges: Dict[Tuple[str, str], float] = {}
+
+    status_counts: Dict[str, float] = {}
     for row in rows:
-        value = float(row.get("value") or 0.0)
+        value = float(row.get("items_touched") or 0.0)
         if value <= 0:
             continue
-        source = _normalize_label(row.get("source"), "Unknown")
-        target = _normalize_label(row.get("target"), "Unknown")
-        _touch_node(nodes, source, "state")
-        _touch_node(nodes, target, "state")
-        _add_edge(edges, source, target, value)
+        status_raw = _normalize_label(row.get("status"), "unknown").lower()
+        status_counts[status_raw] = status_counts.get(status_raw, 0.0) + value
+
+    status_labels = {
+        "backlog": "Backlog",
+        "todo": "Todo",
+        "in_progress": "In Progress",
+        "in_review": "In Review",
+        "blocked": "Blocked",
+        "done": "Done",
+        "canceled": "Canceled",
+        "unknown": "Unknown",
+    }
+
+    def _label(status: str) -> str:
+        return status_labels.get(status, status.replace("_", " ").title())
+
+    backlog = status_counts.get("backlog", 0.0)
+    todo = status_counts.get("todo", 0.0)
+    in_progress = status_counts.get("in_progress", 0.0)
+    in_review = status_counts.get("in_review", 0.0)
+    done = status_counts.get("done", 0.0)
+    blocked = status_counts.get("blocked", 0.0)
+    canceled = status_counts.get("canceled", 0.0)
+
+    flow_backlog = min(backlog, todo)
+    flow_todo = min(todo, in_progress)
+    blocked_flow = min(in_progress, blocked)
+    remaining = max(0.0, in_progress - blocked_flow)
+    review_flow = min(remaining, in_review)
+    remaining = max(0.0, remaining - review_flow)
+    canceled_flow = min(remaining, canceled)
+    done_flow = min(review_flow, done)
+
+    for status in status_counts:
+        _touch_node(nodes, _label(status), "state")
+
+    _add_edge(edges, _label("backlog"), _label("todo"), flow_backlog)
+    _add_edge(edges, _label("todo"), _label("in_progress"), flow_todo)
+    _add_edge(edges, _label("in_progress"), _label("blocked"), blocked_flow)
+    _add_edge(edges, _label("in_progress"), _label("in_review"), review_flow)
+    _add_edge(edges, _label("in_progress"), _label("canceled"), canceled_flow)
+    _add_edge(edges, _label("in_review"), _label("done"), done_flow)
 
     return list(nodes.values()), _links_from_edges(edges)
 
@@ -286,9 +445,19 @@ async def _build_hotspot_flow(
     end_day: date,
     filters: MetricFilter,
 ) -> Tuple[List[SankeyNode], List[SankeyLink]]:
-    if not await _tables_present(client, ["git_commit_stats", "git_commits", "repos"]):
+    if not await _tables_present(client, ["file_metrics_daily", "repos"]):
         return [], []
-    scope_filter, scope_params = await _repo_scope_filter(client, filters)
+    if not await _columns_present(
+        client,
+        "file_metrics_daily",
+        ["repo_id", "day", "path", "churn"],
+    ):
+        return [], []
+    if not await _columns_present(client, "repos", ["id", "repo"]):
+        return [], []
+    scope_filter, scope_params = await _repo_scope_filter(
+        client, filters, repo_column="metrics.repo_id"
+    )
     rows = await fetch_hotspot_rows(
         client,
         start_day=start_day,
@@ -332,6 +501,8 @@ async def build_sankey_response(
     window_start: Optional[date] = None,
     window_end: Optional[date] = None,
 ) -> SankeyResponse:
+    if mode == "hotpot":
+        mode = "hotspot"
     definition = SANKEY_DEFINITIONS.get(mode)
     if definition is None:
         raise ValueError(f"Unknown sankey mode: {mode}")

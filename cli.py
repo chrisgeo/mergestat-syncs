@@ -1402,11 +1402,56 @@ def _cmd_api(ns: argparse.Namespace) -> int:
     if ns.db:
         os.environ["CLICKHOUSE_DSN"] = ns.db
 
+    log_level = str(getattr(ns, "log_level", "") or "INFO").upper()
+    log_config = {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "formatters": {
+            "default": {
+                "format": "%(asctime)s %(levelname)s %(name)s: %(message)s"
+            },
+            "access": {"format": "%(message)s"},
+        },
+        "handlers": {
+            "default": {
+                "class": "logging.StreamHandler",
+                "formatter": "default",
+                "stream": "ext://sys.stdout",
+            },
+            "access": {
+                "class": "logging.StreamHandler",
+                "formatter": "access",
+                "stream": "ext://sys.stdout",
+            },
+        },
+        "loggers": {
+            "uvicorn": {
+                "handlers": ["default"],
+                "level": log_level,
+                "propagate": False,
+            },
+            "uvicorn.error": {
+                "handlers": ["default"],
+                "level": log_level,
+                "propagate": False,
+            },
+            "uvicorn.access": {
+                "handlers": ["access"],
+                "level": log_level,
+                "propagate": False,
+            },
+        },
+        "root": {"handlers": ["default"], "level": log_level},
+    }
+
     uvicorn.run(
         "dev_health_ops.api.main:app",
         host=ns.host,
         port=ns.port,
         reload=ns.reload,
+        log_level=log_level.lower(),
+        access_log=True,
+        log_config=log_config,
     )
     return 0
 
