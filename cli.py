@@ -968,6 +968,14 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
     async def _handler(store):
         repo_count = max(1, ns.repo_count)
         base_name = ns.repo_name
+        team_assignment = SyntheticDataGenerator(
+            repo_name=base_name
+        ).get_team_assignment(count=8)
+        if hasattr(store, "insert_teams") and team_assignment.get("teams"):
+            await store.insert_teams(team_assignment["teams"])
+            logging.info(
+                "Inserted %d synthetic teams.", len(team_assignment["teams"])
+            )
 
         for i in range(repo_count):
             r_name = base_name
@@ -1051,6 +1059,8 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
             if ns.with_metrics:
                 from metrics.job_daily import (
                     ClickHouseMetricsSink,
+                    MongoMetricsSink,
+                    PostgresMetricsSink,
                     SQLiteMetricsSink,
                 )
 
@@ -1061,13 +1071,27 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
                     from metrics.job_daily import _normalize_sqlite_url
 
                     sink = SQLiteMetricsSink(_normalize_sqlite_url(ns.db))
+                elif db_type == "mongo":
+                    sink = MongoMetricsSink(
+                        ns.db, db_name=os.getenv("MONGO_DB_NAME")
+                    )
+                elif db_type == "postgres":
+                    sink = PostgresMetricsSink(ns.db)
 
                 if sink:
-                    sink.ensure_tables()
+                    if isinstance(sink, MongoMetricsSink):
+                        sink.ensure_indexes()
+                    else:
+                        sink.ensure_tables()
 
                     # Generate and write complexity snapshots
+                    comp_data = generator.generate_complexity_metrics(days=ns.days)
+                    complexity_by_day = {}
+                    for snapshot in comp_data["snapshots"]:
+                        complexity_by_day.setdefault(snapshot.as_of_day, {})[
+                            snapshot.file_path
+                        ] = snapshot
                     if hasattr(sink, "write_file_complexity_snapshots"):
-                        comp_data = generator.generate_complexity_metrics(days=ns.days)
                         if comp_data["snapshots"]:
                             sink.write_file_complexity_snapshots(comp_data["snapshots"])
                         if comp_data["dailies"]:
@@ -1076,6 +1100,33 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
                             f"- Complexity snapshots: {len(comp_data['snapshots'])}"
                         )
 
+                    blame_concentration = {}
+                    if blame_data:
+                        blame_by_file = {}
+                        for row in blame_data:
+                            author = (
+                                getattr(row, "author_email", None)
+                                or getattr(row, "author_name", None)
+                                or "unknown"
+                            )
+                            path = getattr(row, "path", None)
+                            if not path:
+                                continue
+                            blame_by_file.setdefault(path, {})
+                            blame_by_file[path][author] = (
+                                blame_by_file[path].get(author, 0) + 1
+                            )
+                        for path, counts in blame_by_file.items():
+                            total = sum(counts.values())
+                            if total:
+                                blame_concentration[path] = max(counts.values()) / float(
+                                    total
+                                )
+
+                    import uuid
+
+                    from analytics.investment import InvestmentClassifier
+                    from analytics.issue_types import IssueTypeNormalizer
                     from metrics.compute import compute_daily_metrics
                     from metrics.compute_cicd import compute_cicd_metrics_daily
                     from metrics.compute_deployments import compute_deploy_metrics_daily
@@ -1093,13 +1144,34 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
                         compute_ic_metrics_daily,
                         compute_ic_landscape_rolling,
                     )
-                    from metrics.hotspots import compute_file_hotspots
+                    from metrics.hotspots import (
+                        compute_file_hotspots,
+                        compute_file_risk_hotspots,
+                    )
+                    from metrics.knowledge import (
+                        compute_bus_factor,
+                        compute_code_ownership_gini,
+                    )
                     from metrics.quality import (
                         compute_rework_churn_ratio,
                         compute_single_owner_file_ratio,
                     )
                     from metrics.reviews import compute_review_edges_daily
+                    from metrics.schemas import (
+                        InvestmentClassificationRecord,
+                        InvestmentMetricsRecord,
+                        IssueTypeMetricsRecord,
+                    )
+                    from providers.identity import load_identity_resolver
                     from providers.teams import TeamResolver
+
+                    investment_classifier = InvestmentClassifier(
+                        REPO_ROOT / "config/investment_areas.yaml"
+                    )
+                    issue_type_normalizer = IssueTypeNormalizer(
+                        REPO_ROOT / "config/issue_type_mapping.yaml"
+                    )
+                    identity_resolver = load_identity_resolver()
 
                     commit_by_hash = {c.hash: c for c in commits}
                     commit_stat_rows = []
@@ -1195,10 +1267,12 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
                         )
 
                     # Provide stable team IDs for dashboards without requiring config.
-                    team_assignment = generator.get_team_assignment(count=8)
                     team_resolver = TeamResolver(
                         member_to_team=team_assignment["member_map"]
                     )
+                    team_map = {
+                        k: v[0] for k, v in team_assignment["member_map"].items()
+                    }
 
                     computed_at = datetime.now(timezone.utc)
 
@@ -1259,6 +1333,16 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
                                 repo_id=str(repo.id), window_stats=window_stats
                             )
                         }
+                        bus_factor_by_repo = {
+                            repo.id: compute_bus_factor(
+                                repo_id=str(repo.id), window_stats=window_stats
+                            )
+                        }
+                        gini_by_repo = {
+                            repo.id: compute_code_ownership_gini(
+                                repo_id=str(repo.id), window_stats=window_stats
+                            )
+                        }
 
                         repo_result = compute_daily_metrics(
                             day=day,
@@ -1268,9 +1352,12 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
                             computed_at=computed_at,
                             include_commit_metrics=True,
                             team_resolver=team_resolver,
+                            identity_resolver=identity_resolver,
                             mttr_by_repo=mttr_by_repo,
                             rework_churn_ratio_by_repo=rework_ratio_by_repo,
                             single_owner_file_ratio_by_repo=single_owner_ratio_by_repo,
+                            bus_factor_by_repo=bus_factor_by_repo,
+                            code_ownership_gini_by_repo=gini_by_repo,
                         )
                         team_metrics = compute_team_wellbeing_metrics_daily(
                             day=day,
@@ -1290,10 +1377,6 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
                         )
 
                         # Enrich User Metrics with IC fields
-                        # Convert TeamResolver map to simple identity->team_id map
-                        team_map = {
-                            k: v[0] for k, v in team_assignment["member_map"].items()
-                        }
                         ic_metrics = compute_ic_metrics_daily(
                             git_metrics=repo_result.user_metrics,
                             wi_metrics=wi_user_rows,
@@ -1319,6 +1402,202 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
                         if state_rows:
                             sink.write_work_item_state_durations(state_rows)
 
+                        issue_type_stats = {}
+                        investment_classifications = []
+                        investment_metrics_rows = []
+                        inv_metrics_map = {}
+
+                        def _get_team(wi):
+                            if getattr(wi, "assignees", None):
+                                t_id, _ = team_resolver.resolve(wi.assignees[0])
+                                if t_id:
+                                    return t_id
+                            return "unassigned"
+
+                        def _normalize_investment_team_id(team_id):
+                            if not team_id or team_id == "unassigned":
+                                return None
+                            return team_id
+
+                        for item in work_items:
+                            r_id = getattr(item, "repo_id", None) or uuid.UUID(int=0)
+                            prov = item.provider
+                            team_id = _get_team(item)
+                            norm_type = issue_type_normalizer.normalize(
+                                prov, item.type, getattr(item, "labels", [])
+                            )
+
+                            key = (r_id, prov, team_id, norm_type)
+                            if key not in issue_type_stats:
+                                issue_type_stats[key] = {
+                                    "created": 0,
+                                    "completed": 0,
+                                    "active": 0,
+                                    "cycle_hours": [],
+                                }
+
+                            stats = issue_type_stats[key]
+                            created = item.created_at
+                            if start_dt <= created < end_dt:
+                                stats["created"] += 1
+
+                            if item.completed_at:
+                                completed = item.completed_at
+                                if start_dt <= completed < end_dt:
+                                    stats["completed"] += 1
+                                    if item.started_at:
+                                        hours = (
+                                            completed - item.started_at
+                                        ).total_seconds() / 3600.0
+                                        if hours >= 0:
+                                            stats["cycle_hours"].append(hours)
+
+                            if created < end_dt and (
+                                not item.completed_at or item.completed_at >= start_dt
+                            ):
+                                stats["active"] += 1
+
+                            if created < end_dt and (
+                                not item.completed_at
+                                or item.completed_at >= start_dt
+                            ):
+                                cls = investment_classifier.classify(
+                                    {
+                                        "labels": getattr(item, "labels", []),
+                                        "component": getattr(item, "component", ""),
+                                        "title": item.title,
+                                        "provider": item.provider,
+                                    }
+                                )
+                                investment_classifications.append(
+                                    InvestmentClassificationRecord(
+                                        repo_id=r_id if r_id.int != 0 else None,
+                                        day=day,
+                                        artifact_type="work_item",
+                                        artifact_id=item.work_item_id,
+                                        provider=item.provider,
+                                        investment_area=cls.investment_area,
+                                        project_stream=cls.project_stream or "",
+                                        confidence=cls.confidence,
+                                        rule_id=cls.rule_id,
+                                        computed_at=computed_at,
+                                    )
+                                )
+
+                                if item.completed_at:
+                                    completed = item.completed_at
+                                    if start_dt <= completed < end_dt:
+                                        team_id = _normalize_investment_team_id(
+                                            _get_team(item)
+                                        )
+                                        key = (
+                                            r_id,
+                                            team_id,
+                                            cls.investment_area,
+                                            cls.project_stream or "",
+                                        )
+                                        if key not in inv_metrics_map:
+                                            inv_metrics_map[key] = {
+                                                "units": 0,
+                                                "completed": 0,
+                                                "churn": 0,
+                                                "cycles": [],
+                                            }
+                                        inv_metrics_map[key]["completed"] += 1
+                                        points = getattr(item, "story_points", 1) or 1
+                                        inv_metrics_map[key]["units"] += int(points)
+                                        if item.started_at:
+                                            hours = (
+                                                completed - item.started_at
+                                            ).total_seconds() / 3600.0
+                                            if hours >= 0:
+                                                inv_metrics_map[key]["cycles"].append(
+                                                    hours
+                                                )
+
+                        issue_type_metrics_rows = []
+                        for (
+                            r_id,
+                            prov,
+                            team_id,
+                            norm_type,
+                        ), stat in issue_type_stats.items():
+                            cycles = sorted(stat["cycle_hours"])
+                            p50 = cycles[len(cycles) // 2] if cycles else 0.0
+                            p90 = cycles[int(len(cycles) * 0.9)] if cycles else 0.0
+                            issue_type_metrics_rows.append(
+                                IssueTypeMetricsRecord(
+                                    repo_id=r_id if r_id.int != 0 else None,
+                                    day=day,
+                                    provider=prov,
+                                    team_id=team_id,
+                                    issue_type_norm=norm_type,
+                                    created_count=stat["created"],
+                                    completed_count=stat["completed"],
+                                    active_count=stat["active"],
+                                    cycle_p50_hours=p50,
+                                    cycle_p90_hours=p90,
+                                    lead_p50_hours=0.0,
+                                    computed_at=computed_at,
+                                )
+                            )
+
+                        for c in day_commit_stats:
+                            r_id = c["repo_id"]
+                            path = c["file_path"]
+                            if not path:
+                                continue
+                            cls = investment_classifier.classify(
+                                {
+                                    "paths": [path],
+                                    "labels": [],
+                                    "component": "",
+                                }
+                            )
+                            author_email = c["author_email"] or ""
+                            t_id, _ = team_resolver.resolve(author_email)
+                            team_id = _normalize_investment_team_id(t_id)
+                            key = (
+                                r_id,
+                                team_id,
+                                cls.investment_area,
+                                cls.project_stream or "",
+                            )
+                            if key not in inv_metrics_map:
+                                inv_metrics_map[key] = {
+                                    "units": 0,
+                                    "completed": 0,
+                                    "churn": 0,
+                                    "cycles": [],
+                                }
+                            inv_metrics_map[key]["churn"] += (
+                                c["additions"] + c["deletions"]
+                            )
+
+                        for (
+                            r_id,
+                            team_id,
+                            area,
+                            stream,
+                        ), data in inv_metrics_map.items():
+                            cycles = sorted(data["cycles"])
+                            p50 = cycles[len(cycles) // 2] if cycles else 0.0
+                            investment_metrics_rows.append(
+                                InvestmentMetricsRecord(
+                                    repo_id=r_id if r_id.int != 0 else None,
+                                    day=day,
+                                    team_id=team_id,
+                                    investment_area=area,
+                                    project_stream=stream,
+                                    delivery_units=data["units"],
+                                    work_items_completed=data["completed"],
+                                    prs_merged=0,
+                                    churn_loc=data["churn"],
+                                    cycle_p50_hours=p50,
+                                    computed_at=computed_at,
+                                )
+                            )
+
                         file_metrics = compute_file_hotspots(
                             repo_id=repo.id,
                             day=day,
@@ -1327,6 +1606,17 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
                         )
                         if file_metrics:
                             sink.write_file_metrics(file_metrics)
+
+                        risk_hotspots = compute_file_risk_hotspots(
+                            repo_id=repo.id,
+                            day=day,
+                            window_stats=window_stats,
+                            complexity_map=complexity_by_day.get(day, {}),
+                            blame_map=blame_concentration,
+                            computed_at=computed_at,
+                        )
+                        if risk_hotspots and hasattr(sink, "write_file_hotspot_daily"):
+                            sink.write_file_hotspot_daily(risk_hotspots)
 
                         review_edges = compute_review_edges_daily(
                             day=day,
@@ -1345,6 +1635,23 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
                             sink.write_commit_metrics(repo_result.commit_metrics)
                         if team_metrics:
                             sink.write_team_metrics(team_metrics)
+                        if (
+                            hasattr(sink, "write_issue_type_metrics")
+                            and issue_type_metrics_rows
+                        ):
+                            sink.write_issue_type_metrics(issue_type_metrics_rows)
+                        if (
+                            hasattr(sink, "write_investment_classifications")
+                            and investment_classifications
+                        ):
+                            sink.write_investment_classifications(
+                                investment_classifications
+                            )
+                        if (
+                            hasattr(sink, "write_investment_metrics")
+                            and investment_metrics_rows
+                        ):
+                            sink.write_investment_metrics(investment_metrics_rows)
 
                         cicd_metrics = compute_cicd_metrics_daily(
                             day=day,

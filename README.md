@@ -35,7 +35,7 @@ This provides the `dev-hops` command in your terminal.
 dev-hops --help
 ```
 
-*Note: In the documentation below, you can replace `dev-hops` with `dev-hops` if you have installed the package.*
+_Note: In the documentation below, you can replace `dev-hops` with `dev-hops` if you have installed the package._
 
 ## Private Repository Support ✅
 
@@ -96,14 +96,14 @@ from connectors import GitHubConnector
 
 async def main():
     connector = GitHubConnector(token="your_token")
-    
+
     results = await connector.get_repos_with_stats_async(
         org_name="myorg",
         pattern="myorg/*",
         batch_size=10,
         max_concurrent=4,
     )
-    
+
     for result in results:
         if result.success:
             print(f"{result.repository.full_name}: {result.stats.total_commits} commits")
@@ -113,13 +113,13 @@ asyncio.run(main())
 
 ### Pattern Matching Examples
 
-| Pattern | Matches |
-|---------|---------|
+| Pattern       | Matches                                      |
+| ------------- | -------------------------------------------- |
 | `chrisgeo/m*` | `chrisgeo/dev-health-ops`, `chrisgeo/my-app` |
-| `*/api-*` | `anyorg/api-service`, `myuser/api-gateway` |
-| `org/repo` | Exactly `org/repo` |
-| `chrisgeo/*` | All repositories owned by `chrisgeo` |
-| `*sync*` | Any repository with `sync` in the name |
+| `*/api-*`     | `anyorg/api-service`, `myuser/api-gateway`   |
+| `org/repo`    | Exactly `org/repo`                           |
+| `chrisgeo/*`  | All repositories owned by `chrisgeo`         |
+| `*sync*`      | Any repository with `sync` in the name       |
 
 ## Developer Health Metrics (Work + Git) + Grafana ✅
 
@@ -139,13 +139,13 @@ Jira is **not** a replacement for pull request data — it’s used to track ass
 
 ### Quickstart (ClickHouse + Grafana)
 
-1) Start ClickHouse + Grafana:
+1. Start ClickHouse + Grafana:
 
 ```bash
 dev-hops grafana up
 ```
 
-1) Sync Git data into ClickHouse (choose one):
+1. Sync Git data into ClickHouse (choose one):
 
 ```bash
 # Local repo (commits + stats)
@@ -158,7 +158,7 @@ dev-hops sync git --provider github --db "clickhouse://localhost:8123/default" -
 dev-hops sync git --provider gitlab --db "clickhouse://localhost:8123/default" --project-id <id>
 ```
 
-1) Compute derived metrics (Git + Work Items):
+1. Compute derived metrics (Git + Work Items):
 
 ```bash
 # (Optional) Sync work items from provider APIs (recommended)
@@ -171,7 +171,7 @@ dev-hops metrics daily --date 2025-02-01 --db "clickhouse://localhost:8123/defau
 dev-hops metrics daily --date 2025-02-01 --backfill 30 --db "clickhouse://localhost:8123/default"
 ```
 
-1) Open Grafana:
+1. Open Grafana:
 
 - <http://localhost:3000> (default `admin` / `admin`)
 - Dashboards are provisioned under the “Developer Health” folder.
@@ -411,15 +411,15 @@ This project includes several key performance optimizations to speed up git data
 
 For a typical repository with 1000 files and 10,000 commits:
 
-| Operation | Before | After | Improvement |
-|-----------|--------|-------|-------------|
-| Git Blame | 50 min | 6-12 min | **4-8x faster** |
-| Commits | - | 1-2 min | **New feature** |
-| Commit Stats | - | 2-4 min | **New feature** |
-| Files | - | 30-60 sec | **New feature** |
-| **Total** | **50+ min** | **10-20 min** | **~3-5x faster** |
+| Operation    | Before      | After         | Improvement      |
+| ------------ | ----------- | ------------- | ---------------- |
+| Git Blame    | 50 min      | 6-12 min      | **4-8x faster**  |
+| Commits      | -           | 1-2 min       | **New feature**  |
+| Commit Stats | -           | 2-4 min       | **New feature**  |
+| Files        | -           | 30-60 sec     | **New feature**  |
+| **Total**    | **50+ min** | **10-20 min** | **~3-5x faster** |
 
-*Actual performance depends on hardware, repository size, and configuration.*
+_Actual performance depends on hardware, repository size, and configuration._
 
 ### PostgreSQL vs MongoDB vs SQLite: Setup and Migration Considerations
 
@@ -503,8 +503,39 @@ For a typical repository with 1000 files and 10,000 commits:
 
 This behavior is different from GitHub/GitLab connectors, which provide accurate PR data directly from the provider API.
 
+## Example Running Order
+
+1.  Sync teams
+
+python cli.py sync teams --provider config --path config/teams.yaml --db "<DB_CONN>"
+
+# or: python cli.py sync teams --provider jira --db "<DB_CONN>"
+
+2. Sync git facts (example: GitHub)
+
+python cli.py sync git --provider github --owner "<ORG>" --repo "<REPO>" --db "<DB_CONN>"
+python cli.py sync prs --provider github --owner "<ORG>" --repo "<REPO>" --db "<DB_CONN>"
+python cli.py sync blame --provider github --owner "<ORG>" --repo "<REPO>" --db "<DB_CONN>"
+python cli.py sync cicd --provider github --owner "<ORG>" --repo "<REPO>" --db "<DB_CONN>"
+python cli.py sync deployments --provider github --owner "<ORG>" --repo "<REPO>" --db "<DB_CONN>"
+python cli.py sync incidents --provider github --owner "<ORG>" --repo "<REPO>" --db "<DB_CONN>"
+
+3. Sync work items (and derived work‑item tables)
+
+python cli.py sync work-items --provider github --db "<DB_CONN>" --date YYYY-MM-DD --backfill 30
+
+# use --provider jira|gitlab|all as needed
+
+4. Compute daily metrics (uses stored facts)
+
+python cli.py metrics daily --db "<DB_CONN>" --date YYYY-MM-DD --backfill 30
+
+5. Compute complexity snapshots
+
+python cli.py metrics complexity --repo-path /path/to/repo --db "<DB_CONN>" --date YYYY-MM-DD --backfill 30
 
 ## Sample Dashboards
+
 <img width="1807" height="1080" alt="Advanced Work Tracking Phase 2" src="https://github.com/user-attachments/assets/f635d1ec-2c0f-41c6-b57c-e3687f090007" />
 <img width="1807" height="1080" alt="CI CD Pipelines Dashboard" src="https://github.com/user-attachments/assets/ba8a03bc-fa4c-4241-9a3b-ab312c9e9f23" />
 <img width="1807" height="1080" alt="Code Hotspots Dashboard" src="https://github.com/user-attachments/assets/3ba27599-ec82-424d-a616-330b946ac37b" />
