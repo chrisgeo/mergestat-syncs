@@ -52,7 +52,10 @@ class ClickHouseMetricsSink:
         if not dsn:
             raise ValueError("ClickHouse DSN is required")
         self.dsn = dsn
-        self.client = clickhouse_connect.get_client(dsn=dsn)
+        settings = {
+            "max_query_size": 1 * 1024 * 1024,  # 1MB
+        }
+        self.client = clickhouse_connect.get_client(dsn=dsn, settings=settings)
 
     def close(self) -> None:
         try:
@@ -411,7 +414,9 @@ class ClickHouseMetricsSink:
             rows,
         )
 
-    def write_incident_metrics(self, rows: Sequence[IncidentMetricsDailyRecord]) -> None:
+    def write_incident_metrics(
+        self, rows: Sequence[IncidentMetricsDailyRecord]
+    ) -> None:
         if not rows:
             return
         self._insert_rows(
@@ -451,9 +456,7 @@ class ClickHouseMetricsSink:
             rows,
         )
 
-    def write_repo_complexity_daily(
-        self, rows: Sequence[RepoComplexityDaily]
-    ) -> None:
+    def write_repo_complexity_daily(self, rows: Sequence[RepoComplexityDaily]) -> None:
         if not rows:
             return
         self._insert_rows(
@@ -513,9 +516,7 @@ class ClickHouseMetricsSink:
             rows,
         )
 
-    def write_investment_metrics(
-        self, rows: Sequence[InvestmentMetricsRecord]
-    ) -> None:
+    def write_investment_metrics(self, rows: Sequence[InvestmentMetricsRecord]) -> None:
         if not rows:
             return
         self._insert_rows(
@@ -536,9 +537,7 @@ class ClickHouseMetricsSink:
             rows,
         )
 
-    def write_issue_type_metrics(
-        self, rows: Sequence[IssueTypeMetricsRecord]
-    ) -> None:
+    def write_issue_type_metrics(self, rows: Sequence[IssueTypeMetricsRecord]) -> None:
         if not rows:
             return
         self._insert_rows(
@@ -581,7 +580,7 @@ class ClickHouseMetricsSink:
     ) -> List[Dict[str, Any]]:
         """
         Compute rolling 30d stats for all users as of the given day.
-        
+
         Aggregation logic:
         - churn_loc_30d: sum(loc_touched)
         - delivery_units_30d: sum(delivery_units)
@@ -590,9 +589,9 @@ class ClickHouseMetricsSink:
         """
         # We look at [as_of_day - 29 days, as_of_day] inclusive.
         # Note: 'day' in user_metrics_daily is the date of the metrics.
-        
+
         start_day = as_of_day - timedelta(days=29)
-        
+
         params = {
             "start": start_day.isoformat(),
             "end": as_of_day.isoformat(),
@@ -601,9 +600,9 @@ class ClickHouseMetricsSink:
         if repo_id:
             where.append("repo_id = toUUID(%(repo_id)s)")
             params["repo_id"] = str(repo_id)
-            
+
         where_clause = " AND ".join(where)
-        
+
         # We use argMax(..., computed_at) to get the latest version of the row for each day
         # before aggregating over days.
         # However, user_metrics_daily is MergeTree, not ReplacingMergeTree in the original schema (001).
@@ -612,10 +611,10 @@ class ClickHouseMetricsSink:
         # If we assume we might have multiple rows per day/user/repo, we should take the latest.
         # The PK is (repo_id, author_email, day).
         # We'll aggregate over (identity_id, team_id, repo_id)
-        
+
         # Note: identity_id was added in 005. For older rows it might be null/empty.
         # We fallback to author_email if identity_id is empty.
-        
+
         sql = f"""
         SELECT
             if(empty(identity_id), author_email, identity_id) as identity_id,
@@ -629,9 +628,9 @@ class ClickHouseMetricsSink:
         GROUP BY identity_id
         HAVING identity_id != ''
         """
-        
+
         # Note: ClickHouse's quantile(0.5) is approximate but fast.
-        
+
         try:
             result = self.client.query(sql, parameters=params)
             rows = []

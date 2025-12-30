@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+import math
 from typing import Any, Dict, List
 
 from ..models.filters import MetricFilter
@@ -113,11 +114,25 @@ def _delta_pct(current: float, previous: float) -> float:
     return (current - previous) / previous * 100.0
 
 
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return default
+    return number if math.isfinite(number) else default
+
+
+def _safe_transform(transform, value: float) -> float:
+    return _safe_float(transform(value))
+
+
 def _spark_points(rows: List[Dict[str, Any]], transform) -> List[SparkPoint]:
     points = []
     for row in rows:
-        value = float(row.get("value") or 0.0)
-        points.append(SparkPoint(ts=row["day"], value=transform(value)))
+        value = _safe_float(row.get("value"))
+        points.append(
+            SparkPoint(ts=row["day"], value=_safe_transform(transform, value))
+        )
     return points
 
 
@@ -163,6 +178,8 @@ async def _metric_deltas(
                 scope_filter=scope_filter,
                 scope_params=scope_params,
             )
+            current_value = _safe_float(current_value)
+            previous_value = _safe_float(previous_value)
             spark = _spark_points(current_series, metric["transform"])
         else:
             current_value = await fetch_metric_value(
@@ -185,6 +202,8 @@ async def _metric_deltas(
                 scope_params=scope_params,
                 aggregator=metric["aggregator"],
             )
+            current_value = _safe_float(current_value)
+            previous_value = _safe_float(previous_value)
             series = await fetch_metric_series(
                 client,
                 table=metric["table"],
@@ -197,12 +216,12 @@ async def _metric_deltas(
             )
             spark = _spark_points(series, metric["transform"])
 
-        delta_pct = _delta_pct(current_value, previous_value)
+        delta_pct = _safe_float(_delta_pct(current_value, previous_value))
         deltas.append(
             MetricDelta(
                 metric=metric["metric"],
                 label=metric["label"],
-                value=metric["transform"](current_value),
+                value=_safe_transform(metric["transform"], current_value),
                 unit=metric["unit"],
                 delta_pct=delta_pct,
                 spark=spark,

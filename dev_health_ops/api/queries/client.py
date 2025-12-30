@@ -48,7 +48,9 @@ async def close_global_client() -> None:
     _SHARED_DSN = None
 
 
-async def query_dicts(client: Any, query: str, params: Dict[str, Any]) -> List[Dict[str, Any]]:
+async def query_dicts(
+    client: Any, query: str, params: Dict[str, Any]
+) -> List[Dict[str, Any]]:
     result = client.query(query, parameters=params)
     if inspect.isawaitable(result):
         result = await result
