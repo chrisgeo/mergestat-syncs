@@ -813,15 +813,31 @@ async def test_clickhouse_store_context_manager_initializes_and_creates_tables()
         mock_migrations_path.__truediv__.return_value = mock_clickhouse_path
         
         mock_clickhouse_path.exists.return_value = True
-        mock_clickhouse_path.glob.return_value = [mock_sql_file]
+        
+        # Configure mock_sql_file with necessary attributes
+        mock_sql_file.name = "000_test.sql"
+        mock_sql_file.suffix = ".sql"
+        mock_sql_file.stem = "000_test"
+        
+        # Configure glob to return the mock file only for .sql pattern
+        def glob_side_effect(pattern):
+            if pattern == "*.sql":
+                return [mock_sql_file]
+            return []
+            
+        mock_clickhouse_path.glob.side_effect = glob_side_effect
 
         store = ClickHouseStore("clickhouse://localhost:8123/default")
         async with store as s:
             assert s.client is mock_client
 
     get_client.assert_called_once_with(dsn="clickhouse://localhost:8123/default")
-    # Expect 2 calls because our mock SQL has 2 statements
-    assert mock_client.command.call_count == 2
+    # Expect 4 calls:
+    # 1. CREATE TABLE schema_migrations
+    # 2. CREATE TABLE test1 (from sql file)
+    # 3. CREATE TABLE test2 (from sql file)
+    # 4. INSERT INTO schema_migrations (record migration)
+    assert mock_client.command.call_count == 4
     mock_client.close.assert_called_once()
 
 
