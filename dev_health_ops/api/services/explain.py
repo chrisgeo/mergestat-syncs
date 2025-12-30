@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import List
+import math
+from typing import Any, List
 
 from ..models.filters import MetricFilter
 from ..models.schemas import Contributor, ExplainResponse
@@ -101,6 +102,18 @@ def _delta_pct(current: float, previous: float) -> float:
     return (current - previous) / previous * 100.0
 
 
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return default
+    return number if math.isfinite(number) else default
+
+
+def _safe_transform(transform, value: float) -> float:
+    return _safe_float(transform(value))
+
+
 async def build_explain_response(
     *,
     db_url: str,
@@ -142,7 +155,9 @@ async def build_explain_response(
             aggregator=config["aggregator"],
         )
 
-        delta_pct = _delta_pct(current_value, previous_value)
+        current_value = _safe_float(current_value)
+        previous_value = _safe_float(previous_value)
+        delta_pct = _safe_float(_delta_pct(current_value, previous_value))
 
         drivers = await fetch_metric_driver_delta(
             client,
@@ -169,12 +184,14 @@ async def build_explain_response(
 
     driver_models: List[Contributor] = []
     for row in drivers:
+        raw_value = _safe_float(row.get("value"))
+        raw_delta = _safe_float(row.get("delta_pct"))
         driver_models.append(
             Contributor(
                 id=str(row.get("id") or ""),
                 label=str(row.get("id") or "Unknown"),
-                value=config["transform"](float(row.get("value") or 0.0)),
-                delta_pct=float(row.get("delta_pct") or 0.0),
+                value=_safe_transform(config["transform"], raw_value),
+                delta_pct=raw_delta,
                 evidence_link=(
                     f"/api/v1/drilldown/prs?metric={metric}"
                     f"&scope_type={filters.scope.level}"
@@ -185,11 +202,12 @@ async def build_explain_response(
 
     contributor_models: List[Contributor] = []
     for row in contributors:
+        raw_value = _safe_float(row.get("value"))
         contributor_models.append(
             Contributor(
                 id=str(row.get("id") or ""),
                 label=str(row.get("id") or "Unknown"),
-                value=config["transform"](float(row.get("value") or 0.0)),
+                value=_safe_transform(config["transform"], raw_value),
                 delta_pct=0.0,
                 evidence_link=(
                     f"/api/v1/drilldown/prs?metric={metric}"
@@ -203,7 +221,7 @@ async def build_explain_response(
         metric=metric,
         label=config["label"],
         unit=config["unit"],
-        value=config["transform"](current_value),
+        value=_safe_transform(config["transform"], current_value),
         delta_pct=delta_pct,
         drivers=driver_models,
         contributors=contributor_models,
