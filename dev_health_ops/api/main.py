@@ -343,10 +343,10 @@ async def flame_aggregated(
     """
     _reject_comparative_params(request)
 
-    if mode not in ("cycle_breakdown", "code_hotspots"):
+    if mode not in ("cycle_breakdown", "code_hotspots", "throughput"):
         raise HTTPException(
             status_code=400,
-            detail="mode must be 'cycle_breakdown' or 'code_hotspots'",
+            detail="mode must be 'cycle_breakdown', 'code_hotspots', or 'throughput'",
         )
 
     # Calculate date window
