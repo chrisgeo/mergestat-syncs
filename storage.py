@@ -1435,13 +1435,56 @@ class ClickHouseStore:
             return
 
         async with self._lock:
-            for path in sorted(migrations_dir.glob("*.sql")):
-                sql = await asyncio.to_thread(path.read_text, encoding="utf-8")
-                for stmt in sql.split(";"):
-                    stmt = stmt.strip()
-                    if not stmt:
-                        continue
-                    await asyncio.to_thread(self.client.command, stmt)
+            # Ensure schema_migrations table exists
+            await asyncio.to_thread(
+                self.client.command,
+                "CREATE TABLE IF NOT EXISTS schema_migrations (version String, applied_at DateTime64(3, 'UTC')) ENGINE = MergeTree() ORDER BY version",
+            )
+
+            # Get applied migrations
+            applied_result = await asyncio.to_thread(
+                self.client.query, "SELECT version FROM schema_migrations"
+            )
+            applied_versions = set(
+                row[0] for row in (getattr(applied_result, "result_rows", []) or [])
+            )
+
+            # Collect all migration files
+            migration_files = sorted(
+                list(migrations_dir.glob("*.sql")) + list(migrations_dir.glob("*.py"))
+            )
+
+            for path in migration_files:
+                version = path.name
+                if version in applied_versions:
+                    continue
+
+                if path.suffix == ".sql":
+                    sql = await asyncio.to_thread(path.read_text, encoding="utf-8")
+                    for stmt in sql.split(";"):
+                        stmt = stmt.strip()
+                        if not stmt:
+                            continue
+                        await asyncio.to_thread(self.client.command, stmt)
+                elif path.suffix == ".py":
+                    # Dynamic import and execution for Python migrations
+                    import importlib.util
+
+                    spec = importlib.util.spec_from_file_location(
+                        f"migrations.clickhouse.{path.stem}", path
+                    )
+                    if spec and spec.loader:
+                        module = importlib.util.module_from_spec(spec)
+                        spec.loader.exec_module(module)
+                        if hasattr(module, "upgrade"):
+                            await asyncio.to_thread(module.upgrade, self.client)
+
+                # Record migration
+                await asyncio.to_thread(
+                    self.client.command,
+                    "INSERT INTO schema_migrations (version, applied_at) VALUES ({version:String}, now())",
+                    parameters={"version": version},
+                )
 
     async def _insert_rows(
         self, table: str, columns: List[str], rows: List[Dict[str, Any]]
