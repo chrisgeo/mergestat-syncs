@@ -3,6 +3,7 @@ Retry and rate limiting utilities with exponential backoff.
 """
 
 import asyncio
+import inspect
 import logging
 import time
 from functools import wraps
@@ -189,7 +190,7 @@ def retry_with_backoff(
             raise RuntimeError("Max retries exceeded with no exception captured")
 
         # Return appropriate wrapper based on function type
-        if asyncio.iscoroutinefunction(func):
+        if inspect.iscoroutinefunction(func):
             return async_wrapper
         else:
             return sync_wrapper
