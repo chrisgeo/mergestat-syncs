@@ -262,7 +262,7 @@ class GitRef(Base):
     tag_commit_hash = Column(
         Text, comment="hash of the commit for refs that are of type tag"
     )
-    _mergestat_synced_at = Column(
+    last_synced = Column(
         DateTime(timezone=True),
         nullable=False,
         default=lambda: datetime.now(timezone.utc),
@@ -288,7 +288,7 @@ class GitFile(Base):
         comment="boolean to determine if the file is an executable",
     )
     contents = Column(Text, comment="contents of the file")
-    _mergestat_synced_at = Column(
+    last_synced = Column(
         DateTime(timezone=True),
         nullable=False,
         default=lambda: datetime.now(timezone.utc),
@@ -330,7 +330,7 @@ class GitCommit(Base):
     parents = Column(
         Integer, nullable=False, comment="the number of parents of the commit"
     )
-    _mergestat_synced_at = Column(
+    last_synced = Column(
         DateTime(timezone=True),
         nullable=False,
         default=lambda: datetime.now(timezone.utc),
@@ -372,7 +372,7 @@ class GitCommitStat(Base):
     new_file_mode = Column(
         Text, default="unknown", comment="new file mode derived from git mode"
     )
-    _mergestat_synced_at = Column(
+    last_synced = Column(
         DateTime(timezone=True),
         nullable=False,
         default=lambda: datetime.now(timezone.utc),
@@ -467,7 +467,7 @@ class GitBlame(Base, GitBlameMixin):
         Text, comment="hash of the commit the modification was made in"
     )
     line = Column(Text, comment="content of the line")
-    _mergestat_synced_at = Column(
+    last_synced = Column(
         DateTime(timezone=True),
         nullable=False,
         default=lambda: datetime.now(timezone.utc),
@@ -546,7 +546,7 @@ class GitPullRequest(Base):
     )
     reviews_count = Column(Integer, default=0, comment="total number of reviews")
     comments_count = Column(Integer, default=0, comment="total number of comments")
-    _mergestat_synced_at = Column(
+    last_synced = Column(
         DateTime(timezone=True),
         nullable=False,
         default=lambda: datetime.now(timezone.utc),
@@ -591,7 +591,7 @@ class GitPullRequestReview(Base):
         nullable=False,
         comment="timestamp when review was submitted",
     )
-    _mergestat_synced_at = Column(
+    last_synced = Column(
         DateTime(timezone=True),
         nullable=False,
         default=lambda: datetime.now(timezone.utc),
@@ -626,7 +626,7 @@ class CiPipelineRun(Base):
     queued_at = Column(DateTime(timezone=True))
     started_at = Column(DateTime(timezone=True), nullable=False)
     finished_at = Column(DateTime(timezone=True))
-    _mergestat_synced_at = Column(
+    last_synced = Column(
         DateTime(timezone=True),
         nullable=False,
         default=lambda: datetime.now(timezone.utc),
@@ -650,7 +650,7 @@ class Deployment(Base):
     deployed_at = Column(DateTime(timezone=True))
     merged_at = Column(DateTime(timezone=True))
     pull_request_number = Column(Integer)
-    _mergestat_synced_at = Column(
+    last_synced = Column(
         DateTime(timezone=True),
         nullable=False,
         default=lambda: datetime.now(timezone.utc),
@@ -670,7 +670,7 @@ class Incident(Base):
     status = Column(Text)
     started_at = Column(DateTime(timezone=True), nullable=False)
     resolved_at = Column(DateTime(timezone=True))
-    _mergestat_synced_at = Column(
+    last_synced = Column(
         DateTime(timezone=True),
         nullable=False,
         default=lambda: datetime.now(timezone.utc),

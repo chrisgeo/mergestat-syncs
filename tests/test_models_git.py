@@ -177,37 +177,37 @@ class TestTimezoneAwareDatetimes:
         assert created_at.tzinfo == timezone.utc
 
     def test_git_ref_synced_at_is_timezone_aware(self):
-        """Test that GitRef._mergestat_synced_at default is timezone-aware."""
+        """Test that GitRef.last_synced default is timezone-aware."""
         git_ref = GitRef()
-        default_func = git_ref.__table__.columns["_mergestat_synced_at"].default.arg
+        default_func = git_ref.__table__.columns["last_synced"].default.arg
         synced_at = default_func(MagicMock())
 
         assert synced_at.tzinfo is not None
         assert synced_at.tzinfo == timezone.utc
 
     def test_git_file_synced_at_is_timezone_aware(self):
-        """Test that GitFile._mergestat_synced_at default is timezone-aware."""
+        """Test that GitFile.last_synced default is timezone-aware."""
         git_file = GitFile()
-        default_func = git_file.__table__.columns["_mergestat_synced_at"].default.arg
+        default_func = git_file.__table__.columns["last_synced"].default.arg
         synced_at = default_func(MagicMock())
 
         assert synced_at.tzinfo is not None
         assert synced_at.tzinfo == timezone.utc
 
     def test_git_commit_synced_at_is_timezone_aware(self):
-        """Test that GitCommit._mergestat_synced_at default is timezone-aware."""
+        """Test that GitCommit.last_synced default is timezone-aware."""
         git_commit = GitCommit()
-        default_func = git_commit.__table__.columns["_mergestat_synced_at"].default.arg
+        default_func = git_commit.__table__.columns["last_synced"].default.arg
         synced_at = default_func(MagicMock())
 
         assert synced_at.tzinfo is not None
         assert synced_at.tzinfo == timezone.utc
 
     def test_git_commit_stat_synced_at_is_timezone_aware(self):
-        """Test that GitCommitStat._mergestat_synced_at default is timezone-aware."""
+        """Test that GitCommitStat.last_synced default is timezone-aware."""
         git_commit_stat = GitCommitStat()
         default_func = git_commit_stat.__table__.columns[
-            "_mergestat_synced_at"
+            "last_synced"
         ].default.arg
         synced_at = default_func(MagicMock())
 
@@ -215,9 +215,9 @@ class TestTimezoneAwareDatetimes:
         assert synced_at.tzinfo == timezone.utc
 
     def test_git_blame_synced_at_is_timezone_aware(self):
-        """Test that GitBlame._mergestat_synced_at default is timezone-aware."""
+        """Test that GitBlame.last_synced default is timezone-aware."""
         git_blame = GitBlame()
-        default_func = git_blame.__table__.columns["_mergestat_synced_at"].default.arg
+        default_func = git_blame.__table__.columns["last_synced"].default.arg
         synced_at = default_func(MagicMock())
 
         assert synced_at.tzinfo is not None
@@ -265,11 +265,11 @@ class TestBackwardCompatibility:
         """Test that all datetime columns are configured with timezone=True."""
         models_and_columns = [
             (Repo, "created_at"),
-            (GitRef, "_mergestat_synced_at"),
-            (GitFile, "_mergestat_synced_at"),
-            (GitCommit, "_mergestat_synced_at"),
-            (GitCommitStat, "_mergestat_synced_at"),
-            (GitBlame, "_mergestat_synced_at"),
+            (GitRef, "last_synced"),
+            (GitFile, "last_synced"),
+            (GitCommit, "last_synced"),
+            (GitCommitStat, "last_synced"),
+            (GitBlame, "last_synced"),
         ]
 
         for model, column_name in models_and_columns:
@@ -283,11 +283,11 @@ class TestBackwardCompatibility:
         """Test that all datetime defaults are callable (lambdas)."""
         models_and_columns = [
             (Repo, "created_at"),
-            (GitRef, "_mergestat_synced_at"),
-            (GitFile, "_mergestat_synced_at"),
-            (GitCommit, "_mergestat_synced_at"),
-            (GitCommitStat, "_mergestat_synced_at"),
-            (GitBlame, "_mergestat_synced_at"),
+            (GitRef, "last_synced"),
+            (GitFile, "last_synced"),
+            (GitCommit, "last_synced"),
+            (GitCommitStat, "last_synced"),
+            (GitBlame, "last_synced"),
         ]
 
         for model, column_name in models_and_columns:

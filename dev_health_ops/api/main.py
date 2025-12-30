@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from datetime import date, datetime
+import logging
 import os
 
 
@@ -15,6 +16,7 @@ from .models.filters import (
     FilterOptionsResponse,
     HomeRequest,
     MetricFilter,
+    SankeyRequest,
     ScopeFilter,
     TimeFilter,
 )
@@ -32,6 +34,7 @@ from .models.schemas import (
     PersonMetricResponse,
     PersonSearchResult,
     PersonSummaryResponse,
+    SankeyResponse,
 )
 from .queries.client import clickhouse_client, query_dicts, close_global_client
 from .queries.drilldown import fetch_issues, fetch_pull_requests
@@ -52,9 +55,28 @@ from .services.people import (
 from .services.heatmap import build_heatmap_response
 from .services.flame import build_flame_response
 from .services.quadrant import build_quadrant_response
+from .services.sankey import build_sankey_response
 
 HOME_CACHE = TTLCache(ttl_seconds=60)
 EXPLAIN_CACHE = TTLCache(ttl_seconds=120)
+
+
+def _sanitize_for_log(value: str) -> str:
+    """
+    Remove characters that could be used to forge or split log entries.
+
+    This is intentionally minimal to avoid changing functional behavior:
+    it strips carriage returns, newlines, and other non-printable
+    control characters.
+    """
+    if value is None:
+        return ""
+    text = str(value)
+    # Remove CR/LF explicitly, then strip remaining control chars
+    text = text.replace("\r", "").replace("\n", "")
+    return "".join(ch for ch in text if ch >= " " and ch != "\x7f")
+
+logger = logging.getLogger(__name__)
 
 _FORBIDDEN_QUERY_PARAMS = {
     "compare_to",
@@ -603,6 +625,55 @@ async def investment_post(payload: HomeRequest) -> InvestmentResponse:
             db_url=_db_url(), filters=payload.filters
         )
     except Exception as exc:
+        raise HTTPException(status_code=503, detail="Data unavailable") from exc
+
+
+@app.get("/api/v1/sankey", response_model=SankeyResponse)
+async def sankey_get(
+    response: Response,
+    mode: str = "investment",
+    scope_type: str = "org",
+    scope_id: str = "",
+    range_days: int = 30,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    window_start: date | None = None,
+    window_end: date | None = None,
+) -> SankeyResponse:
+    try:
+        filters = _filters_from_query(
+            scope_type, scope_id, range_days, range_days, start_date, end_date
+        )
+        result = await build_sankey_response(
+            db_url=_db_url(),
+            mode=mode,
+            filters=filters,
+            window_start=window_start,
+            window_end=window_end,
+        )
+        if response is not None:
+            response.headers["X-DevHealth-Deprecated"] = "use POST with filters"
+        return result
+    except Exception as exc:
+        logger.exception("Sankey GET failed for mode=%s", _sanitize_for_log(mode))
+        raise HTTPException(status_code=503, detail="Data unavailable") from exc
+
+
+@app.post("/api/v1/sankey", response_model=SankeyResponse)
+async def sankey_post(payload: SankeyRequest) -> SankeyResponse:
+    try:
+        return await build_sankey_response(
+            db_url=_db_url(),
+            mode=payload.mode,
+            filters=payload.filters,
+            context=payload.context,
+            window_start=payload.window_start,
+            window_end=payload.window_end,
+        )
+    except Exception as exc:
+        logger.exception(
+            "Sankey POST failed for mode=%s", _sanitize_for_log(payload.mode)
+        )
         raise HTTPException(status_code=503, detail="Data unavailable") from exc
 
 

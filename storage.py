@@ -475,7 +475,7 @@ class SQLAlchemyStore:
                     "path": item.get("path"),
                     "executable": item.get("executable"),
                     "contents": item.get("contents"),
-                    "_mergestat_synced_at": item.get("_mergestat_synced_at")
+                    "last_synced": item.get("last_synced")
                     or synced_at_default,
                 }
             else:
@@ -484,7 +484,7 @@ class SQLAlchemyStore:
                     "path": getattr(item, "path"),
                     "executable": getattr(item, "executable"),
                     "contents": getattr(item, "contents"),
-                    "_mergestat_synced_at": getattr(item, "_mergestat_synced_at", None)
+                    "last_synced": getattr(item, "last_synced", None)
                     or synced_at_default,
                 }
             rows.append(row)
@@ -493,7 +493,7 @@ class SQLAlchemyStore:
             GitFile,
             rows,
             conflict_columns=["repo_id", "path"],
-            update_columns=["executable", "contents", "_mergestat_synced_at"],
+            update_columns=["executable", "contents", "last_synced"],
         )
 
     async def insert_git_commit_data(self, commit_data: List[GitCommit]) -> None:
@@ -514,7 +514,7 @@ class SQLAlchemyStore:
                     "committer_email": item.get("committer_email"),
                     "committer_when": item.get("committer_when"),
                     "parents": item.get("parents"),
-                    "_mergestat_synced_at": item.get("_mergestat_synced_at")
+                    "last_synced": item.get("last_synced")
                     or synced_at_default,
                 }
             else:
@@ -529,7 +529,7 @@ class SQLAlchemyStore:
                     "committer_email": getattr(item, "committer_email"),
                     "committer_when": getattr(item, "committer_when"),
                     "parents": getattr(item, "parents"),
-                    "_mergestat_synced_at": getattr(item, "_mergestat_synced_at", None)
+                    "last_synced": getattr(item, "last_synced", None)
                     or synced_at_default,
                 }
             rows.append(row)
@@ -547,7 +547,7 @@ class SQLAlchemyStore:
                 "committer_email",
                 "committer_when",
                 "parents",
-                "_mergestat_synced_at",
+                "last_synced",
             ],
         )
 
@@ -568,7 +568,7 @@ class SQLAlchemyStore:
                     "deletions": item.get("deletions"),
                     "old_file_mode": old_mode,
                     "new_file_mode": new_mode,
-                    "_mergestat_synced_at": item.get("_mergestat_synced_at")
+                    "last_synced": item.get("last_synced")
                     or synced_at_default,
                 }
             else:
@@ -582,7 +582,7 @@ class SQLAlchemyStore:
                     "deletions": getattr(item, "deletions"),
                     "old_file_mode": old_mode,
                     "new_file_mode": new_mode,
-                    "_mergestat_synced_at": getattr(item, "_mergestat_synced_at", None)
+                    "last_synced": getattr(item, "last_synced", None)
                     or synced_at_default,
                 }
             rows.append(row)
@@ -596,7 +596,7 @@ class SQLAlchemyStore:
                 "deletions",
                 "old_file_mode",
                 "new_file_mode",
-                "_mergestat_synced_at",
+                "last_synced",
             ],
         )
 
@@ -616,7 +616,7 @@ class SQLAlchemyStore:
                     "author_when": item.get("author_when"),
                     "commit_hash": item.get("commit_hash"),
                     "line": item.get("line"),
-                    "_mergestat_synced_at": item.get("_mergestat_synced_at")
+                    "last_synced": item.get("last_synced")
                     or synced_at_default,
                 }
             else:
@@ -629,7 +629,7 @@ class SQLAlchemyStore:
                     "author_when": getattr(item, "author_when"),
                     "commit_hash": getattr(item, "commit_hash"),
                     "line": getattr(item, "line"),
-                    "_mergestat_synced_at": getattr(item, "_mergestat_synced_at", None)
+                    "last_synced": getattr(item, "last_synced", None)
                     or synced_at_default,
                 }
             rows.append(row)
@@ -644,7 +644,7 @@ class SQLAlchemyStore:
                 "author_when",
                 "commit_hash",
                 "line",
-                "_mergestat_synced_at",
+                "last_synced",
             ],
         )
 
@@ -675,7 +675,7 @@ class SQLAlchemyStore:
                     "changes_requested_count": item.get("changes_requested_count", 0),
                     "reviews_count": item.get("reviews_count", 0),
                     "comments_count": item.get("comments_count", 0),
-                    "_mergestat_synced_at": item.get("_mergestat_synced_at")
+                    "last_synced": item.get("last_synced")
                     or synced_at_default,
                 }
             else:
@@ -701,7 +701,7 @@ class SQLAlchemyStore:
                     ),
                     "reviews_count": getattr(item, "reviews_count", 0),
                     "comments_count": getattr(item, "comments_count", 0),
-                    "_mergestat_synced_at": getattr(item, "_mergestat_synced_at", None)
+                    "last_synced": getattr(item, "last_synced", None)
                     or synced_at_default,
                 }
             rows.append(row)
@@ -728,7 +728,7 @@ class SQLAlchemyStore:
                 "changes_requested_count",
                 "reviews_count",
                 "comments_count",
-                "_mergestat_synced_at",
+                "last_synced",
             ],
         )
 
@@ -748,7 +748,7 @@ class SQLAlchemyStore:
                     "reviewer": item.get("reviewer"),
                     "state": item.get("state"),
                     "submitted_at": item.get("submitted_at"),
-                    "_mergestat_synced_at": item.get("_mergestat_synced_at")
+                    "last_synced": item.get("last_synced")
                     or synced_at_default,
                 }
             else:
@@ -759,7 +759,7 @@ class SQLAlchemyStore:
                     "reviewer": getattr(item, "reviewer"),
                     "state": getattr(item, "state"),
                     "submitted_at": getattr(item, "submitted_at"),
-                    "_mergestat_synced_at": getattr(item, "_mergestat_synced_at", None)
+                    "last_synced": getattr(item, "last_synced", None)
                     or synced_at_default,
                 }
             rows.append(row)
@@ -772,7 +772,7 @@ class SQLAlchemyStore:
                 "reviewer",
                 "state",
                 "submitted_at",
-                "_mergestat_synced_at",
+                "last_synced",
             ],
         )
 
@@ -792,7 +792,7 @@ class SQLAlchemyStore:
                     "queued_at": item.get("queued_at"),
                     "started_at": item.get("started_at"),
                     "finished_at": item.get("finished_at"),
-                    "_mergestat_synced_at": item.get("_mergestat_synced_at")
+                    "last_synced": item.get("last_synced")
                     or synced_at_default,
                 }
             else:
@@ -803,7 +803,7 @@ class SQLAlchemyStore:
                     "queued_at": getattr(item, "queued_at", None),
                     "started_at": getattr(item, "started_at"),
                     "finished_at": getattr(item, "finished_at", None),
-                    "_mergestat_synced_at": getattr(item, "_mergestat_synced_at", None)
+                    "last_synced": getattr(item, "last_synced", None)
                     or synced_at_default,
                 }
             rows.append(row)
@@ -817,7 +817,7 @@ class SQLAlchemyStore:
                 "queued_at",
                 "started_at",
                 "finished_at",
-                "_mergestat_synced_at",
+                "last_synced",
             ],
         )
 
@@ -838,7 +838,7 @@ class SQLAlchemyStore:
                     "deployed_at": item.get("deployed_at"),
                     "merged_at": item.get("merged_at"),
                     "pull_request_number": item.get("pull_request_number"),
-                    "_mergestat_synced_at": item.get("_mergestat_synced_at")
+                    "last_synced": item.get("last_synced")
                     or synced_at_default,
                 }
             else:
@@ -852,7 +852,7 @@ class SQLAlchemyStore:
                     "deployed_at": getattr(item, "deployed_at", None),
                     "merged_at": getattr(item, "merged_at", None),
                     "pull_request_number": getattr(item, "pull_request_number", None),
-                    "_mergestat_synced_at": getattr(item, "_mergestat_synced_at", None)
+                    "last_synced": getattr(item, "last_synced", None)
                     or synced_at_default,
                 }
             rows.append(row)
@@ -869,7 +869,7 @@ class SQLAlchemyStore:
                 "deployed_at",
                 "merged_at",
                 "pull_request_number",
-                "_mergestat_synced_at",
+                "last_synced",
             ],
         )
 
@@ -886,7 +886,7 @@ class SQLAlchemyStore:
                     "status": item.get("status"),
                     "started_at": item.get("started_at"),
                     "resolved_at": item.get("resolved_at"),
-                    "_mergestat_synced_at": item.get("_mergestat_synced_at")
+                    "last_synced": item.get("last_synced")
                     or synced_at_default,
                 }
             else:
@@ -896,7 +896,7 @@ class SQLAlchemyStore:
                     "status": getattr(item, "status"),
                     "started_at": getattr(item, "started_at"),
                     "resolved_at": getattr(item, "resolved_at", None),
-                    "_mergestat_synced_at": getattr(item, "_mergestat_synced_at", None)
+                    "last_synced": getattr(item, "last_synced", None)
                     or synced_at_default,
                 }
             rows.append(row)
@@ -909,7 +909,7 @@ class SQLAlchemyStore:
                 "status",
                 "started_at",
                 "resolved_at",
-                "_mergestat_synced_at",
+                "last_synced",
             ],
         )
 
@@ -1220,8 +1220,8 @@ class MongoStore:
                     "queued_at": self._normalize_datetime(item.get("queued_at")),
                     "started_at": self._normalize_datetime(item.get("started_at")),
                     "finished_at": self._normalize_datetime(item.get("finished_at")),
-                    "_mergestat_synced_at": self._normalize_datetime(
-                        item.get("_mergestat_synced_at") or synced_at_default
+                    "last_synced": self._normalize_datetime(
+                        item.get("last_synced") or synced_at_default
                     ),
                 })
             else:
@@ -1238,8 +1238,8 @@ class MongoStore:
                     "finished_at": self._normalize_datetime(
                         getattr(item, "finished_at", None)
                     ),
-                    "_mergestat_synced_at": self._normalize_datetime(
-                        getattr(item, "_mergestat_synced_at", None) or synced_at_default
+                    "last_synced": self._normalize_datetime(
+                        getattr(item, "last_synced", None) or synced_at_default
                     ),
                 })
 
@@ -1252,7 +1252,7 @@ class MongoStore:
                 "queued_at",
                 "started_at",
                 "finished_at",
-                "_mergestat_synced_at",
+                "last_synced",
             ],
             rows,
         )
@@ -1274,8 +1274,8 @@ class MongoStore:
                     "deployed_at": self._normalize_datetime(item.get("deployed_at")),
                     "merged_at": self._normalize_datetime(item.get("merged_at")),
                     "pull_request_number": item.get("pull_request_number"),
-                    "_mergestat_synced_at": self._normalize_datetime(
-                        item.get("_mergestat_synced_at") or synced_at_default
+                    "last_synced": self._normalize_datetime(
+                        item.get("last_synced") or synced_at_default
                     ),
                 })
             else:
@@ -1297,8 +1297,8 @@ class MongoStore:
                         getattr(item, "merged_at", None)
                     ),
                     "pull_request_number": getattr(item, "pull_request_number", None),
-                    "_mergestat_synced_at": self._normalize_datetime(
-                        getattr(item, "_mergestat_synced_at", None) or synced_at_default
+                    "last_synced": self._normalize_datetime(
+                        getattr(item, "last_synced", None) or synced_at_default
                     ),
                 })
 
@@ -1314,7 +1314,7 @@ class MongoStore:
                 "deployed_at",
                 "merged_at",
                 "pull_request_number",
-                "_mergestat_synced_at",
+                "last_synced",
             ],
             rows,
         )
@@ -1435,13 +1435,56 @@ class ClickHouseStore:
             return
 
         async with self._lock:
-            for path in sorted(migrations_dir.glob("*.sql")):
-                sql = await asyncio.to_thread(path.read_text, encoding="utf-8")
-                for stmt in sql.split(";"):
-                    stmt = stmt.strip()
-                    if not stmt:
-                        continue
-                    await asyncio.to_thread(self.client.command, stmt)
+            # Ensure schema_migrations table exists
+            await asyncio.to_thread(
+                self.client.command,
+                "CREATE TABLE IF NOT EXISTS schema_migrations (version String, applied_at DateTime64(3, 'UTC')) ENGINE = MergeTree() ORDER BY version",
+            )
+
+            # Get applied migrations
+            applied_result = await asyncio.to_thread(
+                self.client.query, "SELECT version FROM schema_migrations"
+            )
+            applied_versions = set(
+                row[0] for row in (getattr(applied_result, "result_rows", []) or [])
+            )
+
+            # Collect all migration files
+            migration_files = sorted(
+                list(migrations_dir.glob("*.sql")) + list(migrations_dir.glob("*.py"))
+            )
+
+            for path in migration_files:
+                version = path.name
+                if version in applied_versions:
+                    continue
+
+                if path.suffix == ".sql":
+                    sql = await asyncio.to_thread(path.read_text, encoding="utf-8")
+                    for stmt in sql.split(";"):
+                        stmt = stmt.strip()
+                        if not stmt:
+                            continue
+                        await asyncio.to_thread(self.client.command, stmt)
+                elif path.suffix == ".py":
+                    # Dynamic import and execution for Python migrations
+                    import importlib.util
+
+                    spec = importlib.util.spec_from_file_location(
+                        f"migrations.clickhouse.{path.stem}", path
+                    )
+                    if spec and spec.loader:
+                        module = importlib.util.module_from_spec(spec)
+                        spec.loader.exec_module(module)
+                        if hasattr(module, "upgrade"):
+                            await asyncio.to_thread(module.upgrade, self.client)
+
+                # Record migration
+                await asyncio.to_thread(
+                    self.client.command,
+                    "INSERT INTO schema_migrations (version, applied_at) VALUES ({version:String}, now())",
+                    parameters={"version": version},
+                )
 
     async def _insert_rows(
         self, table: str, columns: List[str], rows: List[Dict[str, Any]]
@@ -1488,7 +1531,7 @@ class ClickHouseStore:
             "created_at": created_at,
             "settings": self._json_or_none(getattr(repo, "settings", None)),
             "tags": self._json_or_none(getattr(repo, "tags", None)),
-            "_mergestat_synced_at": synced_at,
+            "last_synced": synced_at,
         }
         await self._insert_rows(
             "repos",
@@ -1499,7 +1542,7 @@ class ClickHouseStore:
                 "created_at",
                 "settings",
                 "tags",
-                "_mergestat_synced_at",
+                "last_synced",
             ],
             [row],
         )
@@ -1687,8 +1730,8 @@ class ClickHouseStore:
                     "path": item.get("path"),
                     "executable": 1 if item.get("executable") else 0,
                     "contents": item.get("contents"),
-                    "_mergestat_synced_at": self._normalize_datetime(
-                        item.get("_mergestat_synced_at") or synced_at_default
+                    "last_synced": self._normalize_datetime(
+                        item.get("last_synced") or synced_at_default
                     ),
                 })
             else:
@@ -1697,14 +1740,14 @@ class ClickHouseStore:
                     "path": getattr(item, "path"),
                     "executable": 1 if getattr(item, "executable") else 0,
                     "contents": getattr(item, "contents"),
-                    "_mergestat_synced_at": self._normalize_datetime(
-                        getattr(item, "_mergestat_synced_at", None) or synced_at_default
+                    "last_synced": self._normalize_datetime(
+                        getattr(item, "last_synced", None) or synced_at_default
                     ),
                 })
 
         await self._insert_rows(
             "git_files",
-            ["repo_id", "path", "executable", "contents", "_mergestat_synced_at"],
+            ["repo_id", "path", "executable", "contents", "last_synced"],
             rows,
         )
 
@@ -1728,8 +1771,8 @@ class ClickHouseStore:
                         item.get("committer_when")
                     ),
                     "parents": int(item.get("parents") or 0),
-                    "_mergestat_synced_at": self._normalize_datetime(
-                        item.get("_mergestat_synced_at") or synced_at_default
+                    "last_synced": self._normalize_datetime(
+                        item.get("last_synced") or synced_at_default
                     ),
                 })
             else:
@@ -1748,8 +1791,8 @@ class ClickHouseStore:
                         getattr(item, "committer_when")
                     ),
                     "parents": int(getattr(item, "parents") or 0),
-                    "_mergestat_synced_at": self._normalize_datetime(
-                        getattr(item, "_mergestat_synced_at", None) or synced_at_default
+                    "last_synced": self._normalize_datetime(
+                        getattr(item, "last_synced", None) or synced_at_default
                     ),
                 })
 
@@ -1766,7 +1809,7 @@ class ClickHouseStore:
                 "committer_email",
                 "committer_when",
                 "parents",
-                "_mergestat_synced_at",
+                "last_synced",
             ],
             rows,
         )
@@ -1786,8 +1829,8 @@ class ClickHouseStore:
                     "deletions": int(item.get("deletions") or 0),
                     "old_file_mode": item.get("old_file_mode") or "unknown",
                     "new_file_mode": item.get("new_file_mode") or "unknown",
-                    "_mergestat_synced_at": self._normalize_datetime(
-                        item.get("_mergestat_synced_at") or synced_at_default
+                    "last_synced": self._normalize_datetime(
+                        item.get("last_synced") or synced_at_default
                     ),
                 })
             else:
@@ -1799,8 +1842,8 @@ class ClickHouseStore:
                     "deletions": int(getattr(item, "deletions") or 0),
                     "old_file_mode": getattr(item, "old_file_mode", None) or "unknown",
                     "new_file_mode": getattr(item, "new_file_mode", None) or "unknown",
-                    "_mergestat_synced_at": self._normalize_datetime(
-                        getattr(item, "_mergestat_synced_at", None) or synced_at_default
+                    "last_synced": self._normalize_datetime(
+                        getattr(item, "last_synced", None) or synced_at_default
                     ),
                 })
 
@@ -1814,7 +1857,7 @@ class ClickHouseStore:
                 "deletions",
                 "old_file_mode",
                 "new_file_mode",
-                "_mergestat_synced_at",
+                "last_synced",
             ],
             rows,
         )
@@ -1835,8 +1878,8 @@ class ClickHouseStore:
                     "author_when": self._normalize_datetime(item.get("author_when")),
                     "commit_hash": item.get("commit_hash"),
                     "line": item.get("line"),
-                    "_mergestat_synced_at": self._normalize_datetime(
-                        item.get("_mergestat_synced_at") or synced_at_default
+                    "last_synced": self._normalize_datetime(
+                        item.get("last_synced") or synced_at_default
                     ),
                 })
             else:
@@ -1851,8 +1894,8 @@ class ClickHouseStore:
                     ),
                     "commit_hash": getattr(item, "commit_hash"),
                     "line": getattr(item, "line"),
-                    "_mergestat_synced_at": self._normalize_datetime(
-                        getattr(item, "_mergestat_synced_at", None) or synced_at_default
+                    "last_synced": self._normalize_datetime(
+                        getattr(item, "last_synced", None) or synced_at_default
                     ),
                 })
 
@@ -1867,7 +1910,7 @@ class ClickHouseStore:
                 "author_when",
                 "commit_hash",
                 "line",
-                "_mergestat_synced_at",
+                "last_synced",
             ],
             rows,
         )
@@ -1905,8 +1948,8 @@ class ClickHouseStore:
                     ),
                     "reviews_count": int(item.get("reviews_count", 0) or 0),
                     "comments_count": int(item.get("comments_count", 0) or 0),
-                    "_mergestat_synced_at": self._normalize_datetime(
-                        item.get("_mergestat_synced_at") or synced_at_default
+                    "last_synced": self._normalize_datetime(
+                        item.get("last_synced") or synced_at_default
                     ),
                 })
             else:
@@ -1936,8 +1979,8 @@ class ClickHouseStore:
                     ),
                     "reviews_count": int(getattr(item, "reviews_count", 0) or 0),
                     "comments_count": int(getattr(item, "comments_count", 0) or 0),
-                    "_mergestat_synced_at": self._normalize_datetime(
-                        getattr(item, "_mergestat_synced_at", None) or synced_at_default
+                    "last_synced": self._normalize_datetime(
+                        getattr(item, "last_synced", None) or synced_at_default
                     ),
                 })
 
@@ -1963,7 +2006,7 @@ class ClickHouseStore:
                 "changes_requested_count",
                 "reviews_count",
                 "comments_count",
-                "_mergestat_synced_at",
+                "last_synced",
             ],
             rows,
         )
@@ -1984,8 +2027,8 @@ class ClickHouseStore:
                     "reviewer": str(item.get("reviewer")),
                     "state": str(item.get("state")),
                     "submitted_at": self._normalize_datetime(item.get("submitted_at")),
-                    "_mergestat_synced_at": self._normalize_datetime(
-                        item.get("_mergestat_synced_at") or synced_at_default
+                    "last_synced": self._normalize_datetime(
+                        item.get("last_synced") or synced_at_default
                     ),
                 })
             else:
@@ -1998,8 +2041,8 @@ class ClickHouseStore:
                     "submitted_at": self._normalize_datetime(
                         getattr(item, "submitted_at")
                     ),
-                    "_mergestat_synced_at": self._normalize_datetime(
-                        getattr(item, "_mergestat_synced_at", None) or synced_at_default
+                    "last_synced": self._normalize_datetime(
+                        getattr(item, "last_synced", None) or synced_at_default
                     ),
                 })
 
@@ -2012,7 +2055,7 @@ class ClickHouseStore:
                 "reviewer",
                 "state",
                 "submitted_at",
-                "_mergestat_synced_at",
+                "last_synced",
             ],
             rows,
         )
@@ -2031,8 +2074,8 @@ class ClickHouseStore:
                     "queued_at": self._normalize_datetime(item.get("queued_at")),
                     "started_at": self._normalize_datetime(item.get("started_at")),
                     "finished_at": self._normalize_datetime(item.get("finished_at")),
-                    "_mergestat_synced_at": self._normalize_datetime(
-                        item.get("_mergestat_synced_at") or synced_at_default
+                    "last_synced": self._normalize_datetime(
+                        item.get("last_synced") or synced_at_default
                     ),
                 })
             else:
@@ -2049,8 +2092,8 @@ class ClickHouseStore:
                     "finished_at": self._normalize_datetime(
                         getattr(item, "finished_at", None)
                     ),
-                    "_mergestat_synced_at": self._normalize_datetime(
-                        getattr(item, "_mergestat_synced_at", None) or synced_at_default
+                    "last_synced": self._normalize_datetime(
+                        getattr(item, "last_synced", None) or synced_at_default
                     ),
                 })
 
@@ -2063,7 +2106,7 @@ class ClickHouseStore:
                 "queued_at",
                 "started_at",
                 "finished_at",
-                "_mergestat_synced_at",
+                "last_synced",
             ],
             rows,
         )
@@ -2085,8 +2128,8 @@ class ClickHouseStore:
                     "deployed_at": self._normalize_datetime(item.get("deployed_at")),
                     "merged_at": self._normalize_datetime(item.get("merged_at")),
                     "pull_request_number": item.get("pull_request_number"),
-                    "_mergestat_synced_at": self._normalize_datetime(
-                        item.get("_mergestat_synced_at") or synced_at_default
+                    "last_synced": self._normalize_datetime(
+                        item.get("last_synced") or synced_at_default
                     ),
                 })
             else:
@@ -2110,8 +2153,8 @@ class ClickHouseStore:
                     "pull_request_number": getattr(
                         item, "pull_request_number", None
                     ),
-                    "_mergestat_synced_at": self._normalize_datetime(
-                        getattr(item, "_mergestat_synced_at", None) or synced_at_default
+                    "last_synced": self._normalize_datetime(
+                        getattr(item, "last_synced", None) or synced_at_default
                     ),
                 })
 
@@ -2127,7 +2170,7 @@ class ClickHouseStore:
                 "deployed_at",
                 "merged_at",
                 "pull_request_number",
-                "_mergestat_synced_at",
+                "last_synced",
             ],
             rows,
         )
@@ -2145,8 +2188,8 @@ class ClickHouseStore:
                     "status": item.get("status"),
                     "started_at": self._normalize_datetime(item.get("started_at")),
                     "resolved_at": self._normalize_datetime(item.get("resolved_at")),
-                    "_mergestat_synced_at": self._normalize_datetime(
-                        item.get("_mergestat_synced_at") or synced_at_default
+                    "last_synced": self._normalize_datetime(
+                        item.get("last_synced") or synced_at_default
                     ),
                 })
             else:
@@ -2160,8 +2203,8 @@ class ClickHouseStore:
                     "resolved_at": self._normalize_datetime(
                         getattr(item, "resolved_at", None)
                     ),
-                    "_mergestat_synced_at": self._normalize_datetime(
-                        getattr(item, "_mergestat_synced_at", None) or synced_at_default
+                    "last_synced": self._normalize_datetime(
+                        getattr(item, "last_synced", None) or synced_at_default
                     ),
                 })
 
@@ -2173,7 +2216,7 @@ class ClickHouseStore:
                 "status",
                 "started_at",
                 "resolved_at",
-                "_mergestat_synced_at",
+                "last_synced",
             ],
             rows,
         )
@@ -2194,7 +2237,7 @@ class ClickHouseStore:
                     "description": item.get("description"),
                     "members": item.get("members") or [],
                     "updated_at": self._normalize_datetime(item.get("updated_at")),
-                    "_mergestat_synced_at": synced_at,
+                    "last_synced": synced_at,
                 })
             else:
                 rows.append({
@@ -2204,12 +2247,12 @@ class ClickHouseStore:
                     "description": getattr(item, "description"),
                     "members": getattr(item, "members", []) or [],
                     "updated_at": self._normalize_datetime(getattr(item, "updated_at")),
-                    "_mergestat_synced_at": synced_at,
+                    "last_synced": synced_at,
                 })
         
         await self._insert_rows(
             "teams",
-            ["id", "team_uuid", "name", "description", "members", "updated_at", "_mergestat_synced_at"],
+            ["id", "team_uuid", "name", "description", "members", "updated_at", "last_synced"],
             rows
         )
 

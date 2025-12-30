@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Literal
 
 from pydantic import BaseModel, Field
 
@@ -343,3 +343,24 @@ class QuadrantResponse(BaseModel):
     axes: QuadrantAxes
     points: List[QuadrantPoint]
     annotations: List[QuadrantAnnotation]
+
+
+class SankeyNode(BaseModel):
+    name: str
+    group: Optional[str] = None
+    value: Optional[float] = None
+
+
+class SankeyLink(BaseModel):
+    source: str
+    target: str
+    value: float
+
+
+class SankeyResponse(BaseModel):
+    mode: Literal["investment", "expense", "state", "hotspot"]
+    nodes: List[SankeyNode]
+    links: List[SankeyLink]
+    unit: Optional[str] = None
+    label: Optional[str] = None
+    description: Optional[str] = None
