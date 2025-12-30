@@ -73,3 +73,16 @@ class FilterOptionsResponse(BaseModel):
     work_category: List[str]
     issue_type: List[str]
     flow_stage: List[str]
+
+
+class SankeyContext(BaseModel):
+    entity_id: Optional[str] = None
+    entity_label: Optional[str] = None
+
+
+class SankeyRequest(BaseModel):
+    mode: Literal["investment", "expense", "state", "hotspot"]
+    filters: MetricFilter
+    context: Optional[SankeyContext] = None
+    window_start: Optional[date] = None
+    window_end: Optional[date] = None

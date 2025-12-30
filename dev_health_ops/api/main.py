@@ -15,6 +15,7 @@ from .models.filters import (
     FilterOptionsResponse,
     HomeRequest,
     MetricFilter,
+    SankeyRequest,
     ScopeFilter,
     TimeFilter,
 )
@@ -32,6 +33,7 @@ from .models.schemas import (
     PersonMetricResponse,
     PersonSearchResult,
     PersonSummaryResponse,
+    SankeyResponse,
 )
 from .queries.client import clickhouse_client, query_dicts, close_global_client
 from .queries.drilldown import fetch_issues, fetch_pull_requests
@@ -52,6 +54,7 @@ from .services.people import (
 from .services.heatmap import build_heatmap_response
 from .services.flame import build_flame_response
 from .services.quadrant import build_quadrant_response
+from .services.sankey import build_sankey_response
 
 HOME_CACHE = TTLCache(ttl_seconds=60)
 EXPLAIN_CACHE = TTLCache(ttl_seconds=120)
@@ -601,6 +604,21 @@ async def investment_post(payload: HomeRequest) -> InvestmentResponse:
     try:
         return await build_investment_response(
             db_url=_db_url(), filters=payload.filters
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Data unavailable") from exc
+
+
+@app.post("/api/v1/sankey", response_model=SankeyResponse)
+async def sankey_post(payload: SankeyRequest) -> SankeyResponse:
+    try:
+        return await build_sankey_response(
+            db_url=_db_url(),
+            mode=payload.mode,
+            filters=payload.filters,
+            context=payload.context,
+            window_start=payload.window_start,
+            window_end=payload.window_end,
         )
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Data unavailable") from exc
