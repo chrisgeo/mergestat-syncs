@@ -42,8 +42,12 @@ jobs:
             if [[ -n "${{ github.event.inputs.image_registry }}" ]]; then
               echo "IMAGE_REGISTRY=${{ github.event.inputs.image_registry }}" >> $GITHUB_ENV
             fi
+          elif [[ "${GITHUB_EVENT_NAME}" == "release" ]]; then
+            echo "VERSION=${{ github.event.release.tag_name }}" >> $GITHUB_ENV
           else
-            echo "VERSION=${{ github.event_name == 'release' && github.event.release.tag_name || github.ref_name }}" >> $GITHUB_ENV
+            # Use a PEP 440 compliant version for branch builds
+            SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+            echo "VERSION=0.0.0.dev0+${SHORT_SHA}" >> $GITHUB_ENV
           fi
 
       - name: Set up Docker Buildx
