@@ -34,6 +34,7 @@ if TYPE_CHECKING:
     from metrics.schemas import FileComplexitySnapshot
     from metrics.schemas import WorkItemUserMetricsDailyRecord
     from models.teams import Team
+    from models.work_items import WorkItem, WorkItemStatusTransition
 
 
 def _parse_date_value(value: Any) -> Optional[date]:
