@@ -8,6 +8,9 @@ WORKDIR /build
 COPY . .
 RUN apt update && apt install -y build-essential git
 
+ARG SETUPTOOLS_SCM_PRETEND_VERSION
+ENV SETUPTOOLS_SCM_PRETEND_VERSION=${SETUPTOOLS_SCM_PRETEND_VERSION}
+
 RUN pip install --no-cache-dir .
 RUN rm -rf /build
 
