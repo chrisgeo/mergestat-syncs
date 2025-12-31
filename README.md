@@ -186,6 +186,62 @@ dev-hops api --db "clickhouse://localhost:8123/default" --reload
 
 OpenAPI docs are available at <http://localhost:8000/docs>.
 
+## Container images
+
+This repo ships two reusable images built from `docker/Dockerfile`, which provides a multi-stage build (`base`, `api`, `runner`). The images cover demo runners and REST APIs:
+
+1. `dev-hops-api` runs `dev-hops api` and exposes `port 8000`.
+2. `dev-hops-runner` uses `dev-hops` as the entrypoint so you can invoke `sync`, `fixtures`, `metrics`, etc., through a container.
+
+### Building the images
+
+Use `scripts/build-images.sh` to build both images (it sets `SETUPTOOLS_SCM_PRETEND_VERSION` so `setuptools_scm` doesn't require `.git`). The base stage installs the package and then drops the source tree so the runtime image contains only the installed wheel. Override the defaults with:
+
+- `IMAGE_REGISTRY` (defaults to `ghcr.io/chrisgeo/dev-health-ops`)
+- `VERSION` (tags the images; default `latest`)
+- `SETUPTOOLS_SCM_PRETEND_VERSION` (needed when building from a released archive without Git metadata)
+
+```bash
+cd /path/to/dev-health-ops
+IMAGE_REGISTRY=ghcr.io/myorg/dev-health-ops \
+VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo latest) \
+./scripts/build-images.sh
+```
+
+Any extra arguments (`--no-cache`, `--pull`, etc.) are forwarded to both `docker build` invocations.
+
+### Running the API container
+
+Expose port `8000` and point the container at your ClickHouse backend:
+
+```bash
+docker run --rm -p 8000:8000 \
+  -e CLICKHOUSE_DSN=clickhouse://ch:ch@clickhouse:8123/stats \
+  dev-hops-api:latest
+```
+
+Add flags after the image name (e.g., `--reload`) to modify the default `api` invocation (`--host 0.0.0.0 --port 8000` is already applied).
+
+### Using the runner container
+
+Mount repositories or fixtures directories and run any `dev-hops` command you need. Share a Docker network with ClickHouse (Compose uses `dev-health-ops_default` by default):
+
+```bash
+docker run --rm -it \
+  --network dev-health-ops_default \
+  -v "$(pwd)":/app \
+  -w /app \
+  -e CLICKHOUSE_DSN=clickhouse://ch:ch@clickhouse:8123/stats \
+  dev-hops-runner:latest \
+  fixtures generate --db clickhouse://ch:ch@clickhouse:8123/stats --days 14
+```
+
+Replace the final arguments with any `dev-hops` subcommand you need (`sync`, `metrics daily`, etc.). The entrypoint handles argument parsing so you can run the same image in CI, demos, or release flows.
+
+### Automated builds
+
+`docker-images.yml` runs on GitHub when a `v*` tag is pushed or a release is published. It logs into `ghcr.io`, builds both `runner`/`api` targets from `docker/Dockerfile`, and pushes `:latest` plus the tag pulled from the workflow context (`${{ github.ref_name }}` or the release tag). Make sure `GITHUB_TOKEN` has `packages: write` (default) so the workflow can publish into `ghcr.io/chrisgeo/dev-health-ops`.
+
 ### “Download” work tracking data (Jira/GitHub/GitLab)
 
 Work items are fetched from provider APIs via a dedicated sync command. This is separate from PR ingestion:

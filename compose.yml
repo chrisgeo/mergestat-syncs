@@ -98,7 +98,10 @@ services:
     working_dir: /app
     command: /bin/sh -c 'python3 cli.py sync git --provider local --db "$DB_CONN_STRING" --repo-path .'
   api:
-    image: python:3.12-alpine
+    build:
+      context: .
+      dockerfile: ./docker/Dockerfile
+      target: api
     container_name: dev-health-api
     environment:
       CLICKHOUSE_DSN: clickhouse://ch:ch@clickhouse:8123/stats
@@ -110,6 +113,5 @@ services:
     volumes:
       - ./:/app
     working_dir: /app
-    command: /bin/sh -c 'apk add --no-cache git && pip install -e . && python cli.py api --host 0.0.0.0 --port 8000'
   renderer:
     image: grafana/grafana-image-renderer:latest
