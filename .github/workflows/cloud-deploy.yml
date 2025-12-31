@@ -29,27 +29,28 @@ jobs:
     env:
       VERSION: ${{ github.event.inputs.version }}
       IMAGE_REGISTRY: ${{ github.event.inputs.image_registry }}
+      GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
     steps:
       - name: Skip Cloud Run deployment without credentials
-        if: ${{ !(env.CLOUD_RUN_PROJECT && env.CLOUD_RUN_REGION && env.CLOUD_RUN_SERVICE && secrets.GCP_SA_KEY) }}
+        if: ${{ not(env.CLOUD_RUN_PROJECT && env.CLOUD_RUN_REGION && env.CLOUD_RUN_SERVICE && env.GCP_SA_KEY) }}
         run: |
           echo "Cloud Run deploy skipped because GCP configuration/secrets are missing."
           echo "Set CLOUD_RUN_* secrets and GCP_SA_KEY to enable deployments."
 
       - name: Authenticate to Google Cloud
-        if: ${{ env.CLOUD_RUN_PROJECT && env.CLOUD_RUN_REGION && env.CLOUD_RUN_SERVICE && secrets.GCP_SA_KEY }}
+        if: ${{ env.CLOUD_RUN_PROJECT && env.CLOUD_RUN_REGION && env.CLOUD_RUN_SERVICE && env.GCP_SA_KEY }}
         uses: google-github-actions/auth@v1
         with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          credentials_json: ${{ env.GCP_SA_KEY }}
 
       - name: Set up gcloud CLI
-        if: ${{ env.CLOUD_RUN_PROJECT && env.CLOUD_RUN_REGION && env.CLOUD_RUN_SERVICE && secrets.GCP_SA_KEY }}
+        if: ${{ env.CLOUD_RUN_PROJECT && env.CLOUD_RUN_REGION && env.CLOUD_RUN_SERVICE && env.GCP_SA_KEY }}
         uses: google-github-actions/setup-gcloud@v1
         with:
           project_id: ${{ env.CLOUD_RUN_PROJECT }}
 
       - name: Deploy API to Cloud Run
-        if: ${{ env.CLOUD_RUN_PROJECT && env.CLOUD_RUN_REGION && env.CLOUD_RUN_SERVICE && env.CLICKHOUSE_DSN && secrets.GCP_SA_KEY }}
+        if: ${{ env.CLOUD_RUN_PROJECT && env.CLOUD_RUN_REGION && env.CLOUD_RUN_SERVICE && env.CLICKHOUSE_DSN && env.GCP_SA_KEY }}
         run: |
           gcloud run deploy "${{ env.CLOUD_RUN_SERVICE }}" \
             --image "${{ env.IMAGE_REGISTRY }}/dev-hops-api:${{ env.VERSION }}" \
