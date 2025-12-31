@@ -11,8 +11,8 @@ WORKDIR /build
 COPY . .
 RUN apt update && apt install -y build-essential git
 
-RUN pip install --no-cache-dir . \
-  && rm -rf /build
+RUN pip install --no-cache-dir .
+RUN rm -rf /build
 
 WORKDIR /app
 RUN mkdir -p /app
