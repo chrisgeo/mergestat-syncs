@@ -11,7 +11,19 @@ WORKDIR /build
 COPY . .
 RUN apt update && apt install -y build-essential git
 
-RUN pip install --no-cache-dir .
+RUN SETUPTOOLS_SCM_PRETEND_VERSION="$(python - <<'PY'
+import os
+import re
+
+version = os.environ.get("SETUPTOOLS_SCM_PRETEND_VERSION", "0+unknown").strip()
+match = re.match(r"^v?(\\d+\\.\\d+\\.\\d+)-([0-9a-f]+)$", version)
+if match:
+    version = f"{match.group(1)}.post0+g{match.group(2)}"
+elif re.match(r"^v?\\d+\\.\\d+\\.\\d+$", version):
+    version = version.lstrip("v")
+print(version)
+PY
+)" pip install --no-cache-dir .
 RUN rm -rf /build
 
 WORKDIR /app
