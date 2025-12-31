@@ -17,11 +17,10 @@ from models.git import (
 from models.work_items import WorkItem, WorkItemStatusTransition, WorkItemType
 from models.teams import Team
 from metrics.schemas import (
-    RepoMetricsDailyRecord,
     UserMetricsDailyRecord,
     WorkItemMetricsDailyRecord,
     WorkItemCycleTimeRecord,
-    FileMetricsRecord,
+    WorkItemUserMetricsDailyRecord,
 )
 
 
