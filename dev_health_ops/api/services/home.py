@@ -105,6 +105,26 @@ _METRICS = [
         "transform": lambda v: v * 100.0,
         "scope": "repo",
     },
+    {
+        "metric": "rework_ratio",
+        "label": "Rework Ratio",
+        "unit": "%",
+        "table": "repo_metrics_daily",
+        "column": "rework_churn_ratio_30d",
+        "aggregator": "avg",
+        "transform": lambda v: v * 100.0,
+        "scope": "repo",
+    },
+    {
+        "metric": "ci_success",
+        "label": "CI Success Rate",
+        "unit": "%",
+        "table": "cicd_metrics_daily",
+        "column": "success_rate",
+        "aggregator": "avg",
+        "transform": lambda v: v * 100.0,
+        "scope": "repo",
+    },
 ]
 
 
