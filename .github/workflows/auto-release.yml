@@ -54,12 +54,42 @@ jobs:
           generate_release_notes: true
           prerelease: true
 
-  call-publish:
+  pypi-publish:
+    name: Build and Publish to PyPI
     needs: tag-and-release
-    uses: ./.github/workflows/publish.yml
-    with:
-      tag: ${{ needs.tag-and-release.outputs.new_tag }}
-    secrets: inherit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.tag-and-release.outputs.new_tag }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install build
+
+      - name: Build package
+        run: python -m build
+
+      - name: Publish to PyPI (Token)
+        if: secrets.PYPI_API_TOKEN != ''
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+
+      - name: Publish to PyPI (OIDC)
+        if: secrets.PYPI_API_TOKEN == ''
+        uses: pypa/gh-action-pypi-publish@release/v1
 
   call-release-plugin:
     needs: tag-and-release
