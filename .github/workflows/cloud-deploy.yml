@@ -4,13 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Image tag to deploy (matches what docker-images.yml pushed)'
+        description: "Image tag to deploy (matches what docker-images.yml pushed)"
         required: false
-        default: 'latest'
+        default: "latest"
       image_registry:
-        description: 'Container registry hosting the artifacts'
+        description: "Container registry hosting the artifacts"
         required: false
-        default: 'ghcr.io/chrisgeo/dev-health-ops'
+        default: "ghcr.io/chrisgeo/dev-health-ops"
 
 env:
   CLOUD_RUN_PROJECT: ${{ secrets.CLOUD_RUN_PROJECT }}
@@ -32,7 +32,7 @@ jobs:
       GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
     steps:
       - name: Skip Cloud Run deployment without credentials
-        if: ${{ not(env.CLOUD_RUN_PROJECT && env.CLOUD_RUN_REGION && env.CLOUD_RUN_SERVICE && env.GCP_SA_KEY) }}
+        if: ${{ !(env.CLOUD_RUN_PROJECT && env.CLOUD_RUN_REGION && env.CLOUD_RUN_SERVICE && env.GCP_SA_KEY) }}
         run: |
           echo "Cloud Run deploy skipped because GCP configuration/secrets are missing."
           echo "Set CLOUD_RUN_* secrets and GCP_SA_KEY to enable deployments."
