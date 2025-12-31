@@ -37,10 +37,17 @@ jobs:
 
       - name: Determine version
         run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
             INPUT_VER="${{ github.event.inputs.version }}"
-            echo "PYTHON_VERSION=${INPUT_VER}" >> $GITHUB_ENV
-            echo "DOCKER_TAG=${INPUT_VER}" >> $GITHUB_ENV
+            if [[ "${INPUT_VER}" == "latest" ]]; then
+              echo "PYTHON_VERSION=0.0.0+${SHORT_SHA}" >> $GITHUB_ENV
+              echo "DOCKER_TAG=latest" >> $GITHUB_ENV
+            else
+              # Manual run: Docker tag with hyphen, Python version with plus
+              echo "PYTHON_VERSION=${INPUT_VER}+${SHORT_SHA}" >> $GITHUB_ENV
+              echo "DOCKER_TAG=${INPUT_VER}-${SHORT_SHA}" >> $GITHUB_ENV
+            fi
             if [[ -n "${{ github.event.inputs.image_registry }}" ]]; then
               echo "IMAGE_REGISTRY=${{ github.event.inputs.image_registry }}" >> $GITHUB_ENV
             fi
@@ -48,11 +55,12 @@ jobs:
             RELEASE_TAG="${{ github.event.release.tag_name }}"
             echo "PYTHON_VERSION=${RELEASE_TAG}" >> $GITHUB_ENV
             echo "DOCKER_TAG=${RELEASE_TAG}" >> $GITHUB_ENV
+          elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            echo "PYTHON_VERSION=${GITHUB_REF_NAME}" >> $GITHUB_ENV
+            echo "DOCKER_TAG=${GITHUB_REF_NAME}" >> $GITHUB_ENV
           else
-            SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-            # PEP 440 compliant version for python package
+            # Branch push: Use SHA for Docker tag, PEP 440 for Python
             echo "PYTHON_VERSION=0.0.0.dev0+${SHORT_SHA}" >> $GITHUB_ENV
-            # Docker tag safe version (just the SHA)
             echo "DOCKER_TAG=${SHORT_SHA}" >> $GITHUB_ENV
           fi
 
