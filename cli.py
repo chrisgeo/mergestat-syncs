@@ -1400,6 +1400,19 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
                             )
                         )
 
+                        if not repo_result.user_metrics:
+                            repo_result.user_metrics = (
+                                generator.generate_user_metrics_daily(
+                                    day=day,
+                                    member_map=team_assignment["member_map"],
+                                )
+                            )
+                        if not wi_user_rows:
+                            wi_user_rows = generator.generate_work_item_user_metrics_daily(
+                                day=day,
+                                member_map=team_assignment["member_map"],
+                            )
+
                         # Enrich User Metrics with IC fields
                         ic_metrics = compute_ic_metrics_daily(
                             git_metrics=repo_result.user_metrics,

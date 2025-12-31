@@ -93,11 +93,19 @@ _FORBIDDEN_QUERY_PARAMS = {
 
 
 def _db_url() -> str:
-    return (
-        os.getenv("CLICKHOUSE_DSN")
+    dsn = (
+        os.getenv("DATABASE_URL")
         or os.getenv("DB_CONN_STRING")
-        or "clickhouse://localhost:8123/default"
+        or os.getenv("CLICKHOUSE_DSN")
     )
+    if dsn:
+        return dsn
+
+    logger.warning(
+        "Missing database environment variable: DATABASE_URL, DB_CONN_STRING, or CLICKHOUSE_DSN"
+    )
+
+    raise RuntimeError("No database environment variable is not set.")
 
 
 def _filters_from_query(
