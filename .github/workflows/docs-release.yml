@@ -32,6 +32,12 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
+      - name: Remove legacy latest version
+        run: |
+          if mike list | awk '{print $1}' | grep -Fxq latest; then
+            mike delete latest --push
+          fi
+
       - name: Deploy versioned docs with Mike
         run: |
           VERSION="${{ github.event.release.tag_name }}"
