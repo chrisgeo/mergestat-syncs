@@ -54,11 +54,10 @@ jobs:
           generate_release_notes: true
           prerelease: true
 
-  build-and-publish:
-    name: Build and Publish
+  pypi-publish:
+    name: Build and Publish to PyPI
     needs: tag-and-release
     runs-on: ubuntu-latest
-    environment: release
     permissions:
       contents: read
       id-token: write
