@@ -11,7 +11,7 @@ on:
 
 jobs:
   tag-and-release:
-    if: (github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'pre-release')) || github.event_name == 'workflow_dispatch'
+    if: ((github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'pre-release')) || github.event_name == 'workflow_dispatch') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -61,6 +61,8 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    env:
+      PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -82,13 +84,13 @@ jobs:
         run: python -m build
 
       - name: Publish to PyPI (Token)
-        if: secrets.PYPI_API_TOKEN != ''
+        if: env.PYPI_API_TOKEN != ''
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           password: ${{ secrets.PYPI_API_TOKEN }}
 
       - name: Publish to PyPI (OIDC)
-        if: secrets.PYPI_API_TOKEN == ''
+        if: env.PYPI_API_TOKEN == ''
         uses: pypa/gh-action-pypi-publish@release/v1
 
   call-release-plugin:

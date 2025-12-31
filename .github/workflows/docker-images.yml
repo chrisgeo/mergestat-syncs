@@ -68,9 +68,11 @@ jobs:
              API_TAGS="${API_TAGS},${CURRENT_REGISTRY}/dev-hops-api:latest"
           fi
           
-          echo "PYTHON_VERSION=${PYTHON_VERSION}" >> $GITHUB_ENV
-          echo "RUNNER_TAGS=${RUNNER_TAGS}" >> $GITHUB_ENV
-          echo "API_TAGS=${API_TAGS}" >> $GITHUB_ENV
+          {
+            echo "PYTHON_VERSION=${PYTHON_VERSION}"
+            echo "RUNNER_TAGS=${RUNNER_TAGS}"
+            echo "API_TAGS=${API_TAGS}"
+          } >> "$GITHUB_ENV"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3

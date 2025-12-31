@@ -1,7 +1,7 @@
 import random
 import uuid
-from datetime import datetime, timedelta, timezone
-from typing import List, Dict, Any, Optional
+from datetime import date, datetime, timedelta, timezone
+from typing import List, Dict, Any, Optional, Tuple
 
 from models.git import (
     Repo,
@@ -22,6 +22,7 @@ from metrics.schemas import (
     WorkItemMetricsDailyRecord,
     WorkItemCycleTimeRecord,
     FileMetricsRecord,
+    WorkItemUserMetricsDailyRecord,
 )
 
 
@@ -608,6 +609,107 @@ class SyntheticDataGenerator:
             )
         return records
 
+    def _resolve_team(
+        self,
+        member_map: Optional[Dict[str, Any]],
+        author_name: str,
+        author_email: str,
+    ) -> Tuple[Optional[str], Optional[str]]:
+        if not member_map:
+            return None, None
+        for key in (author_email, author_name):
+            if not key:
+                continue
+            entry = member_map.get(str(key).strip().lower())
+            if entry:
+                return entry[0], entry[1]
+        return None, None
+
+    def generate_user_metrics_daily(
+        self,
+        *,
+        day: date,
+        member_map: Optional[Dict[str, Any]] = None,
+    ) -> List[UserMetricsDailyRecord]:
+        records = []
+        computed_at = datetime.now(timezone.utc)
+        for author_name, author_email in self.authors:
+            team_id, team_name = self._resolve_team(
+                member_map, author_name, author_email
+            )
+            commits = random.randint(0, 6)
+            loc_added = random.randint(0, 400)
+            loc_deleted = random.randint(0, loc_added)
+            prs_authored = random.randint(0, 3)
+            prs_merged = random.randint(0, prs_authored)
+            pr_cycle_p90 = float(random.randint(24, 120))
+            median_pr_cycle = float(random.randint(8, 72))
+            work_items_completed = random.randint(0, 4)
+            work_items_active = random.randint(0, 4)
+            delivery_units = prs_merged + work_items_completed
+            records.append(
+                UserMetricsDailyRecord(
+                    repo_id=self.repo_id,
+                    day=day,
+                    author_email=author_email,
+                    commits_count=commits,
+                    loc_added=loc_added,
+                    loc_deleted=loc_deleted,
+                    files_changed=random.randint(0, 10),
+                    large_commits_count=random.randint(0, 1),
+                    avg_commit_size_loc=float(
+                        (loc_added + loc_deleted) / max(commits, 1)
+                    ),
+                    prs_authored=prs_authored,
+                    prs_merged=prs_merged,
+                    avg_pr_cycle_hours=median_pr_cycle,
+                    median_pr_cycle_hours=median_pr_cycle,
+                    computed_at=computed_at,
+                    pr_cycle_p90_hours=pr_cycle_p90,
+                    team_id=team_id,
+                    team_name=team_name,
+                    identity_id=author_email,
+                    loc_touched=loc_added + loc_deleted,
+                    prs_opened=prs_authored,
+                    work_items_completed=work_items_completed,
+                    work_items_active=work_items_active,
+                    delivery_units=delivery_units,
+                    cycle_p50_hours=median_pr_cycle,
+                    cycle_p90_hours=pr_cycle_p90,
+                )
+            )
+        return records
+
+    def generate_work_item_user_metrics_daily(
+        self,
+        *,
+        day: date,
+        member_map: Optional[Dict[str, Any]] = None,
+    ) -> List[WorkItemUserMetricsDailyRecord]:
+        records = []
+        computed_at = datetime.now(timezone.utc)
+        for author_name, author_email in self.authors:
+            team_id, team_name = self._resolve_team(
+                member_map, author_name, author_email
+            )
+            records.append(
+                WorkItemUserMetricsDailyRecord(
+                    day=day,
+                    provider=self.provider,
+                    work_scope_id=self.repo_name,
+                    user_identity=author_email,
+                    team_id=team_id,
+                    team_name=team_name,
+                    items_started=random.randint(0, 4),
+                    items_completed=random.randint(0, 4),
+                    wip_count_end_of_day=random.randint(0, 6),
+                    cycle_time_p50_hours=float(random.randint(8, 72)),
+                    cycle_time_p90_hours=float(random.randint(24, 120)),
+                    computed_at=computed_at,
+                )
+            )
+        return records
+
     def generate_work_items(
         self,
         days: int = 30,
@@ -882,3 +984,44 @@ class SyntheticDataGenerator:
                     )
                 )
         return transitions
+
+    def generate_repo_metrics_daily(
+        self, days: int = 30
+    ) -> List[RepoMetricsDailyRecord]:
+        records = []
+        end_date = datetime.now(timezone.utc).date()
+        for i in range(days):
+            day = end_date - timedelta(days=i)
+            records.append(
+                RepoMetricsDailyRecord(
+                    repo_id=self.repo_id,
+                    day=day,
+                    commits_count=random.randint(1, 20),
+                    total_loc_touched=random.randint(150, 3000),
+                    avg_commit_size_loc=float(random.randint(10, 100)),
+                    large_commit_ratio=random.uniform(0.0, 0.2),
+                    prs_merged=random.randint(0, 5),
+                    median_pr_cycle_hours=float(random.randint(4, 72)),
+                    computed_at=datetime.now(timezone.utc),
+                )
+            )
+        return records
+
+    def generate_file_metrics(self) -> List[FileMetricsRecord]:
+        records = []
+        computed_at = datetime.now(timezone.utc)
+        today = computed_at.date()
+        for file_path in self.files:
+            records.append(
+                FileMetricsRecord(
+                    repo_id=self.repo_id,
+                    day=today,
+                    path=file_path,
+                    churn=random.randint(10, 1000),
+                    contributors=random.randint(1, 5),
+                    commits_count=random.randint(1, 20),
+                    hotspot_score=random.uniform(0.0, 1.0),
+                    computed_at=computed_at,
+                )
+            )
+        return records

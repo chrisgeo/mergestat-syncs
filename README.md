@@ -197,6 +197,8 @@ This repo ships two reusable images built from `docker/Dockerfile`, which provid
 
 Use `scripts/build-images.sh` to build both images (it sets `SETUPTOOLS_SCM_PRETEND_VERSION` so `setuptools_scm` doesn't require `.git`). The base stage installs the package and then drops the source tree so the runtime image contains only the installed wheel. Override the defaults with:
 
+- Note: the API runtime loads packaged SQL files from `dev_health_ops/api/sql`. If you extend the build, make sure those SQL files are included in the wheel (the Docker build will fail fast if they're missing).
+
 - `IMAGE_REGISTRY` (defaults to `ghcr.io/chrisgeo/dev-health-ops`)
 - `VERSION` (tags the images; default `latest`)
 - `SETUPTOOLS_SCM_PRETEND_VERSION` (needed when building from a released archive without Git metadata)
@@ -563,32 +565,32 @@ This behavior is different from GitHub/GitLab connectors, which provide accurate
 
 1.  Sync teams
 
-python cli.py sync teams --provider config --path config/teams.yaml --db "<DB_CONN>"
+dev-hops sync teams --provider config --path config/teams.yaml --db "<DB_CONN>"
 
-# or: python cli.py sync teams --provider jira --db "<DB_CONN>"
+# or: dev-hops sync teams --provider jira --db "<DB_CONN>"
 
 2. Sync git facts (example: GitHub)
 
-python cli.py sync git --provider github --owner "<ORG>" --repo "<REPO>" --db "<DB_CONN>"
-python cli.py sync prs --provider github --owner "<ORG>" --repo "<REPO>" --db "<DB_CONN>"
-python cli.py sync blame --provider github --owner "<ORG>" --repo "<REPO>" --db "<DB_CONN>"
-python cli.py sync cicd --provider github --owner "<ORG>" --repo "<REPO>" --db "<DB_CONN>"
-python cli.py sync deployments --provider github --owner "<ORG>" --repo "<REPO>" --db "<DB_CONN>"
-python cli.py sync incidents --provider github --owner "<ORG>" --repo "<REPO>" --db "<DB_CONN>"
+dev-hops sync git --provider github --owner "<ORG>" --repo "<REPO>" --db "<DB_CONN>"
+dev-hops sync prs --provider github --owner "<ORG>" --repo "<REPO>" --db "<DB_CONN>"
+dev-hops sync blame --provider github --owner "<ORG>" --repo "<REPO>" --db "<DB_CONN>"
+dev-hops sync cicd --provider github --owner "<ORG>" --repo "<REPO>" --db "<DB_CONN>"
+dev-hops sync deployments --provider github --owner "<ORG>" --repo "<REPO>" --db "<DB_CONN>"
+dev-hops sync incidents --provider github --owner "<ORG>" --repo "<REPO>" --db "<DB_CONN>"
 
 3. Sync work items (and derived work‑item tables)
 
-python cli.py sync work-items --provider github --db "<DB_CONN>" --date YYYY-MM-DD --backfill 30
+dev-hops sync work-items --provider github --db "<DB_CONN>" --date YYYY-MM-DD --backfill 30
 
 # use --provider jira|gitlab|all as needed
 
 4. Compute daily metrics (uses stored facts)
 
-python cli.py metrics daily --db "<DB_CONN>" --date YYYY-MM-DD --backfill 30
+dev-hops metrics daily --db "<DB_CONN>" --date YYYY-MM-DD --backfill 30
 
 5. Compute complexity snapshots
 
-python cli.py metrics complexity --repo-path /path/to/repo --db "<DB_CONN>" --date YYYY-MM-DD --backfill 30
+dev-hops metrics complexity --repo-path /path/to/repo --db "<DB_CONN>" --date YYYY-MM-DD --backfill 30
 
 ## Sample Dashboards
 

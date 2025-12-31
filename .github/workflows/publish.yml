@@ -7,6 +7,9 @@ on:
         description: 'The tag to build and publish'
         required: true
         type: string
+    secrets:
+      PYPI_API_TOKEN:
+        required: false
 
 jobs:
   build-and-publish:
@@ -15,6 +18,8 @@ jobs:
     permissions:
       contents: read
       id-token: write  # IMPORTANT: this permission is mandatory for trusted publishing
+    env:
+      PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -36,11 +41,11 @@ jobs:
         run: python -m build
 
       - name: Publish to PyPI (Token)
-        if: secrets.PYPI_API_TOKEN != ''
+        if: env.PYPI_API_TOKEN != ''
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           password: ${{ secrets.PYPI_API_TOKEN }}
 
       - name: Publish to PyPI (OIDC)
-        if: secrets.PYPI_API_TOKEN == ''
+        if: env.PYPI_API_TOKEN == ''
         uses: pypa/gh-action-pypi-publish@release/v1

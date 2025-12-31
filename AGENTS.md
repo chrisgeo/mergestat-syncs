@@ -5,6 +5,7 @@ Purpose: compact, actionable rules for an AI coding agent (Copilot-like) working
 - Start by reading `cli.py`, `processors/local.py`, and `connectors/__init__.py` to understand boundaries.
 - Prefer minimal, surgical changes. Use `replace` or `write_file` for edits and keep surrounding style.
 - Use `codebase_investigator` for planning complex changes or understanding the system.
+- Always ensure the terminal has a virtualenv activated: pyenv activate dev-health
 
 ## Architecture & flows
 

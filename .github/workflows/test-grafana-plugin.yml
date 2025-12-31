@@ -49,18 +49,18 @@ jobs:
         run: |
           PLUGIN_ID=$(jq -r .id src/plugin.json)
           VERSION=$(cat dist/plugin.json | jq -r .info.version)
-          echo "plugin_id=$PLUGIN_ID" >> $GITHUB_OUTPUT
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "plugin_id=$PLUGIN_ID" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Package Plugin for Validation
         run: |
-          PLUGIN_ID=${{ steps.metadata.outputs.plugin_id }}
-          VERSION=${{ steps.metadata.outputs.version }}
-          mv dist $PLUGIN_ID
-          zip -r $PLUGIN_ID-$VERSION.zip $PLUGIN_ID
+          PLUGIN_ID="${{ steps.metadata.outputs.plugin_id }}"
+          VERSION="${{ steps.metadata.outputs.version }}"
+          mv dist "$PLUGIN_ID"
+          zip -r "$PLUGIN_ID-$VERSION.zip" "$PLUGIN_ID"
 
       - name: Validate Plugin
         run: |
-          PLUGIN_ID=${{ steps.metadata.outputs.plugin_id }}
-          VERSION=${{ steps.metadata.outputs.version }}
-          npx @grafana/plugin-validator@latest $PLUGIN_ID-$VERSION.zip
+          PLUGIN_ID="${{ steps.metadata.outputs.plugin_id }}"
+          VERSION="${{ steps.metadata.outputs.version }}"
+          npx @grafana/plugin-validator@latest "$PLUGIN_ID-$VERSION.zip"

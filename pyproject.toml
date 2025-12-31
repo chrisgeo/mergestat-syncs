@@ -87,3 +87,6 @@ packages = [
   "providers.jira",
 ]
 py-modules = ["cli", "storage", "utils"]
+
+[tool.setuptools.package-data]
+dev_health_ops = ["api/sql/**/*.sql"]

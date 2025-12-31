@@ -26,6 +26,9 @@ on:
         description: 'Branch to commit version bump to (pre-release only)'
         required: false
         type: string
+    secrets:
+      GRAFANA_ACCESS_POLICY_TOKEN:
+        required: false
 
 jobs:
   check-changes:
@@ -42,44 +45,44 @@ jobs:
         id: check
         run: |
           if [ -n "${{ inputs.tag }}" ]; then
-            CURRENT_TAG=${{ inputs.tag }}
+            CURRENT_TAG="${{ inputs.tag }}"
           else
-            CURRENT_TAG=${GITHUB_REF#refs/tags/}
+            CURRENT_TAG="${GITHUB_REF#refs/tags/}"
           fi
           echo "Current tag: $CURRENT_TAG"
 
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ inputs.tag }}" ]; then
-            VERSION=${CURRENT_TAG#v}
+            VERSION="${CURRENT_TAG#v}"
             PLUGIN_ID=$(jq -r .id grafana/plugins/dev-health-panels/src/plugin.json)
             ASSET_NAME="$PLUGIN_ID-$VERSION.zip"
 
             if GH_TOKEN="${{ github.token }}" gh api "repos/${{ github.repository }}/releases/tags/$CURRENT_TAG" --jq '.assets[].name' > /tmp/release_assets 2>/dev/null; then
               if grep -qx "$ASSET_NAME" /tmp/release_assets; then
                 echo "Release asset already exists: $ASSET_NAME. Skipping build."
-                echo "plugin_changed=false" >> $GITHUB_OUTPUT
+                echo "plugin_changed=false" >> "$GITHUB_OUTPUT"
                 exit 0
               fi
             fi
           fi
 
           # Try to find the previous tag reachable from the current tag's parent
-          PREV_TAG=$(git describe --abbrev=0 --tags ${CURRENT_TAG}^ 2>/dev/null || echo "")
+          PREV_TAG=$(git describe --abbrev=0 --tags "${CURRENT_TAG}^" 2>/dev/null || echo "")
 
           if [ -z "$PREV_TAG" ]; then
             echo "No previous tag found. Triggering release."
-            echo "plugin_changed=true" >> $GITHUB_OUTPUT
+            echo "plugin_changed=true" >> "$GITHUB_OUTPUT"
           else
             echo "Comparing changes between $PREV_TAG and $CURRENT_TAG"
             # Check for changes SPECIFICALLY in the plugin directory
-            CHANGED_FILES=$(git diff --name-only $PREV_TAG $CURRENT_TAG | grep "^grafana/plugins/dev-health-panels/" || true)
+            CHANGED_FILES=$(git diff --name-only "$PREV_TAG" "$CURRENT_TAG" | grep "^grafana/plugins/dev-health-panels/" || true)
             
             if [ -n "$CHANGED_FILES" ]; then
               echo "Plugin changes detected:"
               echo "$CHANGED_FILES" | head -n 5
-              echo "plugin_changed=true" >> $GITHUB_OUTPUT
+              echo "plugin_changed=true" >> "$GITHUB_OUTPUT"
             else
               echo "No plugin changes detected."
-              echo "plugin_changed=false" >> $GITHUB_OUTPUT
+              echo "plugin_changed=false" >> "$GITHUB_OUTPUT"
             fi
           fi
 
@@ -113,17 +116,17 @@ jobs:
         id: get_version
         run: |
           if [ -n "${{ inputs.tag }}" ]; then
-             RAW_VERSION=${{ inputs.tag }}
-          elif [[ $GITHUB_REF == refs/tags/* ]]; then
-            RAW_VERSION=${GITHUB_REF#refs/tags/}
+             RAW_VERSION="${{ inputs.tag }}"
+          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            RAW_VERSION="${GITHUB_REF#refs/tags/}"
           else
             RAW_VERSION=$(jq -r .version package.json)
           fi
 
           # Clean version: remove leading 'v', then ensure it is valid semver (though tags should be)
-          VERSION=${RAW_VERSION#v}
+          VERSION="${RAW_VERSION#v}"
 
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "Parsed version: $VERSION"
 
       - name: Setup Node.js
@@ -137,9 +140,10 @@ jobs:
         run: npm ci
 
       - name: Update package.json version
-        run: npm version ${{ env.VERSION }} --no-git-tag-version --allow-same-version
+        run: npm version "${{ env.VERSION }}" --no-git-tag-version --allow-same-version
       - name: Commit version bump
         run: |
+          # shellcheck disable=SC2193
           if [[ "${{ env.VERSION }}" != *-* ]]; then
             echo "Stable version detected. Skipping version bump commit."
             exit 0
@@ -164,7 +168,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add package.json package-lock.json
           git commit -m "chore(release): bump plugin version to ${{ env.VERSION }}"
-          git push origin HEAD:${{ inputs.source_branch }}
+          git push origin "HEAD:${{ inputs.source_branch }}"
       - name: Build Plugin
         run: npm run build
       - name: Get Plugin Metadata
@@ -172,27 +176,27 @@ jobs:
         run: |
           PLUGIN_ID=$(jq -r .id src/plugin.json)
           VERSION=$(cat dist/plugin.json | jq -r .info.version)
-          echo "plugin_id=$PLUGIN_ID" >> $GITHUB_OUTPUT
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "plugin_id=$PLUGIN_ID" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Package Plugin for Validation
         run: |
-          PLUGIN_ID=${{ steps.metadata.outputs.plugin_id }}
-          VERSION=${{ steps.metadata.outputs.version }}
+          PLUGIN_ID="${{ steps.metadata.outputs.plugin_id }}"
+          VERSION="${{ steps.metadata.outputs.version }}"
 
           # Create source zip before moving dist
-          zip -r $PLUGIN_ID-$VERSION-src.zip . -x "node_modules/*" "dist/*" ".git/*" "*.zip"
-          echo "SOURCE_ASSET=$PLUGIN_ID-$VERSION-src.zip" >> $GITHUB_ENV
+          zip -r "$PLUGIN_ID-$VERSION-src.zip" . -x "node_modules/*" "dist/*" ".git/*" "*.zip"
+          echo "SOURCE_ASSET=$PLUGIN_ID-$VERSION-src.zip" >> "$GITHUB_ENV"
 
           # Package plugin
-          mv dist $PLUGIN_ID
-          zip -r $PLUGIN_ID-$VERSION.zip $PLUGIN_ID
-          echo "PLUGIN_ASSET=$PLUGIN_ID-$VERSION.zip" >> $GITHUB_ENV
+          mv dist "$PLUGIN_ID"
+          zip -r "$PLUGIN_ID-$VERSION.zip" "$PLUGIN_ID"
+          echo "PLUGIN_ASSET=$PLUGIN_ID-$VERSION.zip" >> "$GITHUB_ENV"
 
       - name: Locate Build Artifacts
         id: locate
         run: |
-          ZIP_FILE=${{ env.PLUGIN_ASSET }}
+          ZIP_FILE="${{ env.PLUGIN_ASSET }}"
 
           if [ ! -f "$ZIP_FILE" ]; then
             echo "Plugin zip file not found: $ZIP_FILE"
@@ -201,13 +205,13 @@ jobs:
           fi
 
           echo "Found artifact: $ZIP_FILE"
-          echo "ARTIFACT_PATH=$ZIP_FILE" >> $GITHUB_ENV
+          echo "ARTIFACT_PATH=$ZIP_FILE" >> "$GITHUB_ENV"
 
           # Generate MD5 for consistency with previous workflow
-          md5sum $ZIP_FILE > $ZIP_FILE.md5
-          sha1sum $ZIP_FILE > $ZIP_FILE.sha1
-          echo "MD5_PATH=$ZIP_FILE.md5" >> $GITHUB_ENV
-          echo "SHA1_PATH=$ZIP_FILE.sha1" >> $GITHUB_ENV
+          md5sum "$ZIP_FILE" > "$ZIP_FILE.md5"
+          sha1sum "$ZIP_FILE" > "$ZIP_FILE.sha1"
+          echo "MD5_PATH=$ZIP_FILE.md5" >> "$GITHUB_ENV"
+          echo "SHA1_PATH=$ZIP_FILE.sha1" >> "$GITHUB_ENV"
       - name: Generate artifact attestation
         id: attestation
         uses: actions/attest-build-provenance@v2
