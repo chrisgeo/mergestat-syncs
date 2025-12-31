@@ -38,16 +38,22 @@ jobs:
       - name: Determine version
         run: |
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_ENV
+            INPUT_VER="${{ github.event.inputs.version }}"
+            echo "PYTHON_VERSION=${INPUT_VER}" >> $GITHUB_ENV
+            echo "DOCKER_TAG=${INPUT_VER}" >> $GITHUB_ENV
             if [[ -n "${{ github.event.inputs.image_registry }}" ]]; then
               echo "IMAGE_REGISTRY=${{ github.event.inputs.image_registry }}" >> $GITHUB_ENV
             fi
           elif [[ "${GITHUB_EVENT_NAME}" == "release" ]]; then
-            echo "VERSION=${{ github.event.release.tag_name }}" >> $GITHUB_ENV
+            RELEASE_TAG="${{ github.event.release.tag_name }}"
+            echo "PYTHON_VERSION=${RELEASE_TAG}" >> $GITHUB_ENV
+            echo "DOCKER_TAG=${RELEASE_TAG}" >> $GITHUB_ENV
           else
-            # Use a PEP 440 compliant version for branch builds
             SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-            echo "VERSION=0.0.0.dev0+${SHORT_SHA}" >> $GITHUB_ENV
+            # PEP 440 compliant version for python package
+            echo "PYTHON_VERSION=0.0.0.dev0+${SHORT_SHA}" >> $GITHUB_ENV
+            # Docker tag safe version (just the SHA)
+            echo "DOCKER_TAG=${SHORT_SHA}" >> $GITHUB_ENV
           fi
 
       - name: Set up Docker Buildx
@@ -67,9 +73,9 @@ jobs:
           file: docker/Dockerfile
           target: runner
           build-args: |
-            SETUPTOOLS_SCM_PRETEND_VERSION=${{ env.VERSION }}
+            SETUPTOOLS_SCM_PRETEND_VERSION=${{ env.PYTHON_VERSION }}
           tags: |
-            ${{ env.IMAGE_REGISTRY }}/dev-hops-runner:${{ env.VERSION }}
+            ${{ env.IMAGE_REGISTRY }}/dev-hops-runner:${{ env.DOCKER_TAG }}
             ${{ env.IMAGE_REGISTRY }}/dev-hops-runner:latest
           push: true
 
@@ -80,8 +86,8 @@ jobs:
           file: docker/Dockerfile
           target: api
           build-args: |
-            SETUPTOOLS_SCM_PRETEND_VERSION=${{ env.VERSION }}
+            SETUPTOOLS_SCM_PRETEND_VERSION=${{ env.PYTHON_VERSION }}
           tags: |
-            ${{ env.IMAGE_REGISTRY }}/dev-hops-api:${{ env.VERSION }}
+            ${{ env.IMAGE_REGISTRY }}/dev-hops-api:${{ env.DOCKER_TAG }}
             ${{ env.IMAGE_REGISTRY }}/dev-hops-api:latest
           push: true
