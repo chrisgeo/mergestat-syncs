@@ -1,18 +1,18 @@
 FROM python:3.14-slim AS base
 
-ARG SETUPTOOLS_SCM_PRETEND_VERSION="0+unknown"
-
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    SETUPTOOLS_SCM_PRETEND_VERSION=${SETUPTOOLS_SCM_PRETEND_VERSION:-0+unknown}
+    PYTHONUNBUFFERED=1
 
 WORKDIR /build
 
 COPY . .
 RUN apt update && apt install -y build-essential git
 
-RUN pip install --no-cache-dir . \
-  && rm -rf /build
+ARG SETUPTOOLS_SCM_PRETEND_VERSION
+ENV SETUPTOOLS_SCM_PRETEND_VERSION=${SETUPTOOLS_SCM_PRETEND_VERSION}
+
+RUN pip install --no-cache-dir .
+RUN rm -rf /build
 
 WORKDIR /app
 RUN mkdir -p /app

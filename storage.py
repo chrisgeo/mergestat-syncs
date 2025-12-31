@@ -34,6 +34,7 @@ if TYPE_CHECKING:
     from metrics.schemas import FileComplexitySnapshot
     from metrics.schemas import WorkItemUserMetricsDailyRecord
     from models.teams import Team
+    from models.work_items import WorkItem, WorkItemStatusTransition
 
 
 def _parse_date_value(value: Any) -> Optional[date]:
@@ -2276,3 +2277,99 @@ class ClickHouseStore:
                     updated_at=_parse_datetime_value(row[5])
                 ))
         return teams
+
+    async def insert_work_items(self, work_items: List["WorkItem"]) -> None:
+        if not work_items:
+            return
+        
+        synced_at = self._normalize_datetime(datetime.now(timezone.utc))
+        rows: List[Dict[str, Any]] = []
+        
+        for item in work_items:
+            is_dict = isinstance(item, dict)
+            get = item.get if is_dict else lambda k, default=None: getattr(item, k, default)
+            
+            repo_id_val = get("repo_id")
+            if repo_id_val:
+                repo_id_val = self._normalize_uuid(repo_id_val)
+            else:
+                repo_id_val = uuid.UUID(int=0)
+
+            rows.append({
+                "repo_id": repo_id_val,
+                "work_item_id": str(get("work_item_id")),
+                "provider": str(get("provider")),
+                "title": str(get("title")),
+                "type": str(get("type")),
+                "status": str(get("status")),
+                "status_raw": str(get("status_raw") or ""),
+                "project_key": str(get("project_key") or ""),
+                "project_id": str(get("project_id") or ""),
+                "assignees": get("assignees") or [],
+                "reporter": str(get("reporter") or ""),
+                "created_at": self._normalize_datetime(get("created_at")),
+                "updated_at": self._normalize_datetime(get("updated_at")),
+                "started_at": self._normalize_datetime(get("started_at")),
+                "completed_at": self._normalize_datetime(get("completed_at")),
+                "closed_at": self._normalize_datetime(get("closed_at")),
+                "labels": get("labels") or [],
+                "story_points": float(get("story_points")) if get("story_points") is not None else None,
+                "sprint_id": str(get("sprint_id") or ""),
+                "sprint_name": str(get("sprint_name") or ""),
+                "parent_id": str(get("parent_id") or ""),
+                "epic_id": str(get("epic_id") or ""),
+                "url": str(get("url") or ""),
+                "last_synced": synced_at,
+            })
+
+        await self._insert_rows(
+            "work_items",
+            [
+                "repo_id", "work_item_id", "provider", "title", "type", "status", "status_raw",
+                "project_key", "project_id", "assignees", "reporter",
+                "created_at", "updated_at", "started_at", "completed_at", "closed_at",
+                "labels", "story_points", "sprint_id", "sprint_name", "parent_id", "epic_id", "url",
+                "last_synced"
+            ],
+            rows
+        )
+
+    async def insert_work_item_transitions(self, transitions: List["WorkItemStatusTransition"]) -> None:
+        if not transitions:
+            return
+            
+        synced_at = self._normalize_datetime(datetime.now(timezone.utc))
+        rows: List[Dict[str, Any]] = []
+
+        for item in transitions:
+            is_dict = isinstance(item, dict)
+            get = item.get if is_dict else lambda k, default=None: getattr(item, k, default)
+            
+            repo_id_val = get("repo_id")
+            if repo_id_val:
+                repo_id_val = self._normalize_uuid(repo_id_val)
+            else:
+                repo_id_val = uuid.UUID(int=0)
+
+            rows.append({
+                "repo_id": repo_id_val,
+                "work_item_id": str(get("work_item_id")),
+                "occurred_at": self._normalize_datetime(get("occurred_at")),
+                "provider": str(get("provider")),
+                "from_status": str(get("from_status")),
+                "to_status": str(get("to_status")),
+                "from_status_raw": str(get("from_status_raw") or ""),
+                "to_status_raw": str(get("to_status_raw") or ""),
+                "actor": str(get("actor") or ""),
+                "last_synced": synced_at,
+            })
+            
+        await self._insert_rows(
+            "work_item_transitions",
+            [
+                "repo_id", "work_item_id", "occurred_at", "provider", 
+                "from_status", "to_status", "from_status_raw", "to_status_raw", 
+                "actor", "last_synced"
+            ],
+            rows
+        )
