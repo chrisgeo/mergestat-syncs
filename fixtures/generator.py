@@ -17,9 +17,11 @@ from models.git import (
 from models.work_items import WorkItem, WorkItemStatusTransition, WorkItemType
 from models.teams import Team
 from metrics.schemas import (
+    RepoMetricsDailyRecord,
     UserMetricsDailyRecord,
     WorkItemMetricsDailyRecord,
     WorkItemCycleTimeRecord,
+    FileMetricsRecord,
     WorkItemUserMetricsDailyRecord,
 )
 
@@ -982,3 +984,44 @@ class SyntheticDataGenerator:
                     )
                 )
         return transitions
+
+    def generate_repo_metrics_daily(
+        self, days: int = 30
+    ) -> List[RepoMetricsDailyRecord]:
+        records = []
+        end_date = datetime.now(timezone.utc).date()
+        for i in range(days):
+            day = end_date - timedelta(days=i)
+            records.append(
+                RepoMetricsDailyRecord(
+                    repo_id=self.repo_id,
+                    day=day,
+                    commits_count=random.randint(1, 20),
+                    total_loc_touched=random.randint(150, 3000),
+                    avg_commit_size_loc=float(random.randint(10, 100)),
+                    large_commit_ratio=random.uniform(0.0, 0.2),
+                    prs_merged=random.randint(0, 5),
+                    median_pr_cycle_hours=float(random.randint(4, 72)),
+                    computed_at=datetime.now(timezone.utc),
+                )
+            )
+        return records
+
+    def generate_file_metrics(self) -> List[FileMetricsRecord]:
+        records = []
+        computed_at = datetime.now(timezone.utc)
+        today = computed_at.date()
+        for file_path in self.files:
+            records.append(
+                FileMetricsRecord(
+                    repo_id=self.repo_id,
+                    day=today,
+                    path=file_path,
+                    churn=random.randint(10, 1000),
+                    contributors=random.randint(1, 5),
+                    commits_count=random.randint(1, 20),
+                    hotspot_score=random.uniform(0.0, 1.0),
+                    computed_at=computed_at,
+                )
+            )
+        return records
