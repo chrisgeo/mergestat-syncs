@@ -138,6 +138,7 @@ def fetch_jira_work_items_with_extras(
     sprints: List[Sprint] = []
 
     fetch_comments = _env_flag("JIRA_FETCH_COMMENTS", True)
+    comments_limit = int(os.getenv("JIRA_COMMENTS_LIMIT", "0"))  # 0 means no limit
     sprint_cache: Dict[str, Sprint] = {}
     sprint_ids: set[str] = set()
 
@@ -203,19 +204,31 @@ def fetch_jira_work_items_with_extras(
             )
 
             if fetch_comments and issue_key:
-                for comment in client.iter_issue_comments(
-                    issue_id_or_key=str(issue_key)
-                ):
-                    event = jira_comment_to_interaction_event(
-                        work_item_id=wi.work_item_id,
-                        comment=comment,
-                        identity=identity,
+                try:
+                    comment_count = 0
+                    for comment in client.iter_issue_comments(
+                        issue_id_or_key=str(issue_key)
+                    ):
+                        if comments_limit > 0 and comment_count >= comments_limit:
+                            break
+                        event = jira_comment_to_interaction_event(
+                            work_item_id=wi.work_item_id,
+                            comment=comment,
+                            identity=identity,
+                        )
+                        if event:
+                            interactions.append(event)
+                            comment_count += 1
+                except Exception as exc:
+                    logger.warning(
+                        "Jira: failed to fetch comments for issue %s: %s",
+                        issue_key,
+                        exc,
                     )
-                    if event:
-                        interactions.append(event)
 
-            if wi.sprint_id and wi.sprint_id not in sprint_cache:
-                sprint_ids.add(wi.sprint_id)
+            if wi.sprint_id:
+                if wi.sprint_id not in sprint_cache:
+                    sprint_ids.add(wi.sprint_id)
 
     for sprint_id in sorted(sprint_ids):
         if sprint_id in sprint_cache:

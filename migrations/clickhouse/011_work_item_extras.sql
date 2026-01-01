@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS work_item_dependencies (
     target_work_item_id String,
     relationship_type String,
     relationship_type_raw String
-) ENGINE = MergeTree()
+) ENGINE = ReplacingMergeTree()
 ORDER BY (source_work_item_id, target_work_item_id, relationship_type);
 
 CREATE TABLE IF NOT EXISTS work_item_reopen_events (
@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS work_item_reopen_events (
     from_status_raw Nullable(String),
     to_status_raw Nullable(String),
     actor Nullable(String)
-) ENGINE = MergeTree()
+) ENGINE = ReplacingMergeTree()
 ORDER BY (work_item_id, occurred_at);
 
 CREATE TABLE IF NOT EXISTS work_item_interactions (
@@ -29,8 +29,8 @@ CREATE TABLE IF NOT EXISTS work_item_interactions (
     occurred_at DateTime64(3),
     actor Nullable(String),
     body_length UInt32
-) ENGINE = MergeTree()
-ORDER BY (work_item_id, occurred_at);
+) ENGINE = ReplacingMergeTree()
+ORDER BY (work_item_id, occurred_at, interaction_type);
 
 CREATE TABLE IF NOT EXISTS sprints (
     provider String,
@@ -40,5 +40,5 @@ CREATE TABLE IF NOT EXISTS sprints (
     started_at Nullable(DateTime64(3)),
     ended_at Nullable(DateTime64(3)),
     completed_at Nullable(DateTime64(3))
-) ENGINE = MergeTree()
+) ENGINE = ReplacingMergeTree()
 ORDER BY (provider, sprint_id);

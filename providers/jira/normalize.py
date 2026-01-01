@@ -87,9 +87,26 @@ def _service_class_from_priority(priority_raw: Optional[str]) -> str:
     normalized = str(priority_raw).strip().lower()
     expedite_markers = ("highest", "critical", "blocker", "urgent", "p0", "p1")
     background_markers = ("low", "lowest", "p4", "p5")
-    if any(marker in normalized for marker in expedite_markers):
+
+    def _matches_marker(text: str, markers: Tuple[str, ...]) -> bool:
+        """
+        Return True if `text` matches any marker exactly or contains it as a whole word.
+
+        This avoids substring false-positives such as:
+        - "p10" matching "p1"
+        - "below" matching "low"
+        """
+        for marker in markers:
+            if text == marker:
+                return True
+            pattern = r"\b" + re.escape(marker) + r"\b"
+            if re.search(pattern, text):
+                return True
+        return False
+
+    if _matches_marker(normalized, expedite_markers):
         return "expedite"
-    if any(marker in normalized for marker in background_markers):
+    if _matches_marker(normalized, background_markers):
         return "background"
     return "standard"
 
@@ -98,10 +115,14 @@ def _normalize_relationship_type(raw_value: Optional[str]) -> str:
     if not raw_value:
         return "other"
     normalized = str(raw_value).strip().lower()
-    if "block" in normalized and "blocked by" not in normalized:
-        return "blocks"
-    if "blocked by" in normalized or "is blocked by" in normalized:
+    # Check "blocked by" relationships first, using word boundaries to avoid
+    # accidental matches on longer words and to capture direction explicitly.
+    if re.search(r"\b(?:is\s+)?blocked by\b", normalized):
         return "blocked_by"
+    # Then check for "block"/"blocks" as standalone words to avoid matching
+    # unrelated strings like "blocker" or "blocking".
+    if re.search(r"\bblocks?\b", normalized):
+        return "blocks"
     if "relate" in normalized:
         return "relates"
     if "duplicate" in normalized:

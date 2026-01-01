@@ -7,6 +7,7 @@ import pytest
 from models.work_items import WorkItemStatusTransition
 from providers.identity import IdentityResolver
 from providers.jira.normalize import (
+    _normalize_relationship_type,
     _service_class_from_priority,
     detect_reopen_events,
     extract_jira_issue_dependencies,
@@ -30,10 +31,38 @@ from providers.jira.normalize import (
         ("P5", "background"),
         ("Medium", "standard"),
         (None, "standard"),
+        # False positive prevention tests
+        ("P10", "standard"),  # Should not match "P1"
+        ("P100", "standard"),  # Should not match "P1" or "P0"
+        ("Below", "standard"),  # Should not match "low"
+        ("Following", "standard"),  # Should not match "low"
+        ("P3", "standard"),  # Not in any marker list
     ],
 )
 def test_service_class_from_priority(priority_raw: str | None, expected: str) -> None:
     assert _service_class_from_priority(priority_raw) == expected
+
+
+@pytest.mark.parametrize(
+    ("raw_value", "expected"),
+    [
+        ("blocks", "blocks"),
+        ("Blocks", "blocks"),
+        ("is blocked by", "blocked_by"),
+        ("blocked by", "blocked_by"),
+        ("relates to", "relates"),
+        ("duplicates", "duplicates"),
+        ("other", "other"),
+        (None, "other"),
+        # False positive prevention tests
+        ("blocker", "other"),  # Should not match "blocks"
+        ("blocking", "other"),  # Should not match "blocks"
+        ("blocks all", "blocks"),  # Should match "blocks" with word boundary
+        ("is blocked by all", "blocked_by"),  # Should match "blocked by"
+    ],
+)
+def test_normalize_relationship_type(raw_value: str | None, expected: str) -> None:
+    assert _normalize_relationship_type(raw_value) == expected
 
 
 def test_extract_jira_issue_dependencies() -> None:
