@@ -42,3 +42,4 @@ jobs:
         run: |
           VERSION="${{ github.event.release.tag_name }}"
           mike deploy --push --update-aliases "${VERSION}" latest
+          mike set-default --push latest
