@@ -1,8 +1,9 @@
 """
 Factory for creating metrics sink instances.
 
-The sink backend is selected via the DEV_HEALTH_SINK environment variable
-or by passing a connection string to create_sink().
+The sink backend is selected by passing a connection string to create_sink()
+or via the DEV_HEALTH_SINK environment variable (factory-specific usage).
+Note: Most parts of the application use DATABASE_URI for database configuration.
 
 Supported backends:
 - clickhouse: ClickHouse (default for analytics)
@@ -14,7 +15,7 @@ Example:
     # Via connection string
     sink = create_sink("clickhouse://localhost:8123/default")
 
-    # Via env var
+    # Via env var (factory-specific)
     os.environ["DEV_HEALTH_SINK"] = "mongo://localhost:27017/dev_health"
     sink = create_sink()
 """
@@ -58,7 +59,7 @@ def detect_backend(dsn: str) -> SinkBackend:
     scheme = parsed.scheme.lower()
 
     # Handle SQLAlchemy-style schemes
-    if scheme in ("clickhouse", "clickhouse+native", "clickhouse+http"):
+    if scheme in ("clickhouse", "clickhouse+native", "clickhouse+http", "clickhouse+https"):
         return SinkBackend.CLICKHOUSE
     elif scheme in ("mongodb", "mongodb+srv", "mongo"):
         return SinkBackend.MONGO
