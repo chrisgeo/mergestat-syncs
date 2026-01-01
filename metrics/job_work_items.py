@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
@@ -27,8 +26,7 @@ from metrics.work_items import (
 from metrics.job_daily import (
     REPO_ROOT,
     _discover_repos,
-    _mongo_uri_from_env,
-    _clickhouse_dsn_from_env,
+    _secondary_uri_from_env,
     _to_utc,
     _normalize_sqlite_url,
 )
@@ -68,7 +66,7 @@ def run_work_items_sync_job(
     This job exists so `metrics daily` does not need to call external APIs.
     """
     if not db_url:
-        raise ValueError("Database URI is required (pass --db or set DB_CONN_STRING).")
+        raise ValueError("Database URI is required (pass --db or set DATABASE_URI).")
 
     backend = detect_db_type(db_url)
     sink = (sink or "auto").strip().lower()
@@ -95,7 +93,9 @@ def run_work_items_sync_job(
     provider = (provider or "none").strip().lower()
     provider_set: Set[str]
     if provider in {"none", "off", "skip"}:
-        raise ValueError("work item sync requires --provider (jira|github|gitlab|synthetic|all)")
+        raise ValueError(
+            "work item sync requires --provider (jira|github|gitlab|synthetic|all)"
+        )
     if provider in {"all", "*"}:
         provider_set = {"jira", "github", "gitlab", "synthetic"}
     else:
@@ -127,13 +127,11 @@ def run_work_items_sync_job(
     if backend == "clickhouse":
         primary_sink = ClickHouseMetricsSink(db_url)
         if sink == "both":
-            secondary_sink = MongoMetricsSink(
-                _mongo_uri_from_env(), db_name=os.getenv("MONGO_DB_NAME")
-            )
+            secondary_sink = MongoMetricsSink(_secondary_uri_from_env())
     elif backend == "mongo":
-        primary_sink = MongoMetricsSink(db_url, db_name=os.getenv("MONGO_DB_NAME"))
+        primary_sink = MongoMetricsSink(db_url)
         if sink == "both":
-            secondary_sink = ClickHouseMetricsSink(_clickhouse_dsn_from_env())
+            secondary_sink = ClickHouseMetricsSink(_secondary_uri_from_env())
     elif backend == "postgres":
         primary_sink = PostgresMetricsSink(db_url)
     else:
@@ -165,7 +163,9 @@ def run_work_items_sync_job(
 
             before = len(discovered_repos)
             discovered_repos = [
-                r for r in discovered_repos if fnmatch.fnmatch(r.full_name, search_pattern)
+                r
+                for r in discovered_repos
+                if fnmatch.fnmatch(r.full_name, search_pattern)
             ]
             logger.info(
                 "Filtered repos by '%s': %d/%d",
@@ -271,9 +271,7 @@ def run_work_items_sync_job(
             )
 
             # --- Issue Type Metrics ---
-            issue_type_stats: Dict[
-                Tuple[uuid.UUID, str, str, str], Dict[str, Any]
-            ] = {}
+            issue_type_stats: Dict[Tuple[uuid.UUID, str, str, str], Dict[str, Any]] = {}
 
             def _get_team(wi: Any) -> str:
                 if getattr(wi, "assignees", None):
@@ -350,24 +348,25 @@ def run_work_items_sync_job(
 
             # --- Investment areas ---
             investment_classifications: List[InvestmentClassificationRecord] = []
-            inv_metrics_map: Dict[
-                Tuple[uuid.UUID, str, str, str], Dict[str, Any]
-            ] = {}
+            inv_metrics_map: Dict[Tuple[uuid.UUID, str, str, str], Dict[str, Any]] = {}
 
             for item in work_items:
                 r_id = getattr(item, "repo_id", None) or uuid.UUID(int=0)
                 created = _to_utc(item.created_at)
-                if not (created < end_dt and (not item.completed_at or _to_utc(item.completed_at) >= start_dt)):
+                if not (
+                    created < end_dt
+                    and (
+                        not item.completed_at or _to_utc(item.completed_at) >= start_dt
+                    )
+                ):
                     continue
 
-                cls = investment_classifier.classify(
-                    {
-                        "labels": getattr(item, "labels", []),
-                        "component": getattr(item, "component", ""),
-                        "title": item.title,
-                        "provider": item.provider,
-                    }
-                )
+                cls = investment_classifier.classify({
+                    "labels": getattr(item, "labels", []),
+                    "component": getattr(item, "component", ""),
+                    "title": item.title,
+                    "provider": item.provider,
+                })
 
                 investment_classifications.append(
                     InvestmentClassificationRecord(

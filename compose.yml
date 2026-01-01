@@ -92,11 +92,11 @@ services:
     image: python:alpine
     environment:
       PG_URL: postgres://postgres:postgres@postgres:5432/postgres
-      DB_CONN_STRING: postgres://postgres:postgres@postgres:5432/postgres
+      DATABASE_URI: postgres://postgres:postgres@postgres:5432/postgres
     volumes:
       - ./:/app
     working_dir: /app
-    command: /bin/sh -c 'python3 cli.py sync git --provider local --db "$DB_CONN_STRING" --repo-path .'
+    command: /bin/sh -c 'python3 cli.py sync git --provider local --db "$DATABASE_URI" --repo-path .'
   api:
     build:
       context: .
@@ -104,7 +104,7 @@ services:
       target: api
     container_name: dev-health-api
     environment:
-      CLICKHOUSE_DSN: clickhouse://ch:ch@clickhouse:8123/stats
+      DATABASE_URI: clickhouse://ch:ch@clickhouse:8123/stats
       SETUPTOOLS_SCM_PRETEND_VERSION_FOR_DEV_HEALTH_OPS: "0.0.0"
     depends_on:
       - clickhouse

@@ -19,7 +19,9 @@ def _parse_date(value: str) -> date:
     try:
         return date.fromisoformat(value)
     except ValueError as exc:
-        raise argparse.ArgumentTypeError(f"Invalid date '{value}', expected YYYY-MM-DD") from exc
+        raise argparse.ArgumentTypeError(
+            f"Invalid date '{value}', expected YYYY-MM-DD"
+        ) from exc
 
 
 def _parse_uuid(value: str) -> uuid.UUID:
@@ -30,12 +32,19 @@ def _parse_uuid(value: str) -> uuid.UUID:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Compute and persist daily developer health metrics.")
-    parser.add_argument("--date", required=True, type=_parse_date, help="Target day (UTC) as YYYY-MM-DD.")
+    parser = argparse.ArgumentParser(
+        description="Compute and persist daily developer health metrics."
+    )
+    parser.add_argument(
+        "--date",
+        required=True,
+        type=_parse_date,
+        help="Target day (UTC) as YYYY-MM-DD.",
+    )
     parser.add_argument(
         "--db",
-        default=os.getenv("DB_CONN_STRING") or os.getenv("DATABASE_URL"),
-        help="Database URI (ClickHouse, MongoDB, or SQLite). Defaults to DB_CONN_STRING/DATABASE_URL.",
+        default=os.getenv("DATABASE_URI") or os.getenv("DATABASE_URL"),
+        help="Database URI (ClickHouse, MongoDB, or SQLite). Defaults to DATABASE_URI.",
     )
     parser.add_argument(
         "--backfill",
@@ -43,7 +52,9 @@ def main() -> int:
         default=1,
         help="Compute N days ending at --date (inclusive). Default: 1.",
     )
-    parser.add_argument("--repo-id", type=_parse_uuid, help="Optional repo_id UUID filter.")
+    parser.add_argument(
+        "--repo-id", type=_parse_uuid, help="Optional repo_id UUID filter."
+    )
     parser.add_argument(
         "--sink",
         choices=["auto", "clickhouse", "mongo", "sqlite", "both"],

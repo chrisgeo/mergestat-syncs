@@ -1,6 +1,7 @@
 # Developer Health Metrics (v2)
 
 This repository computes daily “developer health” metrics from:
+
 - synced Git facts (`git_commits`, `git_commit_stats`, `git_pull_requests`)
 - optional work tracking data (Jira issues, GitHub issues/Projects v2, GitLab issues)
 
@@ -13,6 +14,7 @@ Important: Jira (and other issue trackers) is **not** a replacement for pull req
 ## Source Data
 
 Git facts must already exist in the backend you point the job at:
+
 - `git_commits`
 - `git_commit_stats`
 - `git_pull_requests`
@@ -41,21 +43,25 @@ Note: Jira Ops/Service Desk incidents are planned once project-to-repo or deploy
 ## Derived Tables / Collections
 
 ### Git / Repo / User
+
 - `repo_metrics_daily`
 - `user_metrics_daily`
 - `commit_metrics`
 
 ### Work Tracking
+
 - `work_item_metrics_daily` (daily aggregates, by provider/team/repo)
 - `work_item_user_metrics_daily` (daily aggregates, by provider/user/team)
 - `work_item_cycle_times` (per-work-item fact rows for completed items)
 
 ### Team Well-being (team-level only)
+
 - `team_metrics_daily`
 
 ## Metric Definitions
 
 ### Commit size bucketing
+
 - `total_loc = additions + deletions` (summed from `git_commit_stats`)
 - bucket:
   - `small`: `total_loc <= 50`
@@ -63,7 +69,9 @@ Note: Jira Ops/Service Desk incidents are planned once project-to-repo or deploy
   - `large`: `> 300`
 
 ### PR cycle time
+
 For PRs with `merged_at` on day **D**:
+
 - `cycle_time_hours = (merged_at - created_at) / 3600`
 - Distribution fields (per repo/day and user/day):
   - `median_pr_cycle_hours` (p50)
@@ -71,12 +79,15 @@ For PRs with `merged_at` on day **D**:
   - `pr_cycle_p90_hours`
 
 ### Large change thresholds
+
 - Large commits: `total_loc > 300`
 - Large PRs: `additions + deletions >= LARGE_PR_LOC_THRESHOLD` (default: `1000`)
   - Note: PR size facts are **best-effort** and may be missing depending on the connector.
 
 ### Daily user metrics (`user_metrics_daily`)
+
 Keyed by `(repo_id, author_email, day)` where `author_email` falls back to `author_name` when email is missing.
+
 - Commits: counts, LOC added/deleted, distinct files changed (union across the day), large commits, avg commit size
 - PRs: authored (created that day), merged (merged that day), avg/p50/p75/p90 PR cycle hours (for PRs merged that day)
 - Collaboration (nullable when not available):
@@ -86,10 +97,13 @@ Keyed by `(repo_id, author_email, day)` where `author_email` falls back to `auth
   - `reviews_given`, `changes_requested_given`: counts of review submissions for the day
 
 Null behavior:
+
 - if review/comment facts are unavailable, pickup/first-review/review-time fields remain `NULL`
 
 ### Daily repo metrics (`repo_metrics_daily`)
+
 Keyed by `(repo_id, day)`.
+
 - Commits: count, LOC touched, avg size, large commit ratio
 - PRs: merged count, p50/p75/p90 PR cycle hours
 - Quality (best-effort): `large_pr_ratio`, `pr_rework_ratio` (requires PR size and review facts)
@@ -98,26 +112,33 @@ Keyed by `(repo_id, day)`.
   - `code_ownership_gini`: Gini coefficient of code contribution inequality (0..1)
 
 ### Optional per-commit metrics (`commit_metrics`)
+
 Keyed by `(repo_id, day, author_email, commit_hash)`.
 
 ### Work item normalization + cycle times
+
 Work items are normalized into a unified `WorkItem` abstraction (`models/work_items.py`).
 
 Best-effort fields:
+
 - `started_at`: first transition into normalized `in_progress`
 - `completed_at`: first transition into normalized `done` or `canceled`
 
 Time metrics:
+
 - `lead_time_hours = completed_at - created_at` (when completed)
 - `cycle_time_hours = completed_at - started_at` (when started + completed)
 
 Null behavior:
+
 - items missing `started_at` are excluded from cycle-time distributions
 
 ### Work tracking daily metrics (`work_item_metrics_daily`)
+
 Keyed by `(day, provider, team_id, work_scope_id)`.
 
 `work_scope_id` is provider-native and is used to avoid assuming a repo UUID exists for work items:
+
 - Jira: Jira project key (e.g. `ABC`)
 - GitHub: repository full name (e.g. `owner/repo`) when sourced from issues; Projects v2 uses `ghprojv2:<org>#<number>`
 - GitLab: project full path (e.g. `group/project`)
@@ -131,25 +152,33 @@ Keyed by `(day, provider, team_id, work_scope_id)`.
 - `predictability_score`: Completion Rate = `items_completed / (items_completed + wip_count_end_of_day)`
 
 ### Work item facts (`work_item_cycle_times`)
+
 Keyed by `(provider, work_item_id)`; stored as ClickHouse `ReplacingMergeTree` by `computed_at` and as Mongo upserts.
 
 ### Work item time-in-state (`work_item_state_durations_daily`)
+
 Keyed by `(day, provider, work_scope_id, team_id, status)` and computed from provider status transitions (Jira changelog when available).
 
 Null behavior:
+
 - items without status transition history contribute no rows
 
 ### Unassigned work
+
 If a work item has no assignee, daily rollups:
+
 - count it under `team_id=''` (shown as “unassigned” in dashboards)
 - emit a `work_item_user_metrics_daily` row with `user_identity='unassigned'` so you can chart “closed unassigned” work over time
 
 ### Team well-being (team-level only)
+
 Computed from commits (deduplicated by commit hash) and a team mapping.
+
 - `after_hours_commit_ratio`: commits outside business hours on weekdays
 - `weekend_commit_ratio`: commits on weekends
 
 Configuration:
+
 - `BUSINESS_TIMEZONE` (default: `UTC`)
 - `BUSINESS_HOURS_START` (default: `9`)
 - `BUSINESS_HOURS_END` (default: `17`)
@@ -157,7 +186,9 @@ Configuration:
 ## Storage Targets
 
 ### ClickHouse (tables)
+
 Tables are created automatically if missing:
+
 - `repo_metrics_daily`
 - `user_metrics_daily`
 - `commit_metrics`
@@ -195,7 +226,9 @@ ORDER BY day;
 Re-computations are **append-only** and distinguished by `computed_at`. To query the latest metrics for a key/day, use `argMax(..., computed_at)` in ClickHouse.
 
 ### MongoDB (collections)
+
 Collections are created automatically:
+
 - `repo_metrics_daily`
 - `user_metrics_daily`
 - `commit_metrics`
@@ -207,7 +240,9 @@ Collections are created automatically:
 Documents use stable compound `_id` keys and are written via upserts, so recomputation is safe.
 
 ### SQLite (tables)
+
 Tables are created automatically in the same `.db` file:
+
 - `repo_metrics_daily`
 - `user_metrics_daily`
 - `commit_metrics`
@@ -219,18 +254,20 @@ Tables are created automatically in the same `.db` file:
 ## Running The Daily Job
 
 The job reads source data from the **same backend** you point it at (ClickHouse or MongoDB), using the synced tables/collections:
+
 - `git_commits`
 - `git_commit_stats`
 - `git_pull_requests`
-It also supports SQLite, reading the same tables and writing metrics tables into the same `.db` file.
+  It also supports SQLite, reading the same tables and writing metrics tables into the same `.db` file.
 
 ### Environment variables
-- `DB_CONN_STRING` (or `DATABASE_URL`): ClickHouse or MongoDB URI for both reading source data and writing derived metrics.
-- `MONGO_DB_NAME` (optional): MongoDB database name if not provided in the URI (defaults to the URI default db or `mergestat`).
-- `CLICKHOUSE_DSN` / `MONGO_URI`: required when running with `--sink both`.
+
+- `DATABASE_URI` (or `DATABASE_URL`): ClickHouse, MongoDB, SQLite, or PostgreSQL URI for both reading source data and writing derived metrics.
+- `SECONDARY_DATABASE_URI`: Required when running with `--sink both` to write to a secondary backend.
 
 ### Examples
-- Compute one day (backend inferred from `--db` or `DB_CONN_STRING`):
+
+- Compute one day (backend inferred from `--db` or `DATABASE_URI`):
   - `python cli.py metrics daily --date 2025-02-01 --db clickhouse://localhost:8123/default`
   - `python cli.py metrics daily --date 2025-02-01 --db mongodb://localhost:27017/mergestat`
   - `python cli.py metrics daily --date 2025-02-01 --db sqlite:///./mergestat.db`
@@ -255,11 +292,14 @@ We compute canonical Individual Contributor (IC) metrics and "Developer Landscap
 **Note:** These metrics are designed for identifying signals and patterns, not for ranking individuals.
 
 ### Identity Resolution
+
 - Users are mapped to a canonical `identity_id` (preferring email) across providers.
 - Configuration: `config/teams.yaml` or `config/team_mapping.yaml`.
 
 ### IC Metrics (`user_metrics_daily`)
+
 Extends the daily user metrics with work tracking and unified throughput signals:
+
 - `identity_id`: Canonical user identity.
 - `loc_touched`: Sum of additions + deletions.
 - `delivery_units`: `prs_merged` + `work_items_completed`.
@@ -267,18 +307,22 @@ Extends the daily user metrics with work tracking and unified throughput signals
 - `cycle_p50_hours`: Median cycle time (PRs).
 
 ### Landscape Maps (`ic_landscape_rolling_30d`)
+
 Rolling 30-day metrics normalized by team percentiles (0..1).
 Stored in ClickHouse table `ic_landscape_rolling_30d`.
 
 #### Map 1: Churn vs Throughput
+
 - **X**: `log(churn_loc_30d)` (rolling 30d sum of LOC touched)
 - **Y**: `delivery_units_30d` (rolling 30d sum of delivery units)
 
 #### Map 2: Cycle Time vs Throughput
+
 - **X**: `log(cycle_p50_30d_hours)` (median of daily median PR cycle times over 30d)
 - **Y**: `delivery_units_30d`
 
 #### Map 3: WIP vs Throughput
+
 - **X**: `wip_max_30d` (max active work items over 30d)
 - **Y**: `delivery_units_30d`
 

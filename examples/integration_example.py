@@ -26,7 +26,7 @@ async def github_to_storage_example():
         return
 
     # Database connection
-    db_conn = os.getenv("DB_CONN_STRING", "sqlite+aiosqlite:///./test_integration.db")
+    db_conn = os.getenv("DATABASE_URI", "sqlite+aiosqlite:///./test_integration.db")
 
     print("=== GitHub to Storage Integration ===\n")
 
@@ -143,7 +143,7 @@ async def gitlab_to_storage_example():
         return
 
     # Database connection
-    db_conn = os.getenv("DB_CONN_STRING", "sqlite+aiosqlite:///./test_integration.db")
+    db_conn = os.getenv("DATABASE_URI", "sqlite+aiosqlite:///./test_integration.db")
 
     print("\n\n=== GitLab to Storage Integration ===\n")
 

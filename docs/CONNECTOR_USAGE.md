@@ -19,7 +19,7 @@ This is the original mode that analyzes a local git repository.
 
 ```bash
 # Using environment variables
-export DB_CONN_STRING="postgresql+asyncpg://localhost:5432/mergestat"
+export DATABASE_URI="postgresql+asyncpg://localhost:5432/mergestat"
 export REPO_PATH="/path/to/repo"
 python cli.py sync git --provider local
 
@@ -167,17 +167,16 @@ The project ID is the numeric identifier for your GitLab project:
 
 All modes support these environment variables:
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `DB_CONN_STRING` | Database connection string | None (required) |
-| `DB_TYPE` | Database type (`postgres`, `mongo`, `sqlite`, or `clickhouse`) | Auto-detected from URL |
-| `DB_ECHO` | Enable SQL logging | `false` |
-| `MONGO_DB_NAME` | MongoDB database name | None |
-| `BATCH_SIZE` | Records per batch insert | `100` |
-| `MAX_WORKERS` | Parallel workers | `4` |
-| `GITHUB_TOKEN` | GitHub personal access token | None |
-| `GITLAB_TOKEN` | GitLab private token | None |
-| `REPO_PATH` | Path to local repository | `.` |
+| Variable                 | Description                          | Default         |
+| ------------------------ | ------------------------------------ | --------------- |
+| `DATABASE_URI`           | Database connection string           | None (required) |
+| `SECONDARY_DATABASE_URI` | Secondary database for `--sink both` | None            |
+| `DB_ECHO`                | Enable SQL logging                   | `false`         |
+| `BATCH_SIZE`             | Records per batch insert             | `100`           |
+| `MAX_WORKERS`            | Parallel workers                     | `4`             |
+| `GITHUB_TOKEN`           | GitHub personal access token         | None            |
+| `GITLAB_TOKEN`           | GitLab private token                 | None            |
+| `REPO_PATH`              | Path to local repository             | `.`             |
 
 ## Command-Line Arguments
 

@@ -14,6 +14,10 @@ def _normalize_postgres_url(db_url: str) -> str:
 class PostgresMetricsSink(SQLiteMetricsSink):
     """Postgres sink for derived daily metrics (idempotent upserts by primary key)."""
 
+    @property
+    def backend_type(self) -> str:
+        return "postgres"
+
     def __init__(self, db_url: str) -> None:
         super().__init__(_normalize_postgres_url(db_url))
 

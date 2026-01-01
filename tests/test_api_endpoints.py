@@ -34,6 +34,15 @@ def client():
     return TestClient(app)
 
 
+@pytest.fixture(autouse=True)
+def mock_db_url(monkeypatch):
+    """Set a dummy DATABASE_URL so endpoints don't return 503."""
+    monkeypatch.setattr(
+        "dev_health_ops.api.main._db_url",
+        lambda: "clickhouse://localhost:8123/default",
+    )
+
+
 def test_home_endpoint_schema(client, monkeypatch):
     sample = HomeResponse(
         freshness=Freshness(
@@ -52,7 +61,9 @@ def test_home_endpoint_schema(client, monkeypatch):
                 value=4.2,
                 unit="days",
                 delta_pct=12.0,
-                spark=[SparkPoint(ts=datetime(2024, 1, 1, tzinfo=timezone.utc), value=4.2)],
+                spark=[
+                    SparkPoint(ts=datetime(2024, 1, 1, tzinfo=timezone.utc), value=4.2)
+                ],
             )
         ],
         summary=[
@@ -67,9 +78,7 @@ def test_home_endpoint_schema(client, monkeypatch):
             title="Constraint",
             claim="Review congestion.",
             evidence=[
-                ConstraintEvidence(
-                    label="Evidence", link="/api/v1/drilldown/prs"
-                )
+                ConstraintEvidence(label="Evidence", link="/api/v1/drilldown/prs")
             ],
             experiments=["Experiment"],
         ),

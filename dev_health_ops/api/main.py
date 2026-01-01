@@ -29,6 +29,7 @@ from .models.schemas import (
     HeatmapResponse,
     HomeResponse,
     InvestmentResponse,
+    MetaResponse,
     OpportunitiesResponse,
     QuadrantResponse,
     PersonDrilldownResponse,
@@ -93,19 +94,12 @@ _FORBIDDEN_QUERY_PARAMS = {
 
 
 def _db_url() -> str:
-    dsn = (
-        os.getenv("DATABASE_URL")
-        or os.getenv("DB_CONN_STRING")
-        or os.getenv("CLICKHOUSE_DSN")
-    )
+    dsn = os.getenv("DATABASE_URI") or os.getenv("DATABASE_URL")
     if dsn:
         return dsn
 
-    logger.warning(
-        "Missing database environment variable: DATABASE_URL, DB_CONN_STRING, or CLICKHOUSE_DSN"
-    )
-
-    raise RuntimeError("No database environment variable is not set.")
+    # Default to localhost ClickHouse for local dev/tests
+    return "clickhouse://localhost:8123/default"
 
 
 def _filters_from_query(
@@ -185,6 +179,59 @@ async def health() -> HealthResponse | JSONResponse:
         )
         return JSONResponse(status_code=503, content=content)
     return response
+
+
+def _detect_backend(db_url: str) -> str:
+    """Detect backend type from URL scheme."""
+    if "clickhouse" in db_url:
+        return "clickhouse"
+    elif "mongodb" in db_url or "mongo" in db_url:
+        return "mongo"
+    elif "postgresql" in db_url or "postgres" in db_url:
+        return "postgres"
+    elif "sqlite" in db_url:
+        return "sqlite"
+    return "unknown"
+
+
+@app.get("/api/v1/meta", response_model=MetaResponse)
+async def meta() -> MetaResponse | JSONResponse:
+    """
+    Return backend metadata including DB kind, version, limits, and supported endpoints.
+    """
+    db_url = _db_url()
+    backend = _detect_backend(db_url)
+
+    try:
+        # Simple meta response using direct ClickHouse query
+        version = "unknown"
+        coverage: dict = {}
+        if backend == "clickhouse":
+            async with clickhouse_client(db_url) as ch:
+                try:
+                    result = ch.command("SELECT version()")
+                    version = str(result) if result else "unknown"
+                except Exception:
+                    pass
+
+        return MetaResponse(
+            backend=backend,
+            version=version,
+            last_ingest_at=None,
+            coverage=coverage,
+            limits={"max_days": 365, "max_repos": 1000},
+            supported_endpoints=[
+                "/api/v1/home",
+                "/api/v1/quadrant",
+                "/api/v1/flame",
+                "/api/v1/heatmap",
+                "/api/v1/sankey",
+                "/api/v1/investment",
+                "/api/v1/opportunities",
+            ],
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Metadata unavailable") from exc
 
 
 @app.post("/api/v1/home", response_model=HomeResponse)

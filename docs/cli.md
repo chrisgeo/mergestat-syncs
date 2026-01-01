@@ -43,4 +43,4 @@ python cli.py grafana up
 
 ## Flags and overrides
 
-CLI flags override environment variables. Use `--db` or `DB_CONN_STRING` to target a specific database.
+CLI flags override environment variables. Use `--db` or `DATABASE_URI` to target a specific database.
