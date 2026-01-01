@@ -25,7 +25,11 @@ from metrics.schemas import (
     FileComplexitySnapshot,
     RepoComplexityDaily,
     FileHotspotDaily,
+    InvestmentClassificationRecord,
+    InvestmentMetricsRecord,
+    IssueTypeMetricsRecord,
 )
+from metrics.sinks.base import BaseMetricsSink
 
 
 def _dt_to_sqlite(value: datetime) -> str:
@@ -34,8 +38,12 @@ def _dt_to_sqlite(value: datetime) -> str:
     return value.astimezone(timezone.utc).replace(tzinfo=None).isoformat()
 
 
-class SQLiteMetricsSink:
+class SQLiteMetricsSink(BaseMetricsSink):
     """SQLite sink for derived daily metrics (idempotent upserts by primary key)."""
+
+    @property
+    def backend_type(self) -> str:
+        return "sqlite"
 
     def __init__(self, db_url: str) -> None:
         if not db_url:
@@ -354,6 +362,54 @@ class SQLiteMetricsSink:
               PRIMARY KEY (repo_id, day, file_path)
             )
             """,
+            """
+            CREATE TABLE IF NOT EXISTS investment_classifications_daily (
+              repo_id TEXT,
+              day TEXT NOT NULL,
+              artifact_type TEXT NOT NULL,
+              artifact_id TEXT NOT NULL,
+              provider TEXT NOT NULL,
+              investment_area TEXT NOT NULL,
+              project_stream TEXT,
+              confidence REAL NOT NULL,
+              rule_id TEXT NOT NULL,
+              computed_at TEXT NOT NULL,
+              PRIMARY KEY (provider, artifact_type, artifact_id, day)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS investment_metrics_daily (
+              repo_id TEXT,
+              day TEXT NOT NULL,
+              team_id TEXT,
+              investment_area TEXT NOT NULL,
+              project_stream TEXT,
+              delivery_units INTEGER NOT NULL,
+              work_items_completed INTEGER NOT NULL,
+              prs_merged INTEGER NOT NULL,
+              churn_loc INTEGER NOT NULL,
+              cycle_p50_hours REAL NOT NULL,
+              computed_at TEXT NOT NULL,
+              PRIMARY KEY (day, investment_area, team_id, project_stream)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS issue_type_metrics_daily (
+              repo_id TEXT,
+              day TEXT NOT NULL,
+              provider TEXT NOT NULL,
+              team_id TEXT NOT NULL,
+              issue_type_norm TEXT NOT NULL,
+              created_count INTEGER NOT NULL,
+              completed_count INTEGER NOT NULL,
+              active_count INTEGER NOT NULL,
+              cycle_p50_hours REAL NOT NULL,
+              cycle_p90_hours REAL NOT NULL,
+              lead_p50_hours REAL NOT NULL,
+              computed_at TEXT NOT NULL,
+              PRIMARY KEY (day, provider, team_id, issue_type_norm)
+            )
+            """,
             "CREATE INDEX IF NOT EXISTS idx_repo_metrics_daily_day ON repo_metrics_daily(day)",
             "CREATE INDEX IF NOT EXISTS idx_user_metrics_daily_day ON user_metrics_daily(day)",
             "CREATE INDEX IF NOT EXISTS idx_commit_metrics_day ON commit_metrics(day)",
@@ -369,6 +425,9 @@ class SQLiteMetricsSink:
             "CREATE INDEX IF NOT EXISTS idx_file_complexity_snapshots_day ON file_complexity_snapshots(as_of_day)",
             "CREATE INDEX IF NOT EXISTS idx_repo_complexity_daily_day ON repo_complexity_daily(day)",
             "CREATE INDEX IF NOT EXISTS idx_file_hotspot_daily_day ON file_hotspot_daily(day)",
+            "CREATE INDEX IF NOT EXISTS idx_investment_classifications_daily_day ON investment_classifications_daily(day)",
+            "CREATE INDEX IF NOT EXISTS idx_investment_metrics_daily_day ON investment_metrics_daily(day)",
+            "CREATE INDEX IF NOT EXISTS idx_issue_type_metrics_daily_day ON issue_type_metrics_daily(day)",
         ]
         with self.engine.begin() as conn:
             for stmt in stmts:
@@ -377,7 +436,7 @@ class SQLiteMetricsSink:
             # - Add work_scope_id columns
             # - Add UNIQUE indexes so ON CONFLICT(...) upserts work
             # - Add new columns for IC metrics
-            
+
             # New User Metrics Columns
             for col, type_ in [
                 ("identity_id", "TEXT"),
@@ -390,7 +449,9 @@ class SQLiteMetricsSink:
                 ("cycle_p90_hours", "REAL NOT NULL DEFAULT 0.0"),
             ]:
                 if not self._table_has_column(conn, "user_metrics_daily", col):
-                    conn.execute(text(f"ALTER TABLE user_metrics_daily ADD COLUMN {col} {type_}"))
+                    conn.execute(
+                        text(f"ALTER TABLE user_metrics_daily ADD COLUMN {col} {type_}")
+                    )
 
             if not self._table_has_column(
                 conn, "work_item_metrics_daily", "work_scope_id"
@@ -584,6 +645,10 @@ class SQLiteMetricsSink:
                     conn.execute(
                         text(f"ALTER TABLE user_metrics_daily ADD COLUMN {col} {type_}")
                     )
+
+    def ensure_schema(self) -> None:
+        """Create SQLite tables via DDL statements."""
+        self.ensure_tables()
 
     @staticmethod
     def _table_has_column(conn, table: str, column: str) -> bool:
@@ -848,7 +913,8 @@ class SQLiteMetricsSink:
             "team_name": data.get("team_name"),
             "active_hours": float(data.get("active_hours", 0.0) or 0.0),
             "weekend_days": int(data.get("weekend_days", 0) or 0),
-            "identity_id": str(data.get("identity_id") or "") or str(data["author_email"]),
+            "identity_id": str(data.get("identity_id") or "")
+            or str(data["author_email"]),
             "loc_touched": int(data.get("loc_touched", 0) or 0),
             "prs_opened": int(data.get("prs_opened", 0) or 0),
             "work_items_completed": int(data.get("work_items_completed", 0) or 0),
@@ -958,7 +1024,9 @@ class SQLiteMetricsSink:
     def get_rolling_30d_user_stats(
         self,
         as_of_day: date,
-        repo_id: Optional[str] = None, # repo_id in sqlite sink is usually handled upstream but we support filtering
+        repo_id: Optional[
+            str
+        ] = None,  # repo_id in sqlite sink is usually handled upstream but we support filtering
     ) -> List[Dict[str, Any]]:
         """
         Compute rolling 30d stats by aggregating daily rows in Python.
@@ -966,7 +1034,7 @@ class SQLiteMetricsSink:
         start_day = as_of_day - timedelta(days=29)
         start_str = start_day.isoformat()
         end_str = as_of_day.isoformat()
-        
+
         # Select raw rows
         query = """
         SELECT
@@ -980,18 +1048,18 @@ class SQLiteMetricsSink:
         WHERE day >= :start AND day <= :end
         """
         params: Dict[str, Any] = {"start": start_str, "end": end_str}
-        
+
         if repo_id:
             query += " AND repo_id = :repo_id"
             params["repo_id"] = str(repo_id)
 
         rows = []
         with self.engine.connect() as conn:
-             rows = conn.execute(text(query), params).fetchall()
+            rows = conn.execute(text(query), params).fetchall()
 
         # Aggregate in Python
         aggs: Dict[str, Dict[str, Any]] = {}
-        
+
         for r in rows:
             identity_id = r[0]
             team_id = r[1]
@@ -999,24 +1067,24 @@ class SQLiteMetricsSink:
             delivery_units = r[3] or 0
             cycle_p50 = r[4] or 0.0
             wip = r[5] or 0
-            
+
             if identity_id not in aggs:
                 aggs[identity_id] = {
                     "identity_id": identity_id,
-                    "team_id": team_id, # Take first found team_id
+                    "team_id": team_id,  # Take first found team_id
                     "churn_loc_30d": 0,
                     "delivery_units_30d": 0,
                     "wip_max_30d": 0,
-                    "cycle_p50_values": []
+                    "cycle_p50_values": [],
                 }
-            
+
             entry = aggs[identity_id]
             entry["churn_loc_30d"] += loc_touched
             entry["delivery_units_30d"] += delivery_units
             entry["wip_max_30d"] = max(entry["wip_max_30d"], wip)
             if cycle_p50 > 0:
                 entry["cycle_p50_values"].append(cycle_p50)
-            
+
             # Update team_id if missing (simple last-wins or non-null wins strategy)
             if not entry["team_id"] and team_id:
                 entry["team_id"] = team_id
@@ -1032,11 +1100,11 @@ class SQLiteMetricsSink:
                 if len(cycle_vals) % 2 == 1:
                     median_cycle = cycle_vals[mid]
                 else:
-                    median_cycle = (cycle_vals[mid-1] + cycle_vals[mid]) / 2.0
-            
+                    median_cycle = (cycle_vals[mid - 1] + cycle_vals[mid]) / 2.0
+
             data["cycle_p50_30d_hours"] = median_cycle
             results.append(data)
-            
+
         return results
 
     def write_team_metrics(self, rows: Sequence[TeamMetricsDailyRecord]) -> None:
@@ -1375,7 +1443,9 @@ class SQLiteMetricsSink:
         with self.engine.begin() as conn:
             conn.execute(stmt, payload)
 
-    def write_incident_metrics(self, rows: Sequence[IncidentMetricsDailyRecord]) -> None:
+    def write_incident_metrics(
+        self, rows: Sequence[IncidentMetricsDailyRecord]
+    ) -> None:
         if not rows:
             return
         stmt = text(
@@ -1428,9 +1498,7 @@ class SQLiteMetricsSink:
         with self.engine.begin() as conn:
             conn.execute(stmt, payload)
 
-    def write_repo_complexity_daily(
-        self, rows: Sequence[RepoComplexityDaily]
-    ) -> None:
+    def write_repo_complexity_daily(self, rows: Sequence[RepoComplexityDaily]) -> None:
         if not rows:
             return
         stmt = text(
@@ -1494,7 +1562,9 @@ class SQLiteMetricsSink:
             "cyclomatic_total": int(data["cyclomatic_total"]),
             "cyclomatic_avg": float(data["cyclomatic_avg"]),
             "high_complexity_functions": int(data["high_complexity_functions"]),
-            "very_high_complexity_functions": int(data["very_high_complexity_functions"]),
+            "very_high_complexity_functions": int(
+                data["very_high_complexity_functions"]
+            ),
             "computed_at": _dt_to_sqlite(data["computed_at"]),
         }
 
@@ -1507,7 +1577,9 @@ class SQLiteMetricsSink:
             "cyclomatic_total": int(data["cyclomatic_total"]),
             "cyclomatic_per_kloc": float(data["cyclomatic_per_kloc"]),
             "high_complexity_functions": int(data["high_complexity_functions"]),
-            "very_high_complexity_functions": int(data["very_high_complexity_functions"]),
+            "very_high_complexity_functions": int(
+                data["very_high_complexity_functions"]
+            ),
             "computed_at": _dt_to_sqlite(data["computed_at"]),
         }
 
@@ -1523,5 +1595,143 @@ class SQLiteMetricsSink:
             "cyclomatic_avg": float(data["cyclomatic_avg"]),
             "blame_concentration": data.get("blame_concentration"),
             "risk_score": float(data["risk_score"]),
+            "computed_at": _dt_to_sqlite(data["computed_at"]),
+        }
+
+    # -------------------------------------------------------------------------
+    # Investment / Issue Type metrics
+    # -------------------------------------------------------------------------
+
+    def write_investment_classifications(
+        self, rows: Sequence[InvestmentClassificationRecord]
+    ) -> None:
+        if not rows:
+            return
+        stmt = text(
+            """
+            INSERT INTO investment_classifications_daily (
+              repo_id, day, artifact_type, artifact_id, provider,
+              investment_area, project_stream, confidence, rule_id, computed_at
+            ) VALUES (
+              :repo_id, :day, :artifact_type, :artifact_id, :provider,
+              :investment_area, :project_stream, :confidence, :rule_id, :computed_at
+            )
+            ON CONFLICT (provider, artifact_type, artifact_id, day) DO UPDATE SET
+              repo_id=excluded.repo_id,
+              investment_area=excluded.investment_area,
+              project_stream=excluded.project_stream,
+              confidence=excluded.confidence,
+              rule_id=excluded.rule_id,
+              computed_at=excluded.computed_at
+            """
+        )
+        payload = [self._investment_classification_row(r) for r in rows]
+        with self.engine.begin() as conn:
+            conn.execute(stmt, payload)
+
+    def _investment_classification_row(
+        self, row: InvestmentClassificationRecord
+    ) -> dict:
+        data = asdict(row)
+        return {
+            "repo_id": str(data["repo_id"]) if data["repo_id"] else None,
+            "day": data["day"].isoformat(),
+            "artifact_type": str(data["artifact_type"]),
+            "artifact_id": str(data["artifact_id"]),
+            "provider": str(data["provider"]),
+            "investment_area": str(data["investment_area"]),
+            "project_stream": data["project_stream"],
+            "confidence": float(data["confidence"]),
+            "rule_id": str(data["rule_id"]),
+            "computed_at": _dt_to_sqlite(data["computed_at"]),
+        }
+
+    def write_investment_metrics(self, rows: Sequence[InvestmentMetricsRecord]) -> None:
+        if not rows:
+            return
+        stmt = text(
+            """
+            INSERT INTO investment_metrics_daily (
+              repo_id, day, team_id, investment_area, project_stream,
+              delivery_units, work_items_completed, prs_merged, churn_loc,
+              cycle_p50_hours, computed_at
+            ) VALUES (
+              :repo_id, :day, :team_id, :investment_area, :project_stream,
+              :delivery_units, :work_items_completed, :prs_merged, :churn_loc,
+              :cycle_p50_hours, :computed_at
+            )
+            ON CONFLICT (day, investment_area, team_id, project_stream) DO UPDATE SET
+              repo_id=excluded.repo_id,
+              delivery_units=excluded.delivery_units,
+              work_items_completed=excluded.work_items_completed,
+              prs_merged=excluded.prs_merged,
+              churn_loc=excluded.churn_loc,
+              cycle_p50_hours=excluded.cycle_p50_hours,
+              computed_at=excluded.computed_at
+            """
+        )
+        payload = [self._investment_metrics_row(r) for r in rows]
+        with self.engine.begin() as conn:
+            conn.execute(stmt, payload)
+
+    def _investment_metrics_row(self, row: InvestmentMetricsRecord) -> dict:
+        data = asdict(row)
+        return {
+            "repo_id": str(data["repo_id"]) if data["repo_id"] else None,
+            "day": data["day"].isoformat(),
+            "team_id": data["team_id"],
+            "investment_area": str(data["investment_area"]),
+            "project_stream": data["project_stream"],
+            "delivery_units": int(data["delivery_units"]),
+            "work_items_completed": int(data["work_items_completed"]),
+            "prs_merged": int(data["prs_merged"]),
+            "churn_loc": int(data["churn_loc"]),
+            "cycle_p50_hours": float(data["cycle_p50_hours"]),
+            "computed_at": _dt_to_sqlite(data["computed_at"]),
+        }
+
+    def write_issue_type_metrics(self, rows: Sequence[IssueTypeMetricsRecord]) -> None:
+        if not rows:
+            return
+        stmt = text(
+            """
+            INSERT INTO issue_type_metrics_daily (
+              repo_id, day, provider, team_id, issue_type_norm,
+              created_count, completed_count, active_count,
+              cycle_p50_hours, cycle_p90_hours, lead_p50_hours, computed_at
+            ) VALUES (
+              :repo_id, :day, :provider, :team_id, :issue_type_norm,
+              :created_count, :completed_count, :active_count,
+              :cycle_p50_hours, :cycle_p90_hours, :lead_p50_hours, :computed_at
+            )
+            ON CONFLICT (day, provider, team_id, issue_type_norm) DO UPDATE SET
+              repo_id=excluded.repo_id,
+              created_count=excluded.created_count,
+              completed_count=excluded.completed_count,
+              active_count=excluded.active_count,
+              cycle_p50_hours=excluded.cycle_p50_hours,
+              cycle_p90_hours=excluded.cycle_p90_hours,
+              lead_p50_hours=excluded.lead_p50_hours,
+              computed_at=excluded.computed_at
+            """
+        )
+        payload = [self._issue_type_metrics_row(r) for r in rows]
+        with self.engine.begin() as conn:
+            conn.execute(stmt, payload)
+
+    def _issue_type_metrics_row(self, row: IssueTypeMetricsRecord) -> dict:
+        data = asdict(row)
+        return {
+            "repo_id": str(data["repo_id"]) if data["repo_id"] else None,
+            "day": data["day"].isoformat(),
+            "provider": str(data["provider"]),
+            "team_id": str(data["team_id"]),
+            "issue_type_norm": str(data["issue_type_norm"]),
+            "created_count": int(data["created_count"]),
+            "completed_count": int(data["completed_count"]),
+            "active_count": int(data["active_count"]),
+            "cycle_p50_hours": float(data["cycle_p50_hours"]),
+            "cycle_p90_hours": float(data["cycle_p90_hours"]),
+            "lead_p50_hours": float(data["lead_p50_hours"]),
             "computed_at": _dt_to_sqlite(data["computed_at"]),
         }

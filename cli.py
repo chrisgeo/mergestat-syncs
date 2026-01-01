@@ -834,7 +834,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     daily.add_argument(
         "--db",
-        default=os.getenv("DB_CONN_STRING") or os.getenv("DATABASE_URL"),
+        default=os.getenv("DATABASE_URI") or os.getenv("DATABASE_URL"),
         help="Source DB URI (and default sink).",
     )
     daily.add_argument(
@@ -896,8 +896,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     complexity.add_argument(
         "--db",
-        default=os.getenv("CLICKHOUSE_DSN") or os.getenv("DB_CONN_STRING"),
-        help="ClickHouse DSN.",
+        default=os.getenv("DATABASE_URI") or os.getenv("DATABASE_URL"),
+        help="Database URI.",
     )
     complexity.set_defaults(func=_cmd_metrics_complexity)
 
@@ -921,7 +921,7 @@ def build_parser() -> argparse.ArgumentParser:
     fix_gen = fix_sub.add_parser("generate", help="Generate synthetic data.")
     fix_gen.add_argument(
         "--db",
-        default=os.getenv("DB_CONN_STRING") or os.getenv("DATABASE_URL"),
+        default=os.getenv("DATABASE_URI") or os.getenv("DATABASE_URL"),
         help="Target DB URI.",
     )
     fix_gen.add_argument(
@@ -945,8 +945,8 @@ def build_parser() -> argparse.ArgumentParser:
     api = sub.add_parser("api", help="Run the Dev Health Ops API server.")
     api.add_argument(
         "--db",
-        default=os.getenv("CLICKHOUSE_DSN") or os.getenv("DB_CONN_STRING"),
-        help="ClickHouse DSN (overrides CLICKHOUSE_DSN).",
+        default=os.getenv("DATABASE_URI") or os.getenv("DATABASE_URL"),
+        help="Database URI.",
     )
     api.add_argument("--host", default="127.0.0.1", help="Bind host.")
     api.add_argument("--port", type=int, default=8000, help="Bind port.")
@@ -973,26 +973,21 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
         ).get_team_assignment(count=8)
         if hasattr(store, "insert_teams") and team_assignment.get("teams"):
             await store.insert_teams(team_assignment["teams"])
-            logging.info(
-                "Inserted %d synthetic teams.", len(team_assignment["teams"])
-            )
+            logging.info("Inserted %d synthetic teams.", len(team_assignment["teams"]))
         from storage import SQLAlchemyStore
 
         allow_parallel_inserts = not isinstance(store, SQLAlchemyStore)
         insert_semaphore = asyncio.Semaphore(MAX_WORKERS)
 
-        async def _insert_batches(insert_fn, items, batch_size: int = BATCH_SIZE) -> None:
+        async def _insert_batches(
+            insert_fn, items, batch_size: int = BATCH_SIZE
+        ) -> None:
             if not items:
                 return
             batches = [
-                items[i : i + batch_size]
-                for i in range(0, len(items), batch_size)
+                items[i : i + batch_size] for i in range(0, len(items), batch_size)
             ]
-            if (
-                not allow_parallel_inserts
-                or MAX_WORKERS <= 1
-                or len(batches) == 1
-            ):
+            if not allow_parallel_inserts or MAX_WORKERS <= 1 or len(batches) == 1:
                 for batch in batches:
                     await insert_fn(batch)
                 return
@@ -1006,10 +1001,10 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
         for i in range(repo_count):
             r_name = base_name
             if repo_count > 1:
-                r_name = f"{base_name}-{i+1}"
+                r_name = f"{base_name}-{i + 1}"
 
             logging.info(
-                f"Generating fixture data for repo {i+1}/{repo_count}: {r_name}"
+                f"Generating fixture data for repo {i + 1}/{repo_count}: {r_name}"
             )
             generator = SyntheticDataGenerator(repo_name=r_name)
 
@@ -1096,9 +1091,7 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
 
                     sink = SQLiteMetricsSink(_normalize_sqlite_url(ns.db))
                 elif db_type == "mongo":
-                    sink = MongoMetricsSink(
-                        ns.db, db_name=os.getenv("MONGO_DB_NAME")
-                    )
+                    sink = MongoMetricsSink(ns.db)
                 elif db_type == "postgres":
                     sink = PostgresMetricsSink(ns.db)
 
@@ -1143,9 +1136,9 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
                         for path, counts in blame_by_file.items():
                             total = sum(counts.values())
                             if total:
-                                blame_concentration[path] = max(counts.values()) / float(
-                                    total
-                                )
+                                blame_concentration[path] = max(
+                                    counts.values()
+                                ) / float(total)
 
                     import uuid
 
@@ -1203,92 +1196,80 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
                         commit = commit_by_hash.get(stat.commit_hash)
                         if not commit:
                             continue
-                        commit_stat_rows.append(
-                            {
-                                "repo_id": stat.repo_id,
-                                "commit_hash": stat.commit_hash,
-                                "author_email": commit.author_email,
-                                "author_name": commit.author_name,
-                                "committer_when": commit.committer_when,
-                                "file_path": stat.file_path,
-                                "additions": stat.additions,
-                                "deletions": stat.deletions,
-                            }
-                        )
+                        commit_stat_rows.append({
+                            "repo_id": stat.repo_id,
+                            "commit_hash": stat.commit_hash,
+                            "author_email": commit.author_email,
+                            "author_name": commit.author_name,
+                            "committer_when": commit.committer_when,
+                            "file_path": stat.file_path,
+                            "additions": stat.additions,
+                            "deletions": stat.deletions,
+                        })
 
                     pull_request_rows = []
                     for pr in prs:
-                        pull_request_rows.append(
-                            {
-                                "repo_id": pr.repo_id,
-                                "number": pr.number,
-                                "author_email": pr.author_email,
-                                "author_name": pr.author_name,
-                                "created_at": pr.created_at,
-                                "merged_at": pr.merged_at,
-                                "first_review_at": pr.first_review_at,
-                                "first_comment_at": pr.first_comment_at,
-                                "reviews_count": pr.reviews_count,
-                                "comments_count": pr.comments_count,
-                                "changes_requested_count": pr.changes_requested_count,
-                                "additions": pr.additions,
-                                "deletions": pr.deletions,
-                                "changed_files": pr.changed_files,
-                            }
-                        )
+                        pull_request_rows.append({
+                            "repo_id": pr.repo_id,
+                            "number": pr.number,
+                            "author_email": pr.author_email,
+                            "author_name": pr.author_name,
+                            "created_at": pr.created_at,
+                            "merged_at": pr.merged_at,
+                            "first_review_at": pr.first_review_at,
+                            "first_comment_at": pr.first_comment_at,
+                            "reviews_count": pr.reviews_count,
+                            "comments_count": pr.comments_count,
+                            "changes_requested_count": pr.changes_requested_count,
+                            "additions": pr.additions,
+                            "deletions": pr.deletions,
+                            "changed_files": pr.changed_files,
+                        })
 
                     review_rows = []
                     for review in all_reviews:
-                        review_rows.append(
-                            {
-                                "repo_id": review.repo_id,
-                                "number": review.number,
-                                "reviewer": review.reviewer,
-                                "submitted_at": review.submitted_at,
-                                "state": review.state,
-                            }
-                        )
+                        review_rows.append({
+                            "repo_id": review.repo_id,
+                            "number": review.number,
+                            "reviewer": review.reviewer,
+                            "submitted_at": review.submitted_at,
+                            "state": review.state,
+                        })
 
                     pipeline_rows = []
                     for run in pipeline_runs:
-                        pipeline_rows.append(
-                            {
-                                "repo_id": run.repo_id,
-                                "run_id": run.run_id,
-                                "status": run.status,
-                                "queued_at": run.queued_at,
-                                "started_at": run.started_at,
-                                "finished_at": run.finished_at,
-                            }
-                        )
+                        pipeline_rows.append({
+                            "repo_id": run.repo_id,
+                            "run_id": run.run_id,
+                            "status": run.status,
+                            "queued_at": run.queued_at,
+                            "started_at": run.started_at,
+                            "finished_at": run.finished_at,
+                        })
 
                     deployment_rows = []
                     for deployment in deployments:
-                        deployment_rows.append(
-                            {
-                                "repo_id": deployment.repo_id,
-                                "deployment_id": deployment.deployment_id,
-                                "status": deployment.status,
-                                "environment": deployment.environment,
-                                "started_at": deployment.started_at,
-                                "finished_at": deployment.finished_at,
-                                "deployed_at": deployment.deployed_at,
-                                "merged_at": deployment.merged_at,
-                                "pull_request_number": deployment.pull_request_number,
-                            }
-                        )
+                        deployment_rows.append({
+                            "repo_id": deployment.repo_id,
+                            "deployment_id": deployment.deployment_id,
+                            "status": deployment.status,
+                            "environment": deployment.environment,
+                            "started_at": deployment.started_at,
+                            "finished_at": deployment.finished_at,
+                            "deployed_at": deployment.deployed_at,
+                            "merged_at": deployment.merged_at,
+                            "pull_request_number": deployment.pull_request_number,
+                        })
 
                     incident_rows = []
                     for incident in incidents:
-                        incident_rows.append(
-                            {
-                                "repo_id": incident.repo_id,
-                                "incident_id": incident.incident_id,
-                                "status": incident.status,
-                                "started_at": incident.started_at,
-                                "resolved_at": incident.resolved_at,
-                            }
-                        )
+                        incident_rows.append({
+                            "repo_id": incident.repo_id,
+                            "incident_id": incident.incident_id,
+                            "status": incident.status,
+                            "started_at": incident.started_at,
+                            "resolved_at": incident.resolved_at,
+                        })
 
                     # Provide stable team IDs for dashboards without requiring config.
                     team_resolver = TeamResolver(
@@ -1408,9 +1389,11 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
                                 )
                             )
                         if not wi_user_rows:
-                            wi_user_rows = generator.generate_work_item_user_metrics_daily(
-                                day=day,
-                                member_map=team_assignment["member_map"],
+                            wi_user_rows = (
+                                generator.generate_work_item_user_metrics_daily(
+                                    day=day,
+                                    member_map=team_assignment["member_map"],
+                                )
                             )
 
                         # Enrich User Metrics with IC fields
@@ -1495,17 +1478,14 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
                                 stats["active"] += 1
 
                             if created < end_dt and (
-                                not item.completed_at
-                                or item.completed_at >= start_dt
+                                not item.completed_at or item.completed_at >= start_dt
                             ):
-                                cls = investment_classifier.classify(
-                                    {
-                                        "labels": getattr(item, "labels", []),
-                                        "component": getattr(item, "component", ""),
-                                        "title": item.title,
-                                        "provider": item.provider,
-                                    }
-                                )
+                                cls = investment_classifier.classify({
+                                    "labels": getattr(item, "labels", []),
+                                    "component": getattr(item, "component", ""),
+                                    "title": item.title,
+                                    "provider": item.provider,
+                                })
                                 investment_classifications.append(
                                     InvestmentClassificationRecord(
                                         repo_id=r_id if r_id.int != 0 else None,
@@ -1584,13 +1564,11 @@ def _cmd_fixtures_generate(ns: argparse.Namespace) -> int:
                             path = c["file_path"]
                             if not path:
                                 continue
-                            cls = investment_classifier.classify(
-                                {
-                                    "paths": [path],
-                                    "labels": [],
-                                    "component": "",
-                                }
-                            )
+                            cls = investment_classifier.classify({
+                                "paths": [path],
+                                "labels": [],
+                                "component": "",
+                            })
                             author_email = c["author_email"] or ""
                             t_id, _ = team_resolver.resolve(author_email)
                             team_id = _normalize_investment_team_id(t_id)
@@ -1744,16 +1722,14 @@ def _cmd_api(ns: argparse.Namespace) -> int:
     import uvicorn
 
     if ns.db:
-        os.environ["CLICKHOUSE_DSN"] = ns.db
+        os.environ["DATABASE_URI"] = ns.db
 
     log_level = str(getattr(ns, "log_level", "") or "INFO").upper()
     log_config = {
         "version": 1,
         "disable_existing_loggers": False,
         "formatters": {
-            "default": {
-                "format": "%(asctime)s %(levelname)s %(name)s: %(message)s"
-            },
+            "default": {"format": "%(asctime)s %(levelname)s %(name)s: %(message)s"},
             "access": {"format": "%(message)s"},
         },
         "handlers": {

@@ -218,7 +218,7 @@ Expose port `8000` and point the container at your ClickHouse backend:
 
 ```bash
 docker run --rm -p 8000:8000 \
-  -e CLICKHOUSE_DSN=clickhouse://ch:ch@clickhouse:8123/stats \
+  -e DATABASE_URI=clickhouse://ch:ch@clickhouse:8123/stats \
   dev-hops-api:latest
 ```
 
@@ -233,7 +233,7 @@ docker run --rm -it \
   --network dev-health-ops_default \
   -v "$(pwd)":/app \
   -w /app \
-  -e CLICKHOUSE_DSN=clickhouse://ch:ch@clickhouse:8123/stats \
+  -e DATABASE_URI=clickhouse://ch:ch@clickhouse:8123/stats \
   dev-hops-runner:latest \
   fixtures generate --db clickhouse://ch:ch@clickhouse:8123/stats --days 14
 ```
@@ -275,9 +275,9 @@ This project supports PostgreSQL, MongoDB, SQLite, and ClickHouse as storage bac
 
 ### Environment Variables
 
-- **`DB_CONN_STRING` / `DATABASE_URL`** (optional): Default DB URI for `dev-hops metrics daily --db ...` and for Alembic migrations.
+- **`DATABASE_URI`** (optional): Default DB URI for `dev-hops metrics daily --db ...` and for Alembic migrations. Also accepts `DATABASE_URL` as an alias.
+- **`SECONDARY_DATABASE_URI`** (optional): Secondary database URI for `--sink both` mode (writes to both primary and secondary databases).
 - **`DB_ECHO`** (optional): Enable SQL query logging for PostgreSQL and SQLite. Set to `true`, `1`, or `yes` (case-insensitive) to enable. Any other value (including `false`, `0`, `no`, or unset) disables it. Default: `false`. Note: Enabling this in production can expose sensitive data and impact performance.
-- **`MONGO_DB_NAME`** (optional): The name of the MongoDB database to use. If not specified, the script will use the database specified in the connection string, or default to `stats`.
 - **`REPO_UUID`** (optional): UUID for the repository. If not provided, a deterministic UUID will be derived from the git repository's remote URL (or repository path if no remote exists). This ensures the same repository always gets the same UUID across runs.
 - **`MAX_WORKERS`** (optional): Number of parallel workers for processing git blame data. Higher values can speed up processing but use more CPU and memory. Default: `4`
 - **`LOG_LEVEL`** (optional): Logging level (e.g. `INFO`, `DEBUG`). Default: `INFO`
@@ -292,7 +292,7 @@ You can also configure the database using command-line arguments, which will ove
 
 #### Core Arguments
 
-- **`--db`**: Database connection string (required for `sync`; optional for `metrics daily` if `DB_CONN_STRING`/`DATABASE_URL` is set)
+- **`--db`**: Database connection string (required for `sync`; optional for `metrics daily` if `DATABASE_URI` is set)
 - **`--db-type`**: Database backend override (`postgres`, `mongo`, `sqlite`, or `clickhouse`) - optional if URL scheme is clear
 - **`--provider`**: Source provider for sync targets (`local`, `github`, `gitlab`, `synthetic`)
 - **`--auth`**: Authentication token (GitHub/GitLab)
@@ -387,7 +387,7 @@ MongoDB connection strings follow the standard MongoDB URI format:
 - **With database**: `mongodb://username:password@host:port/database_name`
 - **With options**: `mongodb://host:port/?authSource=admin&retryWrites=true`
 
-You can also set the database name separately using the `MONGO_DB_NAME` environment variable instead of including it in the connection string.
+Note: Include the database name in the URI (e.g., `mongodb://host:port/stats`).
 
 ### SQLite Connection String Format
 
@@ -492,12 +492,12 @@ _Actual performance depends on hardware, repository size, and configuration._
   # Start PostgreSQL with Docker Compose
   docker compose up postgres -d
 
-  # Run migrations (Alembic reads DB_CONN_STRING)
-  export DB_CONN_STRING="postgresql+asyncpg://postgres:postgres@localhost:5333/postgres"
+  # Run migrations (Alembic reads DATABASE_URI)
+  export DATABASE_URI="postgresql+asyncpg://postgres:postgres@localhost:5333/postgres"
   alembic upgrade head
 
   # Sync a local repo
-  dev-hops sync git --provider local --db "$DB_CONN_STRING" --repo-path .
+  dev-hops sync git --provider local --db "$DATABASE_URI" --repo-path .
   ```
 
 #### Using MongoDB
@@ -511,8 +511,7 @@ _Actual performance depends on hardware, repository size, and configuration._
   # Start MongoDB with Docker Compose
   docker compose up mongo -d
 
-  export MONGO_DB_NAME="stats" # optional if not in URI
-  dev-hops sync git --provider local --db "mongodb://localhost:27017" --repo-path .
+  dev-hops sync git --provider local --db "mongodb://localhost:27017/stats" --repo-path .
   ```
 
 #### Using SQLite

@@ -37,14 +37,12 @@ def _detect_backend(db_url: str) -> str:
     url = db_url.lower()
     if url.startswith(("mongodb://", "mongodb+srv://")):
         return "mongo"
-    if url.startswith(
-        (
-            "clickhouse://",
-            "clickhouse+http://",
-            "clickhouse+https://",
-            "clickhouse+native://",
-        )
-    ):
+    if url.startswith((
+        "clickhouse://",
+        "clickhouse+http://",
+        "clickhouse+https://",
+        "clickhouse+native://",
+    )):
         return "clickhouse"
     return "sqlalchemy"
 
@@ -66,7 +64,9 @@ def _fmt_float(value: Any, digits: int = 2) -> str:
         return str(value)
 
 
-def _print_table(title: str, headers: Sequence[str], rows: Iterable[Sequence[Any]]) -> None:
+def _print_table(
+    title: str, headers: Sequence[str], rows: Iterable[Sequence[Any]]
+) -> None:
     rows_list: List[List[str]] = [[str(cell) for cell in row] for row in rows]
     print(f"\n{title}")
     if not rows_list:
@@ -185,7 +185,7 @@ def _pr_from_row(row: Any) -> Optional[GitPullRequest]:
     )
 
 
-async def _run_mongo(db_url: str, mongo_db: Optional[str], limit_commits: int) -> int:
+async def _run_mongo(db_url: str, limit_commits: int) -> int:
     try:
         from motor.motor_asyncio import AsyncIOMotorClient
     except Exception as exc:
@@ -194,14 +194,12 @@ async def _run_mongo(db_url: str, mongo_db: Optional[str], limit_commits: int) -
 
     client = AsyncIOMotorClient(db_url)
     try:
-        db_name = mongo_db or os.getenv("MONGO_DB_NAME")
-        db = client[db_name] if db_name else None
-        if db is None:
-            try:
-                default_db = client.get_default_database()
-                db = default_db if default_db is not None else client["mergestat"]
-            except Exception:
-                db = client["mergestat"]
+        # Get db name from URI or default to 'mergestat'
+        try:
+            default_db = client.get_default_database()
+            db = default_db if default_db is not None else client["mergestat"]
+        except Exception:
+            db = client["mergestat"]
 
         commits: List[GitCommit] = []
         stats: List[GitCommitStat] = []
@@ -253,7 +251,9 @@ async def _run_mongo(db_url: str, mongo_db: Optional[str], limit_commits: int) -
     user_metrics = compute_user_metrics(commits, stats, pr_metrics)
     repo_metrics = compute_repo_metrics(commits, stats, pr_metrics)
 
-    _print_reports(commit_metrics, user_metrics, repo_metrics, limit_commits=limit_commits)
+    _print_reports(
+        commit_metrics, user_metrics, repo_metrics, limit_commits=limit_commits
+    )
     return 0
 
 
@@ -302,7 +302,9 @@ def _run_clickhouse(db_url: str, limit_commits: int) -> int:
     user_metrics = compute_user_metrics(commits, stats, pr_metrics)
     repo_metrics = compute_repo_metrics(commits, stats, pr_metrics)
 
-    _print_reports(commit_metrics, user_metrics, repo_metrics, limit_commits=limit_commits)
+    _print_reports(
+        commit_metrics, user_metrics, repo_metrics, limit_commits=limit_commits
+    )
     return 0
 
 
@@ -323,7 +325,9 @@ async def _run_async(db_url: str, limit_commits: int) -> int:
     user_metrics = compute_user_metrics(commits, stats, pr_metrics)
     repo_metrics = compute_repo_metrics(commits, stats, pr_metrics)
 
-    _print_reports(commit_metrics, user_metrics, repo_metrics, limit_commits=limit_commits)
+    _print_reports(
+        commit_metrics, user_metrics, repo_metrics, limit_commits=limit_commits
+    )
     return 0
 
 
@@ -344,7 +348,9 @@ def _run_sync(db_url: str, limit_commits: int) -> int:
     user_metrics = compute_user_metrics(commits, stats, pr_metrics)
     repo_metrics = compute_repo_metrics(commits, stats, pr_metrics)
 
-    _print_reports(commit_metrics, user_metrics, repo_metrics, limit_commits=limit_commits)
+    _print_reports(
+        commit_metrics, user_metrics, repo_metrics, limit_commits=limit_commits
+    )
     return 0
 
 
@@ -387,7 +393,11 @@ def _print_reports(
 
     users_sorted = sorted(
         user_metrics.values(),
-        key=lambda u: (u.commits_count, u.prs_authored, u.total_loc_added + u.total_loc_deleted),
+        key=lambda u: (
+            u.commits_count,
+            u.prs_authored,
+            u.total_loc_added + u.total_loc_deleted,
+        ),
         reverse=True,
     )
     _print_table(
@@ -456,16 +466,11 @@ def main() -> int:
     )
     parser.add_argument(
         "--db",
-        default=os.getenv("DB_CONN_STRING") or os.getenv("DATABASE_URL"),
+        default=os.getenv("DATABASE_URI") or os.getenv("DATABASE_URL"),
         help=(
             "Database URI (SQLAlchemy: postgresql+asyncpg://..., sqlite+aiosqlite:///...; "
             "MongoDB: mongodb://...; ClickHouse: clickhouse://...)."
         ),
-    )
-    parser.add_argument(
-        "--mongo-db",
-        default=os.getenv("MONGO_DB_NAME"),
-        help="MongoDB database name (if not embedded in the connection string).",
     )
     parser.add_argument(
         "--limit-commits",
@@ -477,17 +482,13 @@ def main() -> int:
 
     if not args.db:
         print("No database connection string provided.")
-        print("Set `DB_CONN_STRING` / `DATABASE_URL` or pass `--db`.")
+        print("Set `DATABASE_URI` or pass `--db`.")
         return 0
 
     try:
         backend = _detect_backend(args.db)
         if backend == "mongo":
-            return asyncio.run(
-                _run_mongo(
-                    args.db, mongo_db=args.mongo_db, limit_commits=args.limit_commits
-                )
-            )
+            return asyncio.run(_run_mongo(args.db, limit_commits=args.limit_commits))
         if backend == "clickhouse":
             return _run_clickhouse(args.db, limit_commits=args.limit_commits)
 

@@ -83,28 +83,41 @@ The project follows a pipeline-like architecture:
 
 - **Private Repos**: Full support for private GitHub/GitLab repos via tokens.
 - **Batch Processing**: Connectors support pattern matching and concurrent batch processing.
-- **Database Agnostic**: Most commands support switching between DB types using the `--db` flag or `DB_CONN_STRING` env var.
+- **Database Agnostic**: Most commands support switching between DB types using the `--db` flag or `DATABASE_URI` env var.
 - **Metrics Computation**: Can be run daily or backfilled for a period.
 - **Plans & Requirements**: Implementation plans in `docs/project.md`, metrics inventory in `docs/metrics-inventory.md`, the roadmap in `docs/roadmap.md`.
+
+## Sink-Based Metrics Architecture
+
+Metrics are persisted via sink implementations in `metrics/sinks/`:
+
+- `metrics/sinks/base.py`: `BaseMetricsSink` ABC defining the sink contract.
+- `metrics/sinks/factory.py`: `create_sink()` factory, `detect_backend()`, `SinkBackend` enum.
+- `metrics/sinks/clickhouse.py`: ClickHouse implementation using `clickhouse_connect`.
+- `metrics/sinks/sqlite.py`: SQLite implementation using SQLAlchemy Core.
+- `metrics/sinks/postgres.py`: PostgreSQL implementation (subclasses SQLite).
+- `metrics/sinks/mongo.py`: MongoDB implementation using `pymongo`.
+
+Backend switching via `DATABASE_URI` env var or `--db` CLI flag.
 
 ## Developer workflows
 
 - Run the sync:
 
 ```bash
-python cli.py sync git --provider local --db "<DB_CONN>" --repo-path /path/to/repo
+python cli.py sync git --provider local --db "$DATABASE_URI" --repo-path /path/to/repo
 ```
 
 - Generate synthetic data:
 
 ```bash
-python cli.py fixtures generate --db "<DB_CONN>" --days 30
+python cli.py fixtures generate --db "$DATABASE_URI" --days 30
 ```
 
 - Sync work items (provider APIs → work item tables):
 
 ```bash
-python cli.py sync work-items --provider github --auth "$GITHUB_TOKEN" -s "org/*" --db "<DB_CONN>" --date 2025-02-01 --backfill 30
+python cli.py sync work-items --provider github --auth "$GITHUB_TOKEN" -s "org/*" --db "$DATABASE_URI" --date 2025-02-01 --backfill 30
 ```
 
 - Compute complexity metrics (batch mode):
@@ -118,7 +131,8 @@ python cli.py metrics complexity --repo-path . -s "*"
 
 ## Conventions & rules for agents
 
-- CLI args override env vars (`DB_CONN_STRING`, `DB_TYPE`, `GITHUB_TOKEN`, `GITLAB_TOKEN`, `REPO_PATH`).
+- CLI args override env vars (`DATABASE_URI`, `GITHUB_TOKEN`, `GITLAB_TOKEN`, `REPO_PATH`).
+- For `sink='both'` mode, set `SECONDARY_DATABASE_URI` for the second sink.
 - Performance knobs: `BATCH_SIZE` and `MAX_WORKERS`.
 - Prefer async batch helpers for network I/O. Respect `RateLimitGate` backoff in connectors/processors.
 - Do not commit secrets. Use environment variables for tokens in examples only.

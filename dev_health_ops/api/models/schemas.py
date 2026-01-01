@@ -135,6 +135,17 @@ class HealthResponse(BaseModel):
     services: Dict[str, str]
 
 
+class MetaResponse(BaseModel):
+    """Backend metadata for /api/v1/meta endpoint."""
+
+    backend: str
+    version: str
+    last_ingest_at: Optional[datetime]
+    coverage: Dict[str, Any]
+    limits: Dict[str, int]
+    supported_endpoints: List[str]
+
+
 class InvestmentCategory(BaseModel):
     key: str
     name: str

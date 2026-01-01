@@ -16,7 +16,7 @@ env:
   CLOUD_RUN_PROJECT: ${{ secrets.CLOUD_RUN_PROJECT }}
   CLOUD_RUN_REGION: ${{ secrets.CLOUD_RUN_REGION }}
   CLOUD_RUN_SERVICE: ${{ secrets.CLOUD_RUN_SERVICE }}
-  CLICKHOUSE_DSN: ${{ secrets.CLICKHOUSE_DSN }}
+  DATABASE_URI: ${{ secrets.DATABASE_URI }}
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
   CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
   CLOUDFLARE_PAGES_PROJECT_NAME: ${{ secrets.CLOUDFLARE_PAGES_PROJECT_NAME }}
@@ -50,7 +50,7 @@ jobs:
           project_id: ${{ env.CLOUD_RUN_PROJECT }}
 
       - name: Deploy API to Cloud Run
-        if: ${{ env.CLOUD_RUN_PROJECT && env.CLOUD_RUN_REGION && env.CLOUD_RUN_SERVICE && env.CLICKHOUSE_DSN && env.GCP_SA_KEY }}
+        if: ${{ env.CLOUD_RUN_PROJECT && env.CLOUD_RUN_REGION && env.CLOUD_RUN_SERVICE && env.DATABASE_URI && env.GCP_SA_KEY }}
         run: |
           gcloud run deploy "${{ env.CLOUD_RUN_SERVICE }}" \
             --image "${{ env.IMAGE_REGISTRY }}/dev-hops-api:${{ env.VERSION }}" \
@@ -58,7 +58,7 @@ jobs:
             --project "${{ env.CLOUD_RUN_PROJECT }}" \
             --allow-unauthenticated \
             --platform managed \
-            --set-env-vars CLICKHOUSE_DSN="${{ env.CLICKHOUSE_DSN }}"
+            --set-env-vars DATABASE_URI="${{ env.DATABASE_URI }}"
 
       - name: Publish Cloudflare Pages
         if: ${{ env.CLOUDFLARE_API_TOKEN && env.CLOUDFLARE_ACCOUNT_ID && env.CLOUDFLARE_PAGES_PROJECT_NAME }}

@@ -36,7 +36,7 @@ target_metadata = Base.metadata
 # can be acquired:
 # my_important_option = config.get_main_option("my_important_option")
 # ... etc.
-db_url = os.getenv("DB_CONN_STRING")
+db_url = os.getenv("DATABASE_URI") or os.getenv("DATABASE_URL")
 if db_url:
     config.set_main_option("sqlalchemy.url", db_url)
 else:
@@ -44,7 +44,7 @@ else:
     url = config.get_main_option("sqlalchemy.url")
     if not url:
         raise ValueError(
-            "Database URL not configured. Set DB_CONN_STRING environment variable "
+            "Database URL not configured. Set DATABASE_URI environment variable "
             "or configure sqlalchemy.url in alembic.ini"
         )
 

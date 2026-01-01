@@ -104,13 +104,11 @@ def run_daily_metrics_job(
     - `work_item_metrics_daily`, `work_item_user_metrics_daily`, `work_item_cycle_times`
 
     When `sink='both'`, metrics are written to the backend given by `db_url` and
-    also to the other sink configured via env:
-    - ClickHouse: `CLICKHOUSE_DSN` (or CLICKHOUSE_HOST/PORT/DB/USER/PASSWORD)
-    - MongoDB: `MONGO_URI` (+ optional `MONGO_DB_NAME`)
+    also to a secondary sink configured via `SECONDARY_DATABASE_URI`.
     """
-    db_url = db_url or os.getenv("DB_CONN_STRING") or os.getenv("DATABASE_URL")
+    db_url = db_url or os.getenv("DATABASE_URI") or os.getenv("DATABASE_URL")
     if not db_url:
-        raise ValueError("Database URI is required (pass --db or set DB_CONN_STRING).")
+        raise ValueError("Database URI is required (pass --db or set DATABASE_URI).")
 
     backend = detect_db_type(db_url)
     if backend not in {"clickhouse", "mongo", "sqlite", "postgres"}:
@@ -143,10 +141,14 @@ def run_daily_metrics_job(
     status_mapping = load_status_mapping()
     identity = load_identity_resolver()
     team_resolver = load_team_resolver()
-    
+
     # Load classifiers
-    investment_classifier = InvestmentClassifier(REPO_ROOT / "config/investment_areas.yaml")
-    issue_type_normalizer = IssueTypeNormalizer(REPO_ROOT / "config/issue_type_mapping.yaml")
+    investment_classifier = InvestmentClassifier(
+        REPO_ROOT / "config/investment_areas.yaml"
+    )
+    issue_type_normalizer = IssueTypeNormalizer(
+        REPO_ROOT / "config/issue_type_mapping.yaml"
+    )
 
     logger.info(
         "Daily metrics job: backend=%s sink=%s day=%s backfill=%d repo_id=%s provider=%s",
@@ -179,13 +181,11 @@ def run_daily_metrics_job(
     if backend == "clickhouse":
         primary_sink = ClickHouseMetricsSink(db_url)
         if sink == "both":
-            secondary_sink = MongoMetricsSink(
-                _mongo_uri_from_env(), db_name=os.getenv("MONGO_DB_NAME")
-            )
+            secondary_sink = MongoMetricsSink(_secondary_uri_from_env())
     elif backend == "mongo":
-        primary_sink = MongoMetricsSink(db_url, db_name=os.getenv("MONGO_DB_NAME"))
+        primary_sink = MongoMetricsSink(db_url)
         if sink == "both":
-            secondary_sink = ClickHouseMetricsSink(_clickhouse_dsn_from_env())
+            secondary_sink = ClickHouseMetricsSink(_secondary_uri_from_env())
     elif backend == "postgres":
         primary_sink = PostgresMetricsSink(db_url)
     else:
@@ -231,8 +231,12 @@ def run_daily_metrics_job(
             )
 
             # Inject a default synthetic repo if 'synthetic' is requested but no synthetic repo exists
-            if "synthetic" in provider_set and not any(r.source == "synthetic" for r in discovered_repos):
-                logger.info("Injecting default 'synthetic/demo-repo' for synthetic data generation")
+            if "synthetic" in provider_set and not any(
+                r.source == "synthetic" for r in discovered_repos
+            ):
+                logger.info(
+                    "Injecting default 'synthetic/demo-repo' for synthetic data generation"
+                )
                 discovered_repos.append(
                     DiscoveredRepo(
                         repo_id=uuid.uuid4(),
@@ -646,7 +650,7 @@ def run_daily_metrics_job(
             issue_type_stats: Dict[Tuple[uuid.UUID, str, str, str], Dict[str, int]] = {}
             # Key: (repo_id, provider, team_id, issue_type_norm)
             # Value: {created, completed, active}
-            
+
             # Helper to resolve team
             def _get_team(wi) -> str:
                 # Use team resolver logic or fallback
@@ -670,22 +674,27 @@ def run_daily_metrics_job(
                 r_id = getattr(item, "repo_id", None) or uuid.UUID(int=0)
                 prov = item.provider
                 team_id = _get_team(item)
-                
+
                 # Normalize type
                 norm_type = issue_type_normalizer.normalize(
                     prov, item.type, getattr(item, "labels", [])
                 )
-                
+
                 key = (r_id, prov, team_id, norm_type)
                 if key not in issue_type_stats:
-                    issue_type_stats[key] = {"created": 0, "completed": 0, "active": 0, "cycles": []}
-                
+                    issue_type_stats[key] = {
+                        "created": 0,
+                        "completed": 0,
+                        "active": 0,
+                        "cycles": [],
+                    }
+
                 stats = issue_type_stats[key]
-                
+
                 created = _to_utc(item.created_at)
                 if start_dt <= created < end_dt:
                     stats["created"] += 1
-                
+
                 if item.completed_at:
                     completed = _to_utc(item.completed_at)
                     if start_dt <= completed < end_dt:
@@ -696,10 +705,12 @@ def run_daily_metrics_job(
                             hours = (completed - started).total_seconds() / 3600.0
                             if hours >= 0:
                                 stats.setdefault("cycles", []).append(hours)
-                
+
                 # Active (WIP) at end of day
                 is_created = created < end_dt
-                is_not_completed = not item.completed_at or _to_utc(item.completed_at) >= end_dt
+                is_not_completed = (
+                    not item.completed_at or _to_utc(item.completed_at) >= end_dt
+                )
                 if is_created and is_not_completed:
                     stats["active"] += 1
 
@@ -708,79 +719,97 @@ def run_daily_metrics_job(
                 cycles = sorted(stat.get("cycles", []))
                 p50 = cycles[len(cycles) // 2] if cycles else 0.0
                 p90 = cycles[int(len(cycles) * 0.9)] if cycles else 0.0
-                
+
                 # We skip lead time for brevity or compute similar to cycle
-                
-                issue_type_metrics_rows.append(IssueTypeMetricsRecord(
-                    repo_id=r_id if r_id.int != 0 else None,
-                    day=d,
-                    provider=prov,
-                    team_id=team_id,
-                    issue_type_norm=norm_type,
-                    created_count=stat["created"],
-                    completed_count=stat["completed"],
-                    active_count=stat["active"],
-                    cycle_p50_hours=p50,
-                    cycle_p90_hours=p90,
-                    lead_p50_hours=0.0, # Placeholder
-                    computed_at=computed_at
-                ))
+
+                issue_type_metrics_rows.append(
+                    IssueTypeMetricsRecord(
+                        repo_id=r_id if r_id.int != 0 else None,
+                        day=d,
+                        provider=prov,
+                        team_id=team_id,
+                        issue_type_norm=norm_type,
+                        created_count=stat["created"],
+                        completed_count=stat["completed"],
+                        active_count=stat["active"],
+                        cycle_p50_hours=p50,
+                        cycle_p90_hours=p90,
+                        lead_p50_hours=0.0,  # Placeholder
+                        computed_at=computed_at,
+                    )
+                )
 
             # --- Investment Classifications & Metrics ---
             investment_classifications = []
-            inv_metrics_map: Dict[Tuple[uuid.UUID, str, str, str], Dict[str, float]] = {}
+            inv_metrics_map: Dict[
+                Tuple[uuid.UUID, str, str, str], Dict[str, float]
+            ] = {}
             # Key: (repo_id, team_id, area, stream)
-            
+
             # 1. Classify Work Items
             for item in work_items:
                 # Check if item relevant for this day (completed or active)
                 # We classify ALL items that are active or acted upon
                 # For simplicity, let's classify items completed today for the metrics
-                
+
                 r_id = getattr(item, "repo_id", None) or uuid.UUID(int=0)
-                
+
                 # Check timestamps to see if we should emit a classification record
                 # We emit classification for items created or updated today?
                 # The requirement says "Investment areas (portfolio classification) ... For each artifact"
                 # We probably want to store classification for items ACTIVE today.
-                
+
                 # If item existed today
                 created = _to_utc(item.created_at)
-                if created < end_dt and (not item.completed_at or _to_utc(item.completed_at) >= start_dt):
+                if created < end_dt and (
+                    not item.completed_at or _to_utc(item.completed_at) >= start_dt
+                ):
                     cls = investment_classifier.classify({
                         "labels": getattr(item, "labels", []),
                         "component": getattr(item, "component", ""),
                         "title": item.title,
-                        "provider": item.provider
+                        "provider": item.provider,
                     })
-                    
-                    investment_classifications.append(InvestmentClassificationRecord(
-                        repo_id=r_id if r_id.int != 0 else None,
-                        day=d,
-                        artifact_type="work_item",
-                        artifact_id=item.work_item_id,
-                        provider=item.provider,
-                        investment_area=cls.investment_area,
-                        project_stream=cls.project_stream or "",
-                        confidence=cls.confidence,
-                        rule_id=cls.rule_id,
-                        computed_at=computed_at
-                    ))
-                    
+
+                    investment_classifications.append(
+                        InvestmentClassificationRecord(
+                            repo_id=r_id if r_id.int != 0 else None,
+                            day=d,
+                            artifact_type="work_item",
+                            artifact_id=item.work_item_id,
+                            provider=item.provider,
+                            investment_area=cls.investment_area,
+                            project_stream=cls.project_stream or "",
+                            confidence=cls.confidence,
+                            rule_id=cls.rule_id,
+                            computed_at=computed_at,
+                        )
+                    )
+
                     # Metrics Aggregation (only for completed items)
                     if item.completed_at:
                         completed = _to_utc(item.completed_at)
                         if start_dt <= completed < end_dt:
                             team_id = _normalize_investment_team_id(_get_team(item))
-                            key = (r_id, team_id, cls.investment_area, cls.project_stream or "")
+                            key = (
+                                r_id,
+                                team_id,
+                                cls.investment_area,
+                                cls.project_stream or "",
+                            )
                             if key not in inv_metrics_map:
-                                inv_metrics_map[key] = {"units": 0, "completed": 0, "churn": 0, "cycles": []}
-                            
+                                inv_metrics_map[key] = {
+                                    "units": 0,
+                                    "completed": 0,
+                                    "churn": 0,
+                                    "cycles": [],
+                                }
+
                             inv_metrics_map[key]["completed"] += 1
                             # Units = story points or 1
                             points = getattr(item, "story_points", 1) or 1
                             inv_metrics_map[key]["units"] += int(points)
-                            
+
                             if item.started_at:
                                 s = _to_utc(item.started_at)
                                 h = (completed - s).total_seconds() / 3600.0
@@ -804,44 +833,51 @@ def run_daily_metrics_job(
                 path = c["file_path"]
                 if not path:
                     continue
-                
+
                 cls = investment_classifier.classify({
                     "paths": [path],
-                    "labels": [], # No labels for commits usually
-                    "component": ""
+                    "labels": [],  # No labels for commits usually
+                    "component": "",
                 })
-                
+
                 # We don't emit a classification record per commit (too many), but we aggregate metrics
                 # We need author team
                 author_email = c["author_email"] or ""
                 t_id, _ = team_resolver.resolve(author_email)
                 team_id = _normalize_investment_team_id(t_id)
-                
+
                 key = (r_id, team_id, cls.investment_area, cls.project_stream or "")
                 if key not in inv_metrics_map:
-                    inv_metrics_map[key] = {"units": 0, "completed": 0, "churn": 0, "cycles": []}
-                
-                inv_metrics_map[key]["churn"] += (c["additions"] + c["deletions"])
+                    inv_metrics_map[key] = {
+                        "units": 0,
+                        "completed": 0,
+                        "churn": 0,
+                        "cycles": [],
+                    }
+
+                inv_metrics_map[key]["churn"] += c["additions"] + c["deletions"]
 
             investment_metrics_rows = []
             for (r_id, team_id, area, stream), data in inv_metrics_map.items():
                 cycles = sorted(data["cycles"])
                 p50 = cycles[len(cycles) // 2] if cycles else 0.0
-                
-                investment_metrics_rows.append(InvestmentMetricsRecord(
-                    repo_id=r_id if r_id.int != 0 else None,
-                    day=d,
-                    team_id=team_id,
-                    investment_area=area,
-                    project_stream=stream,
-                    delivery_units=data["units"],
-                    work_items_completed=data["completed"],
-                    prs_merged=0, # Need PR classification logic
-                    churn_loc=data["churn"],
-                    cycle_p50_hours=p50,
-                    computed_at=computed_at
-                ))
-            
+
+                investment_metrics_rows.append(
+                    InvestmentMetricsRecord(
+                        repo_id=r_id if r_id.int != 0 else None,
+                        day=d,
+                        team_id=team_id,
+                        investment_area=area,
+                        project_stream=stream,
+                        delivery_units=data["units"],
+                        work_items_completed=data["completed"],
+                        prs_merged=0,  # Need PR classification logic
+                        churn_loc=data["churn"],
+                        cycle_p50_hours=p50,
+                        computed_at=computed_at,
+                    )
+                )
+
             # --- IC Metrics & Landscape ---
             team_map = load_team_map()
             ic_metrics = compute_ic_metrics_daily(
@@ -851,7 +887,7 @@ def run_daily_metrics_job(
             )
             # Replace basic user metrics with extended IC metrics
             result.user_metrics[:] = ic_metrics
-            
+
             logger.info(
                 "Computed derived metrics: repo=%d user=%d commit=%d team=%d wi=%d wi_user=%d wi_facts=%d",
                 len(result.repo_metrics),
@@ -867,7 +903,7 @@ def run_daily_metrics_job(
             for s in sinks:
                 logger.debug("Writing derived metrics to sink=%s", type(s).__name__)
                 s.write_repo_metrics(result.repo_metrics)
-                s.write_user_metrics(result.user_metrics) # Writes extended metrics
+                s.write_user_metrics(result.user_metrics)  # Writes extended metrics
                 s.write_commit_metrics(result.commit_metrics)
                 s.write_file_metrics(all_file_metrics)
                 s.write_team_metrics(team_metrics)
@@ -889,17 +925,19 @@ def run_daily_metrics_job(
                 # New metrics writes
                 if hasattr(s, "write_file_hotspot_daily") and risk_hotspots:
                     s.write_file_hotspot_daily(risk_hotspots)
-                
+
                 if hasattr(s, "write_issue_type_metrics") and issue_type_metrics_rows:
                     s.write_issue_type_metrics(issue_type_metrics_rows)
-                        
-                if hasattr(s, "write_investment_classifications") and investment_classifications:
+
+                if (
+                    hasattr(s, "write_investment_classifications")
+                    and investment_classifications
+                ):
                     s.write_investment_classifications(investment_classifications)
-                        
+
                 if hasattr(s, "write_investment_metrics") and investment_metrics_rows:
                     s.write_investment_metrics(investment_metrics_rows)
 
-                
                 # Landscape rolling metrics
                 try:
                     rolling_stats = s.get_rolling_30d_user_stats(
@@ -911,7 +949,9 @@ def run_daily_metrics_job(
                         team_map=team_map,
                     )
                     s.write_ic_landscape_rolling(landscape_recs)
-                    logger.info("Computed and wrote %d landscape records", len(landscape_recs))
+                    logger.info(
+                        "Computed and wrote %d landscape records", len(landscape_recs)
+                    )
                 except Exception as e:
                     logger.warning("Failed to compute/write landscape metrics: %s", e)
 
@@ -923,31 +963,12 @@ def run_daily_metrics_job(
                 logger.exception("Error closing sink %s", type(s).__name__)
 
 
-def _mongo_uri_from_env() -> str:
-    uri = os.getenv("MONGO_URI") or ""
+def _secondary_uri_from_env() -> str:
+    """Get the secondary database URI for sink='both' mode."""
+    uri = os.getenv("SECONDARY_DATABASE_URI") or ""
     if not uri:
-        raise ValueError(
-            "MONGO_URI is required for sink='both' when source is ClickHouse"
-        )
+        raise ValueError("SECONDARY_DATABASE_URI is required for sink='both'")
     return uri
-
-
-def _clickhouse_dsn_from_env() -> str:
-    dsn = os.getenv("CLICKHOUSE_DSN") or ""
-    if dsn:
-        return dsn
-    host = os.getenv("CLICKHOUSE_HOST", "localhost")
-    port = os.getenv("CLICKHOUSE_PORT", "8123")
-    db = os.getenv("CLICKHOUSE_DB", "default")
-    user = os.getenv("CLICKHOUSE_USER", "")
-    password = os.getenv("CLICKHOUSE_PASSWORD", "")
-
-    auth = ""
-    if user and password:
-        auth = f"{user}:{password}@"
-    elif user:
-        auth = f"{user}@"
-    return f"clickhouse://{auth}{host}:{port}/{db}"
 
 
 def _safe_json_loads(value: Any) -> Any:
@@ -1060,9 +1081,11 @@ def _discover_repos(
         except Exception as e:
             # If table doesn't exist or other error, return empty list
             # The synthetic injection logic will handle creating a fake repo if needed.
-            logger.warning("Failed to discover repos from SQLite (table might be missing): %s", e)
+            logger.warning(
+                "Failed to discover repos from SQLite (table might be missing): %s", e
+            )
             rows = []
-            
+
         for r in rows:
             r_settings = getattr(r, "settings", None)
             settings = r_settings if isinstance(r_settings, dict) else {}
@@ -1360,7 +1383,9 @@ def _load_clickhouse_blame_concentration(
         where = "WHERE repo_id = {repo_id:UUID}"
     elif repo_name is not None:
         params["repo_name"] = repo_name
-        where = "WHERE repo_id IN (SELECT id FROM repos WHERE repo = {repo_name:String})"
+        where = (
+            "WHERE repo_id IN (SELECT id FROM repos WHERE repo = {repo_name:String})"
+        )
 
     query = f"""
     SELECT
@@ -1564,7 +1589,11 @@ def _load_mongo_blame_concentration(
     pipeline.extend([
         {
             "$group": {
-                "_id": {"repo_id": "$repo_id", "path": "$path", "author": "$author_email"},
+                "_id": {
+                    "repo_id": "$repo_id",
+                    "path": "$path",
+                    "author": "$author_email",
+                },
                 "lines_by_author": {"$sum": 1},
             }
         },
@@ -1710,7 +1739,7 @@ def _load_sqlite_rows(
                             committer_when = datetime.fromisoformat(committer_when)
                         except ValueError:
                             continue
-                            
+
                     commit_rows.append({
                         "repo_id": repo_uuid,
                         "commit_hash": str(commit_hash),
@@ -1738,7 +1767,7 @@ def _load_sqlite_rows(
                             created_at = datetime.fromisoformat(created_at)
                         except ValueError:
                             continue
-                    
+
                     if isinstance(merged_at, str):
                         try:
                             merged_at = datetime.fromisoformat(merged_at)
@@ -1750,12 +1779,12 @@ def _load_sqlite_rows(
                         "number": int(number or 0),
                         "author_email": author_email,
                         "author_name": author_name,
-                        "created_at": created_at, # type: ignore
-                        "merged_at": merged_at, # type: ignore
+                        "created_at": created_at,  # type: ignore
+                        "merged_at": merged_at,  # type: ignore
                     })
             except Exception as e:
                 logger.warning("Failed to load pull requests from SQLite: %s", e)
-                
+
     except Exception as e:
         logger.warning("Failed to access SQLite session: %s", e)
         return [], []
@@ -1938,7 +1967,7 @@ def _load_sqlite_reviews(
         except Exception as e:
             logger.warning("Failed to load pull request reviews from SQLite: %s", e)
             return []
-            
+
         return rows
 
 
@@ -1957,7 +1986,9 @@ def _load_clickhouse_pipeline_runs(
         repo_filter = " AND repo_id = {repo_id:UUID}"
     elif repo_name is not None:
         params["repo_name"] = repo_name
-        repo_filter = " AND repo_id IN (SELECT id FROM repos WHERE repo = {repo_name:String})"
+        repo_filter = (
+            " AND repo_id IN (SELECT id FROM repos WHERE repo = {repo_name:String})"
+        )
 
     query = f"""
     SELECT
@@ -2013,7 +2044,9 @@ def _load_clickhouse_deployments(
         repo_filter = " AND repo_id = {repo_id:UUID}"
     elif repo_name is not None:
         params["repo_name"] = repo_name
-        repo_filter = " AND repo_id IN (SELECT id FROM repos WHERE repo = {repo_name:String})"
+        repo_filter = (
+            " AND repo_id IN (SELECT id FROM repos WHERE repo = {repo_name:String})"
+        )
 
     query = f"""
     SELECT
@@ -2080,7 +2113,9 @@ def _load_clickhouse_incidents(
         repo_filter = " AND repo_id = {repo_id:UUID}"
     elif repo_name is not None:
         params["repo_name"] = repo_name
-        repo_filter = " AND repo_id IN (SELECT id FROM repos WHERE repo = {repo_name:String})"
+        repo_filter = (
+            " AND repo_id IN (SELECT id FROM repos WHERE repo = {repo_name:String})"
+        )
 
     query = f"""
     SELECT
@@ -2240,6 +2275,7 @@ def _load_sqlite_pipeline_runs(
     repo_name: Optional[str] = None,
 ) -> List[PipelineRunRow]:
     from sqlalchemy import text
+
     query = """
         SELECT repo_id, run_id, status, queued_at, started_at, finished_at
         FROM ci_pipeline_runs
@@ -2258,7 +2294,9 @@ def _load_sqlite_pipeline_runs(
             for r in conn.execute(text(query), params).all():
                 started_at = r[4]
                 if isinstance(started_at, str):
-                    started_at = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+                    started_at = datetime.fromisoformat(
+                        started_at.replace("Z", "+00:00")
+                    )
                 rows.append({
                     "repo_id": uuid.UUID(str(r[0])),
                     "run_id": str(r[1] or ""),
@@ -2282,6 +2320,7 @@ def _load_sqlite_deployments(
     repo_name: Optional[str] = None,
 ) -> List[DeploymentRow]:
     from sqlalchemy import text
+
     query = """
         SELECT repo_id, deployment_id, status, environment, started_at, finished_at, deployed_at, merged_at, pull_request_number
         FROM deployments
@@ -2324,6 +2363,7 @@ def _load_sqlite_incidents(
     repo_name: Optional[str] = None,
 ) -> List[IncidentRow]:
     from sqlalchemy import text
+
     query = """
         SELECT repo_id, incident_id, status, started_at, resolved_at
         FROM incidents
@@ -2342,7 +2382,9 @@ def _load_sqlite_incidents(
             for r in conn.execute(text(query), params).all():
                 started_at = r[3]
                 if isinstance(started_at, str):
-                    started_at = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+                    started_at = datetime.fromisoformat(
+                        started_at.replace("Z", "+00:00")
+                    )
                 rows.append({
                     "repo_id": uuid.UUID(str(r[0])),
                     "incident_id": str(r[1] or ""),

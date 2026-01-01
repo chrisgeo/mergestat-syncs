@@ -10,6 +10,8 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
+from metrics.sinks.factory import detect_backend
+
 from .models.filters import (
     DrilldownRequest,
     ExplainRequest,
@@ -29,6 +31,7 @@ from .models.schemas import (
     HeatmapResponse,
     HomeResponse,
     InvestmentResponse,
+    MetaResponse,
     OpportunitiesResponse,
     QuadrantResponse,
     PersonDrilldownResponse,
@@ -93,19 +96,16 @@ _FORBIDDEN_QUERY_PARAMS = {
 
 
 def _db_url() -> str:
-    dsn = (
-        os.getenv("DATABASE_URL")
-        or os.getenv("DB_CONN_STRING")
-        or os.getenv("CLICKHOUSE_DSN")
-    )
+    dsn = os.getenv("DATABASE_URI") or os.getenv("DATABASE_URL")
     if dsn:
         return dsn
 
-    logger.warning(
-        "Missing database environment variable: DATABASE_URL, DB_CONN_STRING, or CLICKHOUSE_DSN"
+    # Fail fast if no database configuration is provided to avoid
+    # accidentally connecting to an unintended default in production.
+    raise RuntimeError(
+        "Database configuration is missing: set DATABASE_URI or DATABASE_URL "
+        "(e.g. 'clickhouse://localhost:8123/default')."
     )
-
-    raise RuntimeError("No database environment variable is not set.")
 
 
 def _filters_from_query(
@@ -185,6 +185,47 @@ async def health() -> HealthResponse | JSONResponse:
         )
         return JSONResponse(status_code=503, content=content)
     return response
+
+
+@app.get("/api/v1/meta", response_model=MetaResponse)
+async def meta() -> MetaResponse | JSONResponse:
+    """
+    Return backend metadata including DB kind, version, limits, and supported endpoints.
+    """
+    db_url = _db_url()
+    backend = detect_backend(db_url).value  # Get string value from enum
+
+    try:
+        # Simple meta response using direct ClickHouse query
+        version = "unknown"
+        coverage: dict = {}
+        if backend == "clickhouse":
+            async with clickhouse_client(db_url) as ch:
+                try:
+                    result = ch.command("SELECT version()")
+                    version = str(result) if result else "unknown"
+                except Exception:
+                    # Silently ignore version query failures - not critical for meta endpoint
+                    pass
+
+        return MetaResponse(
+            backend=backend,
+            version=version,
+            last_ingest_at=None,
+            coverage=coverage,
+            limits={"max_days": 365, "max_repos": 1000},
+            supported_endpoints=[
+                "/api/v1/home",
+                "/api/v1/quadrant",
+                "/api/v1/flame",
+                "/api/v1/heatmap",
+                "/api/v1/sankey",
+                "/api/v1/investment",
+                "/api/v1/opportunities",
+            ],
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Metadata unavailable") from exc
 
 
 @app.post("/api/v1/home", response_model=HomeResponse)

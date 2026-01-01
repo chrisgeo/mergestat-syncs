@@ -86,7 +86,7 @@ tests:
     - pip install -r requirements.txt
   parallel:
     matrix:
-      - PYTHON_VERSION: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+      - PYTHON_VERSION: [ "3.10", "3.11", "3.12", "3.13", "3.14" ]
   services:
     - name: postgres:15
       alias: postgres
@@ -96,8 +96,8 @@ tests:
     POSTGRES_USER: postgres
     POSTGRES_PASSWORD: postgres
     POSTGRES_DB: test_db
-    DB_CONN_STRING: "postgresql+asyncpg://postgres:postgres@postgres:5432/test_db"
-    MONGO_CONN_STRING: "mongodb://mongo:27017"
+    DATABASE_URI: "postgresql+asyncpg://postgres:postgres@postgres:5432/test_db"
+    SECONDARY_DATABASE_URI: "mongodb://mongo:27017"
   script:
     - |
       python - <<'PY'
@@ -140,8 +140,8 @@ tests:
 
 
       async def main() -> None:
-          await wait_postgres(os.environ["DB_CONN_STRING"])
-          await wait_mongo(os.environ["MONGO_CONN_STRING"])
+          await wait_postgres(os.environ["DATABASE_URI"])
+          await wait_mongo(os.environ["SECONDARY_DATABASE_URI"])
 
 
       asyncio.run(main())

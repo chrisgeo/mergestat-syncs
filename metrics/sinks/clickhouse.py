@@ -30,6 +30,7 @@ from metrics.schemas import (
     InvestmentMetricsRecord,
     IssueTypeMetricsRecord,
 )
+from metrics.sinks.base import BaseMetricsSink
 
 logger = logging.getLogger(__name__)
 
@@ -40,13 +41,17 @@ def _dt_to_clickhouse_datetime(value: datetime) -> datetime:
     return value.astimezone(timezone.utc).replace(tzinfo=None)
 
 
-class ClickHouseMetricsSink:
+class ClickHouseMetricsSink(BaseMetricsSink):
     """
     ClickHouse sink for derived daily metrics.
 
     This sink is append-only: re-computations insert new rows with a newer
     `computed_at`. Queries can select the latest version via `argMax`.
     """
+
+    @property
+    def backend_type(self) -> str:
+        return "clickhouse"
 
     def __init__(self, dsn: str) -> None:
         if not dsn:
@@ -83,8 +88,12 @@ class ClickHouseMetricsSink:
                     continue
                 self.client.command(stmt)
 
-    def ensure_tables(self) -> None:
+    def ensure_schema(self) -> None:
+        """Create ClickHouse tables via SQL migrations."""
         self._apply_sql_migrations()
+
+    # Alias for backward compatibility
+    ensure_tables = ensure_schema
 
     def write_repo_metrics(self, rows: Sequence[RepoMetricsDailyRecord]) -> None:
         if not rows:

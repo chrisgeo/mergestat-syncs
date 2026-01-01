@@ -51,8 +51,8 @@ python cli.py grafana up
 
 CLI flags override environment variables. Common env vars:
 
-- `DB_CONN_STRING`
-- `DB_TYPE`
+- `DATABASE_URI`
+- `SECONDARY_DATABASE_URI`
 - `GITHUB_TOKEN`
 - `GITLAB_TOKEN`
 - `REPO_PATH`
