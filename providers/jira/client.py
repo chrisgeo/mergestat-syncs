@@ -209,6 +209,59 @@ class JiraClient:
                 logger.debug("Jira search complete (isLast=true); fetched=%d", fetched)
                 break
 
+    @retry_with_backoff(max_retries=5, initial_delay=1.0, max_delay=60.0)
+    def fetch_issue_comments_page(
+        self,
+        *,
+        issue_id_or_key: str,
+        start_at: int,
+        max_results: int,
+    ) -> Any:
+        params: Dict[str, Any] = {
+            "startAt": int(start_at),
+            "maxResults": int(max_results),
+        }
+        return self._request_json(
+            path=f"/rest/api/3/issue/{issue_id_or_key}/comment",
+            params=params,
+        )
+
+    def iter_issue_comments(
+        self,
+        *,
+        issue_id_or_key: str,
+        limit: Optional[int] = None,
+    ) -> Iterator[Dict[str, Any]]:
+        start_at = 0
+        fetched = 0
+
+        while True:
+            page = self.fetch_issue_comments_page(
+                issue_id_or_key=issue_id_or_key,
+                start_at=start_at,
+                max_results=self.per_page,
+            )
+            comments = list((page or {}).get("comments") or [])
+            if not comments:
+                break
+
+            for comment in comments:
+                yield comment
+                fetched += 1
+                if limit is not None and fetched >= int(limit):
+                    return
+
+            start_at += len(comments)
+            if (page or {}).get("isLast") is True:
+                break
+
+    @retry_with_backoff(max_retries=5, initial_delay=1.0, max_delay=60.0)
+    def get_sprint(self, *, sprint_id: str) -> Dict[str, Any]:
+        return self._request_json(
+            path=f"/rest/agile/1.0/sprint/{sprint_id}",
+            params={},
+        )
+
     def get_all_projects(self) -> List[Dict[str, Any]]:
         """
         Fetch all visible projects from Jira.

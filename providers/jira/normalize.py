@@ -5,7 +5,14 @@ import re
 from datetime import datetime, timezone
 from typing import Any, List, Optional, Tuple
 
-from models.work_items import WorkItem, WorkItemStatusTransition
+from models.work_items import (
+    Sprint,
+    WorkItem,
+    WorkItemDependency,
+    WorkItemInteractionEvent,
+    WorkItemReopenEvent,
+    WorkItemStatusTransition,
+)
 from providers.identity import IdentityResolver
 from providers.status_mapping import StatusMapping
 
@@ -74,6 +81,158 @@ def _parse_sprint(value: Any) -> Tuple[Optional[str], Optional[str]]:
     return sid, name
 
 
+def _service_class_from_priority(priority_raw: Optional[str]) -> str:
+    if not priority_raw:
+        return "standard"
+    normalized = str(priority_raw).strip().lower()
+    expedite_markers = ("highest", "critical", "blocker", "urgent", "p0", "p1")
+    background_markers = ("low", "lowest", "p4", "p5")
+    if any(marker in normalized for marker in expedite_markers):
+        return "expedite"
+    if any(marker in normalized for marker in background_markers):
+        return "background"
+    return "standard"
+
+
+def _normalize_relationship_type(raw_value: Optional[str]) -> str:
+    if not raw_value:
+        return "other"
+    normalized = str(raw_value).strip().lower()
+    if "block" in normalized and "blocked by" not in normalized:
+        return "blocks"
+    if "blocked by" in normalized or "is blocked by" in normalized:
+        return "blocked_by"
+    if "relate" in normalized:
+        return "relates"
+    if "duplicate" in normalized:
+        return "duplicates"
+    return "other"
+
+
+def extract_jira_issue_dependencies(
+    *,
+    issue: Any,
+    work_item_id: str,
+) -> List[WorkItemDependency]:
+    links = _get_field(issue, "issuelinks") or []
+    dependencies: List[WorkItemDependency] = []
+    for link in links:
+        if not isinstance(link, dict):
+            continue
+        link_type = link.get("type") or {}
+        if not isinstance(link_type, dict):
+            link_type = {}
+        outward_raw = link_type.get("outward") or link_type.get("name")
+        inward_raw = link_type.get("inward") or link_type.get("name")
+
+        outward_issue = link.get("outwardIssue")
+        inward_issue = link.get("inwardIssue")
+
+        if outward_issue:
+            target_key = (
+                outward_issue.get("key") if isinstance(outward_issue, dict) else None
+            )
+            if target_key:
+                raw = str(outward_raw or "")
+                dependencies.append(
+                    WorkItemDependency(
+                        source_work_item_id=work_item_id,
+                        target_work_item_id=f"jira:{target_key}",
+                        relationship_type=_normalize_relationship_type(raw),
+                        relationship_type_raw=raw,
+                    )
+                )
+        if inward_issue:
+            source_key = (
+                inward_issue.get("key") if isinstance(inward_issue, dict) else None
+            )
+            if source_key:
+                raw = str(inward_raw or "")
+                dependencies.append(
+                    WorkItemDependency(
+                        source_work_item_id=f"jira:{source_key}",
+                        target_work_item_id=work_item_id,
+                        relationship_type=_normalize_relationship_type(raw),
+                        relationship_type_raw=raw,
+                    )
+                )
+    return dependencies
+
+
+def detect_reopen_events(
+    *,
+    work_item_id: str,
+    transitions: List[WorkItemStatusTransition],
+) -> List[WorkItemReopenEvent]:
+    events: List[WorkItemReopenEvent] = []
+    for transition in transitions:
+        if transition.from_status in {"done", "canceled"} and transition.to_status not in {
+            "done",
+            "canceled",
+        }:
+            events.append(
+                WorkItemReopenEvent(
+                    work_item_id=work_item_id,
+                    occurred_at=transition.occurred_at,
+                    from_status=transition.from_status,
+                    to_status=transition.to_status,
+                    from_status_raw=transition.from_status_raw,
+                    to_status_raw=transition.to_status_raw,
+                    actor=transition.actor,
+                )
+            )
+    return events
+
+
+def jira_comment_to_interaction_event(
+    *,
+    work_item_id: str,
+    comment: Any,
+    identity: IdentityResolver,
+) -> Optional[WorkItemInteractionEvent]:
+    if not isinstance(comment, dict):
+        return None
+    created_at = _parse_datetime(comment.get("created"))
+    if not created_at:
+        return None
+    author_obj = comment.get("author") or {}
+    actor = None
+    if author_obj:
+        actor = identity.resolve(
+            provider="jira",
+            email=author_obj.get("emailAddress"),
+            account_id=author_obj.get("accountId"),
+            display_name=author_obj.get("displayName"),
+        )
+    body = comment.get("body")
+    body_length = len(body) if isinstance(body, str) else 0
+    return WorkItemInteractionEvent(
+        work_item_id=work_item_id,
+        provider="jira",
+        interaction_type="comment",
+        occurred_at=created_at,
+        actor=actor if actor and actor != "unknown" else None,
+        body_length=body_length,
+    )
+
+
+def jira_sprint_payload_to_model(payload: Any) -> Optional[Sprint]:
+    if not isinstance(payload, dict):
+        return None
+    sprint_id = payload.get("id")
+    if sprint_id is None:
+        return None
+    return Sprint(
+        provider="jira",
+        sprint_id=str(sprint_id),
+        name=str(payload.get("name")) if payload.get("name") else None,
+        state=str(payload.get("state")) if payload.get("state") else None,
+        started_at=_parse_datetime(payload.get("startDate")),
+        ended_at=_parse_datetime(payload.get("endDate")),
+        completed_at=_parse_datetime(payload.get("completeDate")),
+    )
+
+
 def jira_issue_to_work_item(
     *,
     issue: Any,
@@ -125,6 +284,15 @@ def jira_issue_to_work_item(
         type_raw = getattr(issue_type_obj, "name", None) if issue_type_obj else None
 
     labels = list(_get_field(issue, "labels") or [])
+
+    priority_obj = _get_field(issue, "priority")
+    if isinstance(priority_obj, dict):
+        priority_raw = priority_obj.get("name")
+    else:
+        priority_raw = getattr(priority_obj, "name", None) if priority_obj else None
+
+    due_at = _parse_datetime(_get_field(issue, "duedate"))
+    service_class = _service_class_from_priority(priority_raw)
 
     normalized_status = status_mapping.normalize_status(
         provider="jira",
@@ -287,5 +455,8 @@ def jira_issue_to_work_item(
         parent_id=parent_id,
         epic_id=epic_id,
         url=url,
+        priority_raw=str(priority_raw) if priority_raw else None,
+        service_class=service_class,
+        due_at=due_at,
     )
     return work_item, transitions

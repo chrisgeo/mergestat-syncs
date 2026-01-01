@@ -20,7 +20,7 @@ from metrics.work_items import (
     fetch_github_project_v2_items,
     fetch_github_work_items,
     fetch_gitlab_work_items,
-    fetch_jira_work_items,
+    fetch_jira_work_items_with_extras,
     parse_github_projects_v2_env,
 )
 from metrics.job_daily import (
@@ -190,9 +190,20 @@ def run_work_items_sync_job(
 
         work_items: List[Any] = []
         transitions: List[Any] = []
+        dependencies: List[Any] = []
+        reopen_events: List[Any] = []
+        interactions: List[Any] = []
+        sprints: List[Any] = []
 
         if "jira" in provider_set:
-            items, tr = fetch_jira_work_items(
+            (
+                items,
+                tr,
+                dep,
+                reopen,
+                interaction,
+                sprint_rows,
+            ) = fetch_jira_work_items_with_extras(
                 since=since_dt,
                 until=until_dt,
                 status_mapping=status_mapping,
@@ -200,6 +211,10 @@ def run_work_items_sync_job(
             )
             work_items.extend(items)
             transitions.extend(tr)
+            dependencies.extend(dep)
+            reopen_events.extend(reopen)
+            interactions.extend(interaction)
+            sprints.extend(sprint_rows)
 
         if "github" in provider_set:
             items, tr = fetch_github_work_items(
@@ -251,6 +266,24 @@ def run_work_items_sync_job(
             len(transitions),
             sorted(provider_set),
         )
+        if dependencies:
+            logger.info("Jira: extracted %d dependency edges", len(dependencies))
+        if reopen_events:
+            logger.info("Jira: extracted %d reopen events", len(reopen_events))
+        if interactions:
+            logger.info("Jira: extracted %d interaction events", len(interactions))
+        if sprints:
+            logger.info("Jira: extracted %d sprint records", len(sprints))
+
+        for s in sinks:
+            if dependencies and hasattr(s, "write_work_item_dependencies"):
+                s.write_work_item_dependencies(dependencies)
+            if reopen_events and hasattr(s, "write_work_item_reopen_events"):
+                s.write_work_item_reopen_events(reopen_events)
+            if interactions and hasattr(s, "write_work_item_interactions"):
+                s.write_work_item_interactions(interactions)
+            if sprints and hasattr(s, "write_sprints"):
+                s.write_sprints(sprints)
 
         for d in days:
             wi_metrics, wi_user_metrics, wi_cycle_times = (

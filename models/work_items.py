@@ -70,6 +70,9 @@ class WorkItem:
     parent_id: Optional[str] = None
     epic_id: Optional[str] = None
     url: Optional[str] = None
+    priority_raw: Optional[str] = None
+    service_class: Optional[str] = None
+    due_at: Optional[datetime] = None
 
     @property
     def work_scope_id(self) -> str:
@@ -106,3 +109,43 @@ class WorkItemStatusTransition:
     from_status: WorkItemStatusCategory
     to_status: WorkItemStatusCategory
     actor: Optional[str] = None  # canonical identity when resolvable
+
+
+@dataclass(frozen=True)
+class WorkItemDependency:
+    source_work_item_id: str
+    target_work_item_id: str
+    relationship_type: str
+    relationship_type_raw: str
+
+
+@dataclass(frozen=True)
+class WorkItemReopenEvent:
+    work_item_id: str
+    occurred_at: datetime
+    from_status: WorkItemStatusCategory
+    to_status: WorkItemStatusCategory
+    from_status_raw: Optional[str]
+    to_status_raw: Optional[str]
+    actor: Optional[str]
+
+
+@dataclass(frozen=True)
+class WorkItemInteractionEvent:
+    work_item_id: str
+    provider: WorkItemProvider
+    interaction_type: str
+    occurred_at: datetime
+    actor: Optional[str]
+    body_length: int
+
+
+@dataclass(frozen=True)
+class Sprint:
+    provider: WorkItemProvider
+    sprint_id: str
+    name: Optional[str]
+    state: Optional[str]
+    started_at: Optional[datetime]
+    ended_at: Optional[datetime]
+    completed_at: Optional[datetime]

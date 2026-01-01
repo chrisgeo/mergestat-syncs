@@ -1,6 +1,8 @@
 from .git import (GitBlame, GitBlameMixin, GitCommit,  # noqa: F401
                   GitCommitStat, GitFile, Repo)
-from .work_items import WorkItem, WorkItemStatusTransition  # noqa: F401
+from .work_items import (Sprint, WorkItem, WorkItemDependency,  # noqa: F401
+                         WorkItemInteractionEvent, WorkItemReopenEvent,
+                         WorkItemStatusTransition)
 
 __all__ = [
     "GitBlame",
@@ -10,5 +12,9 @@ __all__ = [
     "GitFile",
     "Repo",
     "WorkItem",
+    "WorkItemDependency",
+    "WorkItemInteractionEvent",
+    "WorkItemReopenEvent",
     "WorkItemStatusTransition",
+    "Sprint",
 ]

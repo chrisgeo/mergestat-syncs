@@ -8,7 +8,14 @@ from datetime import datetime, timezone
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from models.git import get_repo_uuid_from_repo
-from models.work_items import WorkItem, WorkItemStatusTransition
+from models.work_items import (
+    Sprint,
+    WorkItem,
+    WorkItemDependency,
+    WorkItemInteractionEvent,
+    WorkItemReopenEvent,
+    WorkItemStatusTransition,
+)
 from providers.identity import IdentityResolver
 from providers.status_mapping import StatusMapping
 
@@ -27,6 +34,18 @@ def _to_utc(dt: datetime) -> datetime:
     if dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc)
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    normalized = raw.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return default
 
 
 def fetch_synthetic_work_items(
@@ -64,14 +83,21 @@ def fetch_synthetic_work_items(
     return all_items, all_transitions
 
 
-def fetch_jira_work_items(
+def fetch_jira_work_items_with_extras(
     *,
     since: datetime,
     until: Optional[datetime] = None,
     status_mapping: StatusMapping,
     identity: IdentityResolver,
     project_keys: Optional[Sequence[str]] = None,
-) -> Tuple[List[WorkItem], List[WorkItemStatusTransition]]:
+) -> Tuple[
+    List[WorkItem],
+    List[WorkItemStatusTransition],
+    List[WorkItemDependency],
+    List[WorkItemReopenEvent],
+    List[WorkItemInteractionEvent],
+    List[Sprint],
+]:
     """
     Fetch Jira issues updated since `since` and normalize into WorkItems.
 
@@ -81,7 +107,13 @@ def fetch_jira_work_items(
     """
     try:
         from providers.jira.client import JiraClient, build_jira_jql
-        from providers.jira.normalize import jira_issue_to_work_item
+        from providers.jira.normalize import (
+            detect_reopen_events,
+            extract_jira_issue_dependencies,
+            jira_comment_to_interaction_event,
+            jira_issue_to_work_item,
+            jira_sprint_payload_to_model,
+        )
     except Exception as exc:  # pragma: no cover
         raise RuntimeError(f"Jira provider not available: {exc}") from exc
 
@@ -100,6 +132,14 @@ def fetch_jira_work_items(
     client = JiraClient.from_env()
     work_items: List[WorkItem] = []
     transitions: List[WorkItemStatusTransition] = []
+    dependencies: List[WorkItemDependency] = []
+    reopen_events: List[WorkItemReopenEvent] = []
+    interactions: List[WorkItemInteractionEvent] = []
+    sprints: List[Sprint] = []
+
+    fetch_comments = _env_flag("JIRA_FETCH_COMMENTS", True)
+    sprint_cache: Dict[str, Sprint] = {}
+    sprint_ids: set[str] = set()
 
     updated_since = _to_utc(since).date().isoformat()
     active_until = _to_utc(until).date().isoformat() if until is not None else None
@@ -143,6 +183,7 @@ def fetch_jira_work_items(
     for jql in jqls:
         logger.debug("Jira: JQL=%s", jql)
         for issue in client.iter_issues(jql=jql, expand_changelog=True):
+            issue_key = issue.get("key") if isinstance(issue, dict) else None
             wi, wi_transitions = jira_issue_to_work_item(
                 issue=issue,
                 status_mapping=status_mapping,
@@ -151,12 +192,67 @@ def fetch_jira_work_items(
             )
             work_items.append(wi)
             transitions.extend(wi_transitions)
+            dependencies.extend(
+                extract_jira_issue_dependencies(issue=issue, work_item_id=wi.work_item_id)
+            )
+            reopen_events.extend(
+                detect_reopen_events(
+                    work_item_id=wi.work_item_id,
+                    transitions=wi_transitions,
+                )
+            )
+
+            if fetch_comments and issue_key:
+                for comment in client.iter_issue_comments(
+                    issue_id_or_key=str(issue_key)
+                ):
+                    event = jira_comment_to_interaction_event(
+                        work_item_id=wi.work_item_id,
+                        comment=comment,
+                        identity=identity,
+                    )
+                    if event:
+                        interactions.append(event)
+
+            if wi.sprint_id and wi.sprint_id not in sprint_cache:
+                sprint_ids.add(wi.sprint_id)
+
+    for sprint_id in sorted(sprint_ids):
+        if sprint_id in sprint_cache:
+            continue
+        try:
+            payload = client.get_sprint(sprint_id=str(sprint_id))
+        except Exception as exc:
+            logger.warning("Jira: failed to fetch sprint %s: %s", sprint_id, exc)
+            continue
+        sprint = jira_sprint_payload_to_model(payload)
+        if sprint:
+            sprint_cache[sprint_id] = sprint
+            sprints.append(sprint)
 
     logger.info("Fetched %d Jira work items (since %s)", len(work_items), updated_since)
     try:
         client.close()
     except Exception as exc:
         logger.warning("Failed to close Jira client: %s", exc)
+    return work_items, transitions, dependencies, reopen_events, interactions, sprints
+
+
+def fetch_jira_work_items(
+    *,
+    since: datetime,
+    until: Optional[datetime] = None,
+    status_mapping: StatusMapping,
+    identity: IdentityResolver,
+    project_keys: Optional[Sequence[str]] = None,
+) -> Tuple[List[WorkItem], List[WorkItemStatusTransition]]:
+    work_items, transitions, _, _, _, _ = fetch_jira_work_items_with_extras(
+        since=since,
+        until=until,
+        status_mapping=status_mapping,
+        identity=identity,
+        project_keys=project_keys,
+    )
     return work_items, transitions
 
 
