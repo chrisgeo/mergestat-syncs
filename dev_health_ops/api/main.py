@@ -10,6 +10,8 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
+from metrics.sinks.factory import detect_backend
+
 from .models.filters import (
     DrilldownRequest,
     ExplainRequest,
@@ -98,8 +100,12 @@ def _db_url() -> str:
     if dsn:
         return dsn
 
-    # Default to localhost ClickHouse for local dev/tests
-    return "clickhouse://localhost:8123/default"
+    # Fail fast if no database configuration is provided to avoid
+    # accidentally connecting to an unintended default in production.
+    raise RuntimeError(
+        "Database configuration is missing: set DATABASE_URI or DATABASE_URL "
+        "(e.g. 'clickhouse://localhost:8123/default')."
+    )
 
 
 def _filters_from_query(
@@ -181,26 +187,13 @@ async def health() -> HealthResponse | JSONResponse:
     return response
 
 
-def _detect_backend(db_url: str) -> str:
-    """Detect backend type from URL scheme."""
-    if "clickhouse" in db_url:
-        return "clickhouse"
-    elif "mongodb" in db_url or "mongo" in db_url:
-        return "mongo"
-    elif "postgresql" in db_url or "postgres" in db_url:
-        return "postgres"
-    elif "sqlite" in db_url:
-        return "sqlite"
-    return "unknown"
-
-
 @app.get("/api/v1/meta", response_model=MetaResponse)
 async def meta() -> MetaResponse | JSONResponse:
     """
     Return backend metadata including DB kind, version, limits, and supported endpoints.
     """
     db_url = _db_url()
-    backend = _detect_backend(db_url)
+    backend = detect_backend(db_url).value  # Get string value from enum
 
     try:
         # Simple meta response using direct ClickHouse query
@@ -212,6 +205,7 @@ async def meta() -> MetaResponse | JSONResponse:
                     result = ch.command("SELECT version()")
                     version = str(result) if result else "unknown"
                 except Exception:
+                    # Silently ignore version query failures - not critical for meta endpoint
                     pass
 
         return MetaResponse(
