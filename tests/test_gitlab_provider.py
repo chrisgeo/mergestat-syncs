@@ -86,6 +86,7 @@ class TestPriorityFromLabels:
     def test_first_priority_wins(self) -> None:
         priority, service_class = _priority_from_labels(["low", "high"])
         assert priority == "low"  # First match wins
+        assert service_class == "intangible"  # Corresponding service class
 
 
 class TestGitLabIssueToWorkItem:

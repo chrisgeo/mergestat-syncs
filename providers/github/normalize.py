@@ -469,12 +469,31 @@ def github_pr_to_work_item(
             )
 
         prev_status = "in_progress"  # PRs start as in_progress
+        # Track if we've seen a merged event to determine closed status correctly
+        merged_in_history = False
+
         for ev in sorted(list(events), key=_ev_dt):
             event_type = str(getattr(ev, "event", "") or "").lower()
             occurred_at = _to_utc(getattr(ev, "created_at", None)) or created_at
 
-            if event_type == "closed":
-                to_status = "done" if merged else "canceled"
+            if event_type == "merged":
+                merged_in_history = True
+                transitions.append(
+                    WorkItemStatusTransition(
+                        work_item_id=work_item_id,
+                        provider="github",
+                        occurred_at=occurred_at,
+                        from_status_raw=None,
+                        to_status_raw="merged",
+                        from_status=prev_status,  # type: ignore[arg-type]
+                        to_status="done",
+                        actor=None,
+                    )
+                )
+                prev_status = "done"
+            elif event_type == "closed":
+                # Use merged_in_history to determine status at the time of close
+                to_status = "done" if merged_in_history else "canceled"
                 transitions.append(
                     WorkItemStatusTransition(
                         work_item_id=work_item_id,
@@ -502,20 +521,6 @@ def github_pr_to_work_item(
                     )
                 )
                 prev_status = "in_progress"
-            elif event_type == "merged":
-                transitions.append(
-                    WorkItemStatusTransition(
-                        work_item_id=work_item_id,
-                        provider="github",
-                        occurred_at=occurred_at,
-                        from_status_raw=None,
-                        to_status_raw="merged",
-                        from_status=prev_status,  # type: ignore[arg-type]
-                        to_status="done",
-                        actor=None,
-                    )
-                )
-                prev_status = "done"
 
     # Set completed_at based on final status
     if merged_at:
@@ -688,8 +693,8 @@ def detect_github_reopen_events(
 
 # Regex patterns for parsing GitHub-style references from issue/PR body
 _GITHUB_ISSUE_REF_PATTERN = re.compile(
-    r"(?:^|\s)(?:depends\s+on|blocked\s+by|blocks|fixes|closes|resolves)\s*:?\s*"
-    r"(?:#(\d+)|(?:https?://github\.com/)?([a-zA-Z0-9_-]+/[a-zA-Z0-9_.-]+)#(\d+))",
+    r"(?:^|[^\S\r\n])(?:depends\s+on|blocked\s+by|blocks|fixes|closes|resolves)\s*:?\s*"
+    r"(?:#(\d+)|(?:(?:https?://)?github\.com/)?([a-zA-Z0-9_-]+/[a-zA-Z0-9_.-]+)#(\d+))",
     re.IGNORECASE | re.MULTILINE,
 )
 
@@ -757,36 +762,38 @@ def extract_github_dependencies(
     return dependencies
 
 
-# Priority labels mapping (similar to GitLab)
+# Priority label mapping - maps label to (priority_raw, service_class)
 _PRIORITY_LABELS = {
-    "priority::critical": "critical",
-    "priority::high": "high",
-    "priority::medium": "medium",
-    "priority::low": "low",
-    "p0": "critical",
-    "p1": "high",
-    "p2": "medium",
-    "p3": "low",
-    "priority-critical": "critical",
-    "priority-high": "high",
-    "priority-medium": "medium",
-    "priority-low": "low",
-    "critical": "critical",
-    "urgent": "critical",
-    "high-priority": "high",
-    "low-priority": "low",
+    "priority::critical": ("critical", "expedite"),
+    "priority::high": ("high", "fixed_date"),
+    "priority::medium": ("medium", "standard"),
+    "priority::low": ("low", "intangible"),
+    "p0": ("critical", "expedite"),
+    "p1": ("high", "fixed_date"),
+    "p2": ("medium", "standard"),
+    "p3": ("low", "intangible"),
+    "priority-critical": ("critical", "expedite"),
+    "priority-high": ("high", "fixed_date"),
+    "priority-medium": ("medium", "standard"),
+    "priority-low": ("low", "intangible"),
+    "critical": ("critical", "expedite"),
+    "urgent": ("critical", "expedite"),
+    "high-priority": ("high", "fixed_date"),
+    "low-priority": ("low", "intangible"),
 }
 
 
-def _priority_from_labels(labels: Sequence[str]) -> Optional[str]:
+def _priority_from_labels(labels: Sequence[str]) -> Tuple[Optional[str], Optional[str]]:
     """
-    Extract priority from labels.
+    Extract priority_raw and service_class from GitHub labels.
+
+    Returns (priority_raw, service_class) or (None, None) if no match.
     """
     for label in labels:
         normalized = label.lower().strip()
         if normalized in _PRIORITY_LABELS:
             return _PRIORITY_LABELS[normalized]
-    return None
+    return (None, None)
 
 
 def enrich_work_item_with_priority(
@@ -803,18 +810,9 @@ def enrich_work_item_with_priority(
     Returns:
         WorkItem with priority/service_class set (or original if no match)
     """
-    priority = _priority_from_labels(labels)
-    if not priority:
+    priority, service_class = _priority_from_labels(labels)
+    if priority is None:
         return work_item
-
-    # Map priority to service_class
-    service_class_map = {
-        "critical": "expedite",
-        "high": "fixed_date",
-        "medium": "standard",
-        "low": "intangible",
-    }
-    service_class = service_class_map.get(priority, "standard")
 
     return WorkItem(
         work_item_id=work_item.work_item_id,
