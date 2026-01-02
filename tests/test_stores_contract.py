@@ -23,7 +23,10 @@ class TestBackendDetection:
     def test_clickhouse_detection(self):
         assert detect_backend("clickhouse://localhost:8123") == SinkBackend.CLICKHOUSE
         assert detect_backend("clickhouse+http://localhost") == SinkBackend.CLICKHOUSE
-        assert detect_backend("clickhouse+https://localhost:8123") == SinkBackend.CLICKHOUSE
+        assert (
+            detect_backend("clickhouse+https://localhost:8123")
+            == SinkBackend.CLICKHOUSE
+        )
 
     def test_postgres_detection(self):
         assert detect_backend("postgresql://localhost/db") == SinkBackend.POSTGRES
@@ -49,12 +52,14 @@ class TestSinkFactory:
     """Tests for sink factory creation."""
 
     def test_creates_clickhouse_sink(self):
-        # Just verify the factory returns the correct type
-        # (actual connection will fail without a real server)
-        from clickhouse_connect.driver.exceptions import OperationalError
-        
-        with pytest.raises(OperationalError):  # Connection error expected
-            create_sink("clickhouse://localhost:8123/default")
+        """Verify factory returns ClickHouseSink for clickhouse:// DSN."""
+        from unittest.mock import MagicMock, patch
+
+        mock_client = MagicMock()
+        with patch("clickhouse_connect.get_client", return_value=mock_client):
+            sink = create_sink("clickhouse://localhost:8123/default")
+            assert sink.backend_type == "clickhouse"
+            sink.close()
 
     def test_creates_sqlite_sink(self):
         sink = create_sink("sqlite:///./test_sinks.db")
