@@ -154,7 +154,7 @@ class JiraProvider(Provider):
         fetch_comments = _env_flag("JIRA_FETCH_COMMENTS", True)
         raw_comments_limit = os.getenv("JIRA_COMMENTS_LIMIT")
         comments_limit = 0
-        if raw_comments_limit not in (None, ""):
+        if raw_comments_limit is not None:
             try:
                 comments_limit = int(raw_comments_limit)
             except ValueError:
