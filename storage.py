@@ -2319,6 +2319,9 @@ class ClickHouseStore:
                 "parent_id": str(get("parent_id") or ""),
                 "epic_id": str(get("epic_id") or ""),
                 "url": str(get("url") or ""),
+                "priority_raw": str(get("priority_raw") or ""),
+                "service_class": str(get("service_class") or ""),
+                "due_at": self._normalize_datetime(get("due_at")),
                 "last_synced": synced_at,
             })
 
@@ -2329,6 +2332,7 @@ class ClickHouseStore:
                 "project_key", "project_id", "assignees", "reporter",
                 "created_at", "updated_at", "started_at", "completed_at", "closed_at",
                 "labels", "story_points", "sprint_id", "sprint_name", "parent_id", "epic_id", "url",
+                "priority_raw", "service_class", "due_at",
                 "last_synced"
             ],
             rows

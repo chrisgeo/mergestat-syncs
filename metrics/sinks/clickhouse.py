@@ -30,6 +30,12 @@ from metrics.schemas import (
     InvestmentMetricsRecord,
     IssueTypeMetricsRecord,
 )
+from models.work_items import (
+    Sprint,
+    WorkItemDependency,
+    WorkItemInteractionEvent,
+    WorkItemReopenEvent,
+)
 from metrics.sinks.base import BaseMetricsSink
 
 logger = logging.getLogger(__name__)
@@ -368,6 +374,80 @@ class ClickHouseMetricsSink(BaseMetricsSink):
                 "items_touched",
                 "avg_wip",
                 "computed_at",
+            ],
+            rows,
+        )
+
+    def write_work_item_dependencies(
+        self, rows: Sequence[WorkItemDependency]
+    ) -> None:
+        if not rows:
+            return
+        self._insert_rows(
+            "work_item_dependencies",
+            [
+                "source_work_item_id",
+                "target_work_item_id",
+                "relationship_type",
+                "relationship_type_raw",
+                "_mergestat_synced_at",
+            ],
+            rows,
+        )
+
+    def write_work_item_reopen_events(
+        self, rows: Sequence[WorkItemReopenEvent]
+    ) -> None:
+        if not rows:
+            return
+        self._insert_rows(
+            "work_item_reopen_events",
+            [
+                "work_item_id",
+                "occurred_at",
+                "from_status",
+                "to_status",
+                "from_status_raw",
+                "to_status_raw",
+                "actor",
+                "_mergestat_synced_at",
+            ],
+            rows,
+        )
+
+    def write_work_item_interactions(
+        self, rows: Sequence[WorkItemInteractionEvent]
+    ) -> None:
+        if not rows:
+            return
+        self._insert_rows(
+            "work_item_interactions",
+            [
+                "work_item_id",
+                "provider",
+                "interaction_type",
+                "occurred_at",
+                "actor",
+                "body_length",
+                "_mergestat_synced_at",
+            ],
+            rows,
+        )
+
+    def write_sprints(self, rows: Sequence[Sprint]) -> None:
+        if not rows:
+            return
+        self._insert_rows(
+            "sprints",
+            [
+                "provider",
+                "sprint_id",
+                "name",
+                "state",
+                "started_at",
+                "ended_at",
+                "completed_at",
+                "_mergestat_synced_at",
             ],
             rows,
         )

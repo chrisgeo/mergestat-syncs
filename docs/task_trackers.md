@@ -13,6 +13,7 @@ Jira is used to track associated project work (planning/throughput/WIP). Pull re
 - `JIRA_PROJECT_KEYS` (optional, comma-separated, e.g. `ABC,XYZ`)
 - `JIRA_JQL` (optional override; if set, used as-is instead of the built-in windowed query)
 - `JIRA_FETCH_ALL` (optional; set to `1` to fetch all issues in the project(s) regardless of date window — can be very slow)
+- `JIRA_FETCH_COMMENTS` (optional; set to `0` to disable comment metadata ingestion; default: `1`)
 
 Optional Jira field mappings (instance-specific):
 - `JIRA_STORY_POINTS_FIELD` (e.g. `customfield_10016`)
