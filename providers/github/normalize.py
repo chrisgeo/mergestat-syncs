@@ -407,7 +407,7 @@ def github_pr_to_work_item(
     labels = [str(lbl) for lbl in labels if lbl]
 
     # Determine status based on state and merge status
-    if merged or merged_at:
+    if merged:
         status_raw = "merged"
         normalized_status = "done"
     elif state == "closed":
@@ -816,28 +816,7 @@ def enrich_work_item_with_priority(
     }
     service_class = service_class_map.get(priority, "standard")
 
-    return WorkItem(
-        work_item_id=work_item.work_item_id,
-        provider=work_item.provider,
-        repo_id=work_item.repo_id,
-        project_key=work_item.project_key,
-        project_id=work_item.project_id,
-        title=work_item.title,
-        type=work_item.type,
-        status=work_item.status,
-        status_raw=work_item.status_raw,
-        assignees=work_item.assignees,
-        reporter=work_item.reporter,
-        created_at=work_item.created_at,
-        updated_at=work_item.updated_at,
-        started_at=work_item.started_at,
-        completed_at=work_item.completed_at,
-        closed_at=work_item.closed_at,
-        labels=work_item.labels,
-        story_points=work_item.story_points,
-        sprint_id=work_item.sprint_id,
-        sprint_name=work_item.sprint_name,
-        priority_raw=priority,
-        service_class=service_class,
-        url=work_item.url,
-    )
+    # Enrich the existing WorkItem instance in place to avoid copying all fields
+    work_item.priority_raw = priority
+    work_item.service_class = service_class
+    return work_item

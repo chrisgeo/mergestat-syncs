@@ -264,8 +264,6 @@ def gitlab_mr_to_work_item(
     else:
         normalized_status = "unknown"
 
-    # Priority from labels
-    priority_raw, service_class = _priority_from_labels(labels)
 
     assignees: List[str] = []
     for a in _get(mr, "assignees") or []:
@@ -464,7 +462,7 @@ def gitlab_note_to_interaction_event(
 
 # Regex patterns for GitLab issue references
 _GITLAB_ISSUE_REF_PATTERN = re.compile(
-    r"(?:^|[^\w])(?:(?P<project>[\w/-]+)?#(?P<iid>\d+))",
+    r"(?<!\S)(?:(?P<project>[\w/-]+)?#(?P<iid>\d+))",
     re.MULTILINE,
 )
 _BLOCKING_KEYWORDS = {"blocks", "blocked by", "is blocked by", "blocking"}
@@ -501,8 +499,20 @@ def extract_gitlab_dependencies(
                 _get(refs, "full") if isinstance(refs, dict) else None
             ) or project_full_path
             if target_path and "#" in str(target_path):
-                # Extract project from "group/project#123" format
-                target_path = str(target_path).split("#")[0]
+                # Extract project from "group/project#123" format, but be defensive
+                raw_target_path = str(target_path)
+                project_part, _ = raw_target_path.split("#", 1)
+                if not project_part:
+                    logger.warning(
+                        "Unexpected GitLab reference format when parsing dependency "
+                        "target_path: %r (link: %r). Falling back to project_full_path=%r.",
+                        raw_target_path,
+                        link,
+                        project_full_path,
+                    )
+                    target_path = project_full_path
+                else:
+                    target_path = project_part
 
             target_id = f"gitlab:{target_path}#{target_iid}"
             if target_id in seen_targets:
@@ -511,7 +521,7 @@ def extract_gitlab_dependencies(
 
             # Map GitLab link types
             if link_type in {"blocks", "is_blocked_by"}:
-                relationship = "blocks" if link_type == "blocks" else "blocked_by"
+                relationship = "blocks" if link_type == "blocks" else "is_blocked_by"
             else:
                 relationship = "relates_to"
 
@@ -613,28 +623,10 @@ def enrich_work_item_with_priority(
     if priority_raw is None:
         return work_item
 
-    return WorkItem(
-        work_item_id=work_item.work_item_id,
-        provider=work_item.provider,
-        repo_id=work_item.repo_id,
-        project_key=work_item.project_key,
-        project_id=work_item.project_id,
-        title=work_item.title,
-        type=work_item.type,
-        status=work_item.status,
-        status_raw=work_item.status_raw,
-        assignees=work_item.assignees,
-        reporter=work_item.reporter,
-        created_at=work_item.created_at,
-        updated_at=work_item.updated_at,
-        started_at=work_item.started_at,
-        completed_at=work_item.completed_at,
-        closed_at=work_item.closed_at,
-        labels=work_item.labels,
-        story_points=work_item.story_points,
-        sprint_id=work_item.sprint_id,
-        sprint_name=work_item.sprint_name,
-        url=work_item.url,
-        priority_raw=priority_raw,
-        service_class=service_class,
-    )
+    # Create a new WorkItem based on the existing instance, overriding only
+    # the fields we want to change. This avoids manually copying every field
+    # and stays robust if WorkItem gains new attributes in the future.
+    data = work_item.__dict__.copy()
+    data["priority_raw"] = priority_raw
+    data["service_class"] = service_class
+    return WorkItem(**data)

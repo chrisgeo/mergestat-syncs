@@ -131,17 +131,16 @@ class GitHubProvider(Provider):
         if not ctx.repo:
             raise ValueError("GitHub provider requires ctx.repo (owner/repo)")
 
+        # Get auth from environment (check authentication before repo format validation)
+        token = os.getenv("GITHUB_TOKEN")
+        if not token:
+            raise ValueError("GITHUB_TOKEN environment variable is required")
+
         # Parse owner/repo from ctx.repo
         parts = ctx.repo.split("/")
         if len(parts) != 2:
             raise ValueError(f"Invalid repo format: {ctx.repo} (expected owner/repo)")
         owner, repo = parts
-
-        # Get auth from environment
-        token = os.getenv("GITHUB_TOKEN")
-        if not token:
-            raise ValueError("GITHUB_TOKEN environment variable is required")
-
         base_url = os.getenv("GITHUB_BASE_URL")
         auth = GitHubAuth(token=token, base_url=base_url)
         client = GitHubWorkClient(auth=auth)
@@ -282,17 +281,16 @@ class GitHubProvider(Provider):
                 remaining_limit = None
                 if ctx.limit is not None:
                     remaining_limit = ctx.limit - fetched_count
-                    if remaining_limit <= 0:
-                        remaining_limit = None
 
-                for pr in client.iter_pull_requests(
-                    owner=owner,
-                    repo=repo,
-                    state="all",
-                    limit=remaining_limit,
-                ):
-                    if ctx.limit is not None and fetched_count >= ctx.limit:
-                        break
+                if remaining_limit is None or remaining_limit > 0:
+                    for pr in client.iter_pull_requests(
+                        owner=owner,
+                        repo=repo,
+                        state="all",
+                        limit=remaining_limit,
+                    ):
+                        if ctx.limit is not None and fetched_count >= ctx.limit:
+                            break
 
                     # Get events for transitions and reopen detection
                     events = list(client.iter_issue_events(pr, limit=1000))
