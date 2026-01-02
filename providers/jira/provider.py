@@ -152,7 +152,16 @@ class JiraProvider(Provider):
         sprints: List[Sprint] = []
 
         fetch_comments = _env_flag("JIRA_FETCH_COMMENTS", True)
-        comments_limit = int(os.getenv("JIRA_COMMENTS_LIMIT", "0"))
+        raw_comments_limit = os.getenv("JIRA_COMMENTS_LIMIT")
+        comments_limit = 0
+        if raw_comments_limit is not None:
+            try:
+                comments_limit = int(raw_comments_limit)
+            except ValueError:
+                logger.warning(
+                    "Invalid JIRA_COMMENTS_LIMIT value %r; falling back to 0",
+                    raw_comments_limit,
+                )
         sprint_cache: Dict[str, Sprint] = {}
         sprint_ids: set[str] = set()
 
@@ -205,90 +214,91 @@ class JiraProvider(Provider):
                     )
                 )
 
-        fetched_count = 0
-        for jql in jqls:
-            logger.debug("Jira: JQL=%s", jql)
-            for issue in client.iter_issues(jql=jql, expand_changelog=True):
+        try:
+            fetched_count = 0
+            for jql in jqls:
+                logger.debug("Jira: JQL=%s", jql)
+                for issue in client.iter_issues(jql=jql, expand_changelog=True):
+                    if ctx.limit is not None and fetched_count >= ctx.limit:
+                        break
+
+                    issue_key = issue.get("key") if isinstance(issue, dict) else None
+                    wi, wi_transitions = jira_issue_to_work_item(
+                        issue=issue,
+                        status_mapping=self.status_mapping,
+                        identity=self.identity,
+                        repo_id=None,
+                    )
+                    work_items.append(wi)
+                    transitions.extend(wi_transitions)
+                    dependencies.extend(
+                        extract_jira_issue_dependencies(
+                            issue=issue, work_item_id=wi.work_item_id
+                        )
+                    )
+                    reopen_events.extend(
+                        detect_reopen_events(
+                            work_item_id=wi.work_item_id,
+                            transitions=wi_transitions,
+                        )
+                    )
+
+                    if fetch_comments and issue_key:
+                        try:
+                            comment_count = 0
+                            for comment in client.iter_issue_comments(
+                                issue_id_or_key=str(issue_key)
+                            ):
+                                if comments_limit > 0 and comment_count >= comments_limit:
+                                    break
+                                event = jira_comment_to_interaction_event(
+                                    work_item_id=wi.work_item_id,
+                                    comment=comment,
+                                    identity=self.identity,
+                                )
+                                if event:
+                                    interactions.append(event)
+                                    comment_count += 1
+                        except Exception as exc:
+                            logger.warning(
+                                "Jira: failed to fetch comments for issue %s: %s",
+                                issue_key,
+                                exc,
+                            )
+
+                    if wi.sprint_id:
+                        if wi.sprint_id not in sprint_cache:
+                            sprint_ids.add(wi.sprint_id)
+
+                    fetched_count += 1
+
                 if ctx.limit is not None and fetched_count >= ctx.limit:
                     break
 
-                issue_key = issue.get("key") if isinstance(issue, dict) else None
-                wi, wi_transitions = jira_issue_to_work_item(
-                    issue=issue,
-                    status_mapping=self.status_mapping,
-                    identity=self.identity,
-                    repo_id=None,
-                )
-                work_items.append(wi)
-                transitions.extend(wi_transitions)
-                dependencies.extend(
-                    extract_jira_issue_dependencies(
-                        issue=issue, work_item_id=wi.work_item_id
-                    )
-                )
-                reopen_events.extend(
-                    detect_reopen_events(
-                        work_item_id=wi.work_item_id,
-                        transitions=wi_transitions,
-                    )
-                )
+            # Fetch sprint details
+            for sprint_id in sorted(sprint_ids):
+                if sprint_id in sprint_cache:
+                    continue
+                try:
+                    payload = client.get_sprint(sprint_id=str(sprint_id))
+                except Exception as exc:
+                    logger.warning("Jira: failed to fetch sprint %s: %s", sprint_id, exc)
+                    continue
+                sprint = jira_sprint_payload_to_model(payload)
+                if sprint:
+                    sprint_cache[sprint_id] = sprint
+                    sprints.append(sprint)
 
-                if fetch_comments and issue_key:
-                    try:
-                        comment_count = 0
-                        for comment in client.iter_issue_comments(
-                            issue_id_or_key=str(issue_key)
-                        ):
-                            if comments_limit > 0 and comment_count >= comments_limit:
-                                break
-                            event = jira_comment_to_interaction_event(
-                                work_item_id=wi.work_item_id,
-                                comment=comment,
-                                identity=self.identity,
-                            )
-                            if event:
-                                interactions.append(event)
-                                comment_count += 1
-                    except Exception as exc:
-                        logger.warning(
-                            "Jira: failed to fetch comments for issue %s: %s",
-                            issue_key,
-                            exc,
-                        )
-
-                if wi.sprint_id:
-                    if wi.sprint_id not in sprint_cache:
-                        sprint_ids.add(wi.sprint_id)
-
-                fetched_count += 1
-
-            if ctx.limit is not None and fetched_count >= ctx.limit:
-                break
-
-        # Fetch sprint details
-        for sprint_id in sorted(sprint_ids):
-            if sprint_id in sprint_cache:
-                continue
+            logger.info(
+                "Jira: fetched %d work items (updated_since=%s)",
+                len(work_items),
+                updated_since,
+            )
+        finally:
             try:
-                payload = client.get_sprint(sprint_id=str(sprint_id))
+                client.close()
             except Exception as exc:
-                logger.warning("Jira: failed to fetch sprint %s: %s", sprint_id, exc)
-                continue
-            sprint = jira_sprint_payload_to_model(payload)
-            if sprint:
-                sprint_cache[sprint_id] = sprint
-                sprints.append(sprint)
-
-        logger.info(
-            "Jira: fetched %d work items (updated_since=%s)",
-            len(work_items),
-            updated_since,
-        )
-
-        try:
-            client.close()
-        except Exception as exc:
-            logger.warning("Failed to close Jira client: %s", exc)
+                logger.warning("Failed to close Jira client: %s", exc)
 
         return ProviderBatch(
             work_items=work_items,
