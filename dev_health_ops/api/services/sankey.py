@@ -16,7 +16,7 @@ from ..queries.sankey import (
     fetch_state_status_counts,
 )
 from ..queries.scopes import build_scope_filter_multi
-from .filtering import resolve_repo_filter_ids, time_window
+from .filtering import resolve_repo_filter_ids, time_window, work_category_filter
 
 logger = logging.getLogger(__name__)
 
@@ -246,8 +246,9 @@ async def _build_investment_flow(
     repo_filter, repo_params = await _repo_scope_filter(
         client, filters, repo_column="repo_id"
     )
-    scope_filter = f"{team_filter}{repo_filter}"
-    scope_params = {**team_params, **repo_params}
+    category_filter, category_params = work_category_filter(filters)
+    scope_filter = f"{team_filter}{repo_filter}{category_filter}"
+    scope_params = {**team_params, **repo_params, **category_params}
     rows = await fetch_investment_flow_items(
         client,
         start_day=start_day,

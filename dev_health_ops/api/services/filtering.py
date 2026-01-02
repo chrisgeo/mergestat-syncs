@@ -57,6 +57,24 @@ async def resolve_repo_filter_ids(client: Any, filters: MetricFilter) -> List[st
     return await resolve_repo_ids(client, repo_refs)
 
 
+def work_category_filter(
+    filters: MetricFilter, column: str = "investment_area"
+) -> Tuple[str, Dict[str, Any]]:
+    raw_categories = filters.why.work_category or []
+    categories: List[str] = []
+    for category in raw_categories:
+        if category is None:
+            continue
+        category_str = str(category).strip()
+        if category_str:
+            categories.append(category_str)
+    if not categories:
+        return "", {}
+    return f" AND {column} IN %(work_categories)s", {
+        "work_categories": categories
+    }
+
+
 async def scope_filter_for_metric(
     client: Any,
     *,
