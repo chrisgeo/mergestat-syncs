@@ -60,11 +60,14 @@ async def resolve_repo_filter_ids(client: Any, filters: MetricFilter) -> List[st
 def work_category_filter(
     filters: MetricFilter, column: str = "investment_area"
 ) -> Tuple[str, Dict[str, Any]]:
-    categories = [
-        str(category).strip()
-        for category in (filters.why.work_category or [])
-        if str(category).strip()
-    ]
+    raw_categories = filters.why.work_category or []
+    categories: List[str] = []
+    for category in raw_categories:
+        if category is None:
+            continue
+        category_str = str(category).strip()
+        if category_str:
+            categories.append(category_str)
     if not categories:
         return "", {}
     return f" AND {column} IN %(work_categories)s", {
