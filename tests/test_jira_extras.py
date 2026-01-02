@@ -7,6 +7,7 @@ import pytest
 from models.work_items import WorkItemStatusTransition
 from providers.identity import IdentityResolver
 from providers.jira.normalize import (
+    _normalize_relationship_type,
     _service_class_from_priority,
     detect_reopen_events,
     extract_jira_issue_dependencies,
@@ -30,10 +31,38 @@ from providers.jira.normalize import (
         ("P5", "background"),
         ("Medium", "standard"),
         (None, "standard"),
+        # False positive prevention tests
+        ("P10", "standard"),  # Should not match "P1"
+        ("P100", "standard"),  # Should not match "P1" or "P0"
+        ("Below", "standard"),  # Should not match "low"
+        ("Following", "standard"),  # Should not match "low"
+        ("P3", "standard"),  # Not in any marker list
     ],
 )
 def test_service_class_from_priority(priority_raw: str | None, expected: str) -> None:
     assert _service_class_from_priority(priority_raw) == expected
+
+
+@pytest.mark.parametrize(
+    ("raw_value", "expected"),
+    [
+        ("blocks", "blocks"),
+        ("Blocks", "blocks"),
+        ("is blocked by", "blocked_by"),
+        ("blocked by", "blocked_by"),
+        ("relates to", "relates"),
+        ("duplicates", "duplicates"),
+        ("other", "other"),
+        (None, "other"),
+        # False positive prevention tests
+        ("blocker", "other"),  # Should not match "blocks"
+        ("blocking", "other"),  # Should not match "blocks"
+        ("blocks all", "blocks"),  # Should match "blocks" with word boundary
+        ("is blocked by all", "blocked_by"),  # Should match "blocked by"
+    ],
+)
+def test_normalize_relationship_type(raw_value: str | None, expected: str) -> None:
+    assert _normalize_relationship_type(raw_value) == expected
 
 
 def test_extract_jira_issue_dependencies() -> None:
@@ -156,3 +185,136 @@ def test_jira_sprint_payload_to_model() -> None:
     assert sprint.started_at == datetime(2025, 2, 1, 10, 0, tzinfo=timezone.utc)
     assert sprint.ended_at == datetime(2025, 2, 15, 10, 0, tzinfo=timezone.utc)
     assert sprint.completed_at == datetime(2025, 2, 14, 10, 0, tzinfo=timezone.utc)
+
+
+def test_jira_comments_limit_no_limit() -> None:
+    """Test that without JIRA_COMMENTS_LIMIT, all comments are fetched."""
+    import os
+    from unittest.mock import MagicMock, patch
+    from metrics.work_items import fetch_jira_work_items_with_extras
+    
+    with patch.dict(os.environ, {"JIRA_COMMENTS_LIMIT": "0"}, clear=False):
+        with patch("providers.jira.client.JiraClient") as MockClient:
+            mock_client = MagicMock()
+            MockClient.from_env.return_value = mock_client
+            
+            # Mock issue with key
+            mock_issue = {"key": "TEST-1", "fields": {}}
+            mock_client.iter_issues.return_value = [mock_issue]
+            
+            # Mock 5 comments
+            mock_comments = [
+                {"created": "2025-01-01T10:00:00.000+0000", "author": {"displayName": "User1"}, "body": "Comment 1"},
+                {"created": "2025-01-01T11:00:00.000+0000", "author": {"displayName": "User2"}, "body": "Comment 2"},
+                {"created": "2025-01-01T12:00:00.000+0000", "author": {"displayName": "User3"}, "body": "Comment 3"},
+                {"created": "2025-01-01T13:00:00.000+0000", "author": {"displayName": "User4"}, "body": "Comment 4"},
+                {"created": "2025-01-01T14:00:00.000+0000", "author": {"displayName": "User5"}, "body": "Comment 5"},
+            ]
+            mock_client.iter_issue_comments.return_value = mock_comments
+            
+            identity = IdentityResolver(alias_to_canonical={})
+            from providers.status_mapping import StatusMapping
+            status_mapping = StatusMapping(
+                status_by_provider={},
+                label_status_by_provider={},
+                type_by_provider={},
+                label_type_by_provider={}
+            )
+            
+            work_items, transitions, dependencies, reopen_events, interactions, sprints = (
+                fetch_jira_work_items_with_extras(
+                    identity=identity,
+                    status_mapping=status_mapping,
+                    since=datetime(2025, 1, 1, tzinfo=timezone.utc),
+                )
+            )
+            
+            # All 5 comments should be fetched
+            assert len(interactions) == 5
+
+
+def test_jira_comments_limit_with_limit() -> None:
+    """Test that JIRA_COMMENTS_LIMIT correctly limits the number of comments fetched."""
+    import os
+    from unittest.mock import MagicMock, patch
+    from metrics.work_items import fetch_jira_work_items_with_extras
+    
+    with patch.dict(os.environ, {"JIRA_COMMENTS_LIMIT": "3"}, clear=False):
+        with patch("providers.jira.client.JiraClient") as MockClient:
+            mock_client = MagicMock()
+            MockClient.from_env.return_value = mock_client
+            
+            # Mock issue with key
+            mock_issue = {"key": "TEST-1", "fields": {}}
+            mock_client.iter_issues.return_value = [mock_issue]
+            
+            # Mock 5 comments
+            mock_comments = [
+                {"created": "2025-01-01T10:00:00.000+0000", "author": {"displayName": "User1"}, "body": "Comment 1"},
+                {"created": "2025-01-01T11:00:00.000+0000", "author": {"displayName": "User2"}, "body": "Comment 2"},
+                {"created": "2025-01-01T12:00:00.000+0000", "author": {"displayName": "User3"}, "body": "Comment 3"},
+                {"created": "2025-01-01T13:00:00.000+0000", "author": {"displayName": "User4"}, "body": "Comment 4"},
+                {"created": "2025-01-01T14:00:00.000+0000", "author": {"displayName": "User5"}, "body": "Comment 5"},
+            ]
+            mock_client.iter_issue_comments.return_value = mock_comments
+            
+            identity = IdentityResolver(alias_to_canonical={})
+            from providers.status_mapping import StatusMapping
+            status_mapping = StatusMapping(
+                status_by_provider={},
+                label_status_by_provider={},
+                type_by_provider={},
+                label_type_by_provider={}
+            )
+            
+            work_items, transitions, dependencies, reopen_events, interactions, sprints = (
+                fetch_jira_work_items_with_extras(
+                    identity=identity,
+                    status_mapping=status_mapping,
+                    since=datetime(2025, 1, 1, tzinfo=timezone.utc),
+                )
+            )
+            
+            # Only 3 comments should be fetched due to limit
+            assert len(interactions) == 3
+
+
+def test_jira_comments_error_handling() -> None:
+    """Test that comment fetch errors are handled gracefully and don't halt sync."""
+    import os
+    from unittest.mock import MagicMock, patch
+    from metrics.work_items import fetch_jira_work_items_with_extras
+    
+    with patch("providers.jira.client.JiraClient") as MockClient:
+        mock_client = MagicMock()
+        MockClient.from_env.return_value = mock_client
+        
+        # Mock issue with key
+        mock_issue = {"key": "TEST-1", "fields": {}}
+        mock_client.iter_issues.return_value = [mock_issue]
+        
+        # Mock error when fetching comments
+        mock_client.iter_issue_comments.side_effect = Exception("API Error")
+        
+        identity = IdentityResolver(alias_to_canonical={})
+        from providers.status_mapping import StatusMapping
+        status_mapping = StatusMapping(
+                status_by_provider={},
+                label_status_by_provider={},
+                type_by_provider={},
+                label_type_by_provider={}
+            )
+        
+        # Should not raise an exception
+        work_items, transitions, dependencies, reopen_events, interactions, sprints = (
+            fetch_jira_work_items_with_extras(
+                identity=identity,
+                status_mapping=status_mapping,
+                since=datetime(2025, 1, 1, tzinfo=timezone.utc),
+            )
+        )
+        
+        # Work item should still be fetched
+        assert len(work_items) == 1
+        # But no interactions due to error
+        assert len(interactions) == 0

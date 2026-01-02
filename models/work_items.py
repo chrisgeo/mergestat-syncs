@@ -117,6 +117,7 @@ class WorkItemDependency:
     target_work_item_id: str
     relationship_type: str
     relationship_type_raw: str
+    _mergestat_synced_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 @dataclass(frozen=True)
@@ -128,6 +129,7 @@ class WorkItemReopenEvent:
     from_status_raw: Optional[str]
     to_status_raw: Optional[str]
     actor: Optional[str]
+    _mergestat_synced_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 @dataclass(frozen=True)
@@ -138,6 +140,7 @@ class WorkItemInteractionEvent:
     occurred_at: datetime
     actor: Optional[str]
     body_length: int
+    _mergestat_synced_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 @dataclass(frozen=True)
@@ -149,3 +152,4 @@ class Sprint:
     started_at: Optional[datetime]
     ended_at: Optional[datetime]
     completed_at: Optional[datetime]
+    _mergestat_synced_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
