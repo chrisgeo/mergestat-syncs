@@ -40,7 +40,9 @@ class WorkItem:
     All timestamps are UTC.
     """
 
-    work_item_id: str  # stable string: jira:ABC-123, gh:owner/repo#123, gitlab:group/project#456
+    work_item_id: (
+        str  # stable string: jira:ABC-123, gh:owner/repo#123, gitlab:group/project#456
+    )
     provider: WorkItemProvider
     title: str
 
@@ -53,7 +55,9 @@ class WorkItem:
     project_key: Optional[str] = None
     project_id: Optional[str] = None
 
-    assignees: List[str] = field(default_factory=list)  # canonical identities when resolvable
+    assignees: List[str] = field(
+        default_factory=list
+    )  # canonical identities when resolvable
     reporter: Optional[str] = None  # canonical identity when resolvable
 
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))

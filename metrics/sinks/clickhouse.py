@@ -378,9 +378,7 @@ class ClickHouseMetricsSink(BaseMetricsSink):
             rows,
         )
 
-    def write_work_item_dependencies(
-        self, rows: Sequence[WorkItemDependency]
-    ) -> None:
+    def write_work_item_dependencies(self, rows: Sequence[WorkItemDependency]) -> None:
         if not rows:
             return
         self._insert_rows(

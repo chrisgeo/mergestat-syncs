@@ -23,7 +23,10 @@ class TestBackendDetection:
     def test_clickhouse_detection(self):
         assert detect_backend("clickhouse://localhost:8123") == SinkBackend.CLICKHOUSE
         assert detect_backend("clickhouse+http://localhost") == SinkBackend.CLICKHOUSE
-        assert detect_backend("clickhouse+https://localhost:8123") == SinkBackend.CLICKHOUSE
+        assert (
+            detect_backend("clickhouse+https://localhost:8123")
+            == SinkBackend.CLICKHOUSE
+        )
 
     def test_postgres_detection(self):
         assert detect_backend("postgresql://localhost/db") == SinkBackend.POSTGRES
