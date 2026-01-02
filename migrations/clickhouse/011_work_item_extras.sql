@@ -3,6 +3,8 @@ ALTER TABLE work_items
     ADD COLUMN IF NOT EXISTS service_class Nullable(String),
     ADD COLUMN IF NOT EXISTS due_at Nullable(DateTime64(3));
 
+-- work_item_dependencies: Tracks relationships between work items (blocks, relates, etc.).
+-- Using ReplacingMergeTree for deduplication on sync retries.
 CREATE TABLE IF NOT EXISTS work_item_dependencies (
     source_work_item_id String,
     target_work_item_id String,
@@ -11,6 +13,8 @@ CREATE TABLE IF NOT EXISTS work_item_dependencies (
 ) ENGINE = ReplacingMergeTree()
 ORDER BY (source_work_item_id, target_work_item_id, relationship_type);
 
+-- work_item_reopen_events: Records when work items are reopened from done/canceled states.
+-- Using ReplacingMergeTree for deduplication on sync retries.
 CREATE TABLE IF NOT EXISTS work_item_reopen_events (
     work_item_id String,
     occurred_at DateTime64(3),
@@ -22,6 +26,10 @@ CREATE TABLE IF NOT EXISTS work_item_reopen_events (
 ) ENGINE = ReplacingMergeTree()
 ORDER BY (work_item_id, occurred_at);
 
+-- work_item_interactions: Records comments and other interaction events on work items.
+-- Using ReplacingMergeTree for deduplication on sync retries.
+-- ORDER BY includes interaction_type to allow efficient deduplication when the same
+-- interaction event might be recorded multiple times at the same timestamp.
 CREATE TABLE IF NOT EXISTS work_item_interactions (
     work_item_id String,
     provider String,
@@ -32,6 +40,8 @@ CREATE TABLE IF NOT EXISTS work_item_interactions (
 ) ENGINE = ReplacingMergeTree()
 ORDER BY (work_item_id, occurred_at, interaction_type);
 
+-- sprints: Stores sprint metadata from work tracking systems.
+-- Using ReplacingMergeTree for deduplication on sync retries.
 CREATE TABLE IF NOT EXISTS sprints (
     provider String,
     sprint_id String,
