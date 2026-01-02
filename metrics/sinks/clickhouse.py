@@ -390,7 +390,7 @@ class ClickHouseMetricsSink(BaseMetricsSink):
                 "target_work_item_id",
                 "relationship_type",
                 "relationship_type_raw",
-                "_mergestat_synced_at",
+                "last_synced",
             ],
             rows,
         )
@@ -410,7 +410,7 @@ class ClickHouseMetricsSink(BaseMetricsSink):
                 "from_status_raw",
                 "to_status_raw",
                 "actor",
-                "_mergestat_synced_at",
+                "last_synced",
             ],
             rows,
         )
@@ -429,7 +429,7 @@ class ClickHouseMetricsSink(BaseMetricsSink):
                 "occurred_at",
                 "actor",
                 "body_length",
-                "_mergestat_synced_at",
+                "last_synced",
             ],
             rows,
         )
@@ -447,7 +447,7 @@ class ClickHouseMetricsSink(BaseMetricsSink):
                 "started_at",
                 "ended_at",
                 "completed_at",
-                "_mergestat_synced_at",
+                "last_synced",
             ],
             rows,
         )
