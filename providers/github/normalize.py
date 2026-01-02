@@ -469,10 +469,9 @@ def github_pr_to_work_item(
             )
 
         prev_status = "in_progress"  # PRs start as in_progress
-        
         # Track if we've seen a merged event to determine closed status correctly
         merged_in_history = False
-        
+
         for ev in sorted(list(events), key=_ev_dt):
             event_type = str(getattr(ev, "event", "") or "").lower()
             occurred_at = _to_utc(getattr(ev, "created_at", None)) or created_at
@@ -694,9 +693,9 @@ def detect_github_reopen_events(
 
 # Regex patterns for parsing GitHub-style references from issue/PR body
 _GITHUB_ISSUE_REF_PATTERN = re.compile(
-    r"(?m)(?:^|[^\S\r\n])(?:depends\s+on|blocked\s+by|blocks|fixes|closes|resolves)\s*:?\s*"
+    r"(?:^|[^\S\r\n])(?:depends\s+on|blocked\s+by|blocks|fixes|closes|resolves)\s*:?\s*"
     r"(?:#(\d+)|(?:(?:https?://)?github\.com/)?([a-zA-Z0-9_-]+/[a-zA-Z0-9_.-]+)#(\d+))",
-    re.IGNORECASE,
+    re.IGNORECASE | re.MULTILINE,
 )
 
 
@@ -812,7 +811,7 @@ def enrich_work_item_with_priority(
         WorkItem with priority/service_class set (or original if no match)
     """
     priority, service_class = _priority_from_labels(labels)
-    if not priority:
+    if priority is None:
         return work_item
 
     return WorkItem(
