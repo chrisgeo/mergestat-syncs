@@ -7,7 +7,7 @@ from ..models.schemas import InvestmentCategory, InvestmentResponse, InvestmentS
 from ..queries.client import clickhouse_client
 from ..queries.investment import fetch_investment_breakdown, fetch_investment_edges
 from ..queries.scopes import build_scope_filter_multi
-from .filtering import resolve_repo_filter_ids, time_window
+from .filtering import resolve_repo_filter_ids, time_window, work_category_filter
 
 
 async def build_investment_response(
@@ -28,6 +28,9 @@ async def build_investment_response(
             scope_filter, scope_params = build_scope_filter_multi(
                 "repo", repo_ids, repo_column="repo_id"
             )
+        category_filter, category_params = work_category_filter(filters)
+        scope_filter = f"{scope_filter}{category_filter}"
+        scope_params = {**scope_params, **category_params}
         rows = await fetch_investment_breakdown(
             client,
             start_day=start_day,
