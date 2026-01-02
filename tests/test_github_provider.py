@@ -708,16 +708,16 @@ def test_extract_github_dependencies_no_body():
 
 def test_priority_from_labels():
     """Test priority extraction from labels."""
-    assert _priority_from_labels(["priority::critical"]) == "critical"
-    assert _priority_from_labels(["priority::high"]) == "high"
-    assert _priority_from_labels(["priority::medium"]) == "medium"
-    assert _priority_from_labels(["priority::low"]) == "low"
-    assert _priority_from_labels(["p0"]) == "critical"
-    assert _priority_from_labels(["p1"]) == "high"
-    assert _priority_from_labels(["p2"]) == "medium"
-    assert _priority_from_labels(["p3"]) == "low"
-    assert _priority_from_labels(["urgent"]) == "critical"
-    assert _priority_from_labels(["bug"]) is None
+    assert _priority_from_labels(["priority::critical"]) == ("critical", "expedite")
+    assert _priority_from_labels(["priority::high"]) == ("high", "fixed_date")
+    assert _priority_from_labels(["priority::medium"]) == ("medium", "standard")
+    assert _priority_from_labels(["priority::low"]) == ("low", "intangible")
+    assert _priority_from_labels(["p0"]) == ("critical", "expedite")
+    assert _priority_from_labels(["p1"]) == ("high", "fixed_date")
+    assert _priority_from_labels(["p2"]) == ("medium", "standard")
+    assert _priority_from_labels(["p3"]) == ("low", "intangible")
+    assert _priority_from_labels(["urgent"]) == ("critical", "expedite")
+    assert _priority_from_labels(["bug"]) == (None, None)
 
 
 def test_enrich_work_item_with_priority():
