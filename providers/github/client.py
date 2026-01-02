@@ -76,7 +76,9 @@ class GitHubWorkClient:
             if limit is not None and count >= int(limit):
                 return
 
-    def iter_issue_events(self, issue: Any, *, limit: Optional[int] = None) -> Iterable[Any]:
+    def iter_issue_events(
+        self, issue: Any, *, limit: Optional[int] = None
+    ) -> Iterable[Any]:
         """
         Iterate issue events (labeled/unlabeled/closed/reopened/assigned/...) via REST.
         """
@@ -84,6 +86,86 @@ class GitHubWorkClient:
         count = 0
         for ev in events:
             yield ev
+            count += 1
+            if limit is not None and count >= int(limit):
+                return
+
+    def iter_pull_requests(
+        self,
+        *,
+        owner: str,
+        repo: str,
+        state: str = "all",
+        sort: str = "updated",
+        direction: str = "desc",
+        limit: Optional[int] = None,
+    ) -> Iterable[Any]:
+        """
+        Iterate pull requests in a repository via REST.
+        """
+        gh_repo = self.get_repo(owner=owner, repo=repo)
+        pulls = gh_repo.get_pulls(state=state, sort=sort, direction=direction)
+        count = 0
+        for pr in pulls:
+            yield pr
+            count += 1
+            if limit is not None and count >= int(limit):
+                return
+
+    def iter_issue_comments(
+        self, issue: Any, *, limit: Optional[int] = None
+    ) -> Iterable[Any]:
+        """
+        Iterate comments on an issue via REST.
+        """
+        comments = issue.get_comments()
+        count = 0
+        for comment in comments:
+            yield comment
+            count += 1
+            if limit is not None and count >= int(limit):
+                return
+
+    def iter_pr_comments(
+        self, pr: Any, *, limit: Optional[int] = None
+    ) -> Iterable[Any]:
+        """
+        Iterate comments on a pull request (issue comments + review comments).
+        """
+        # Issue-style comments
+        for comment in self.iter_issue_comments(pr, limit=limit):
+            yield comment
+
+    def iter_pr_review_comments(
+        self, pr: Any, *, limit: Optional[int] = None
+    ) -> Iterable[Any]:
+        """
+        Iterate review comments on a pull request.
+        """
+        comments = pr.get_review_comments()
+        count = 0
+        for comment in comments:
+            yield comment
+            count += 1
+            if limit is not None and count >= int(limit):
+                return
+
+    def iter_repo_milestones(
+        self,
+        *,
+        owner: str,
+        repo: str,
+        state: str = "all",
+        limit: Optional[int] = None,
+    ) -> Iterable[Any]:
+        """
+        Iterate milestones in a repository via REST.
+        """
+        gh_repo = self.get_repo(owner=owner, repo=repo)
+        milestones = gh_repo.get_milestones(state=state)
+        count = 0
+        for ms in milestones:
+            yield ms
             count += 1
             if limit is not None and count >= int(limit):
                 return
@@ -203,4 +285,3 @@ class GitHubWorkClient:
             if not page.get("hasNextPage"):
                 return
             after = page.get("endCursor")
-
