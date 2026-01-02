@@ -85,9 +85,21 @@ def _register_builtins() -> None:
 
     register_provider("jira", _jira_factory)
 
-    # GitHub and GitLab providers will be added in future PRs
-    # register_provider("github", _github_factory)
-    # register_provider("gitlab", _gitlab_factory)
+    # GitLab provider (lazy import to avoid requiring python-gitlab at startup)
+    def _gitlab_factory() -> Provider:
+        from providers.gitlab.provider import GitLabProvider
+
+        return GitLabProvider()
+
+    register_provider("gitlab", _gitlab_factory)
+
+    # GitHub provider (lazy import to avoid requiring PyGithub at startup)
+    def _github_factory() -> Provider:
+        from providers.github.provider import GitHubProvider
+
+        return GitHubProvider()
+
+    register_provider("github", _github_factory)
 
 
 _register_builtins()
