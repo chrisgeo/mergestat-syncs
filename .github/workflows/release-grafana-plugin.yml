@@ -137,7 +137,7 @@ jobs:
           cache-dependency-path: grafana/plugins/dev-health-panels/package-lock.json
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --legacy-peer-deps
 
       - name: Update package.json version
         run: npm version "${{ env.VERSION }}" --no-git-tag-version --allow-same-version

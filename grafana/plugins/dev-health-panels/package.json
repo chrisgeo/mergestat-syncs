@@ -38,7 +38,6 @@
     "@types/lodash": "^4.14.194",
     "@types/node": "^25.0.3",
     "@types/react-router-dom": "^5.2.0",
-    "@types/testing-library__jest-dom": "6.0.0",
     "copy-webpack-plugin": "^13.0.1",
     "css-loader": "^7.1.2",
     "eslint-plugin-deprecation": "^3.0.0",
