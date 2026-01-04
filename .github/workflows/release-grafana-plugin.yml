@@ -130,7 +130,7 @@ jobs:
           echo "Parsed version: $VERSION"
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '20'
           cache: 'npm'
@@ -214,7 +214,7 @@ jobs:
           echo "SHA1_PATH=$ZIP_FILE.sha1" >> "$GITHUB_ENV"
       - name: Generate artifact attestation
         id: attestation
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v3
         with:
           subject-path: grafana/plugins/dev-health-panels/${{ env.ARTIFACT_PATH }}
       - name: Upload Release Assets

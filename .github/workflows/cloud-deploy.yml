@@ -39,13 +39,13 @@ jobs:
 
       - name: Authenticate to Google Cloud
         if: ${{ env.CLOUD_RUN_PROJECT && env.CLOUD_RUN_REGION && env.CLOUD_RUN_SERVICE && env.GCP_SA_KEY }}
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@v3
         with:
           credentials_json: ${{ env.GCP_SA_KEY }}
 
       - name: Set up gcloud CLI
         if: ${{ env.CLOUD_RUN_PROJECT && env.CLOUD_RUN_REGION && env.CLOUD_RUN_SERVICE && env.GCP_SA_KEY }}
-        uses: google-github-actions/setup-gcloud@v2
+        uses: google-github-actions/setup-gcloud@v3
         with:
           project_id: ${{ env.CLOUD_RUN_PROJECT }}
 
