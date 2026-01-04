@@ -47,7 +47,9 @@ export const InvestmentFlowPanel: React.FC<Props> = ({ data, width, height, opti
   const frame = getFrameWithFields(data.series, [sourceFieldName, valueFieldName]);
   const targetExists = frame ? Boolean(getField(frame, targetFieldName)) : false;
 
-  // Calculate cutoff timestamp using timeRange.to (falls back to 0 if not available)
+  // Calculate cutoff timestamp using timeRange.to
+  // If timeRange is not available, fallback to 0 which results in a negative cutoff,
+  // effectively disabling the time window filter (all data passes through)
   const cutoffTimestamp = useMemo(() => {
     const windowMs = investmentOptions.timeWindowDays * 24 * 60 * 60 * 1000;
     const now = timeRange?.to?.valueOf() ?? 0;
