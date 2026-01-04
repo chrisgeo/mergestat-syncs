@@ -27,7 +27,7 @@ type FlowRecord = {
   day?: string;
 };
 
-export const InvestmentFlowPanel: React.FC<Props> = ({ data, width, height, options }) => {
+export const InvestmentFlowPanel: React.FC<Props> = ({ data, width, height, options, timeRange }) => {
   const theme = useTheme2();
   const styles = useStyles2(getStyles);
 
@@ -47,6 +47,13 @@ export const InvestmentFlowPanel: React.FC<Props> = ({ data, width, height, opti
   const frame = getFrameWithFields(data.series, [sourceFieldName, valueFieldName]);
   const targetExists = frame ? Boolean(getField(frame, targetFieldName)) : false;
 
+  // Calculate cutoff timestamp using timeRange.to (falls back to 0 if not available)
+  const cutoffTimestamp = useMemo(() => {
+    const windowMs = investmentOptions.timeWindowDays * 24 * 60 * 60 * 1000;
+    const now = timeRange?.to?.valueOf() ?? 0;
+    return now - windowMs;
+  }, [investmentOptions.timeWindowDays, timeRange]);
+
   const flows = useMemo(() => {
     if (!frame) {
       return [];
@@ -60,8 +67,6 @@ export const InvestmentFlowPanel: React.FC<Props> = ({ data, width, height, opti
       return [];
     }
 
-    const windowMs = investmentOptions.timeWindowDays * 24 * 60 * 60 * 1000;
-    const cutoff = Date.now() - windowMs;
     const length = frame.length ?? sourceField.values.length;
     const rows: FlowRecord[] = [];
 
@@ -80,7 +85,7 @@ export const InvestmentFlowPanel: React.FC<Props> = ({ data, width, height, opti
         day = String(getFieldValue<string>(dayField, i) ?? '');
         if (day) {
           const time = Date.parse(day);
-          if (Number.isFinite(time) && time < cutoff) {
+          if (Number.isFinite(time) && time < cutoffTimestamp) {
             continue;
           }
         }
@@ -88,7 +93,7 @@ export const InvestmentFlowPanel: React.FC<Props> = ({ data, width, height, opti
       rows.push({ source, target, value, day });
     }
     return rows;
-  }, [frame, investmentOptions, sourceFieldName, targetFieldName, valueFieldName, dayFieldName]);
+  }, [frame, cutoffTimestamp, sourceFieldName, targetFieldName, valueFieldName, dayFieldName]);
 
   // Generate color map based on unique sources and targets found in flows
   const colorMap = useMemo(() => {

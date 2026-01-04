@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { css } from '@emotion/css';
 import { GrafanaTheme2, PanelProps } from '@grafana/data';
 import { useStyles2, useTheme2 } from '@grafana/ui';
@@ -95,7 +95,6 @@ const DonutGlyph: React.FC<{ slices: Array<{ label: string; value: number }> }> 
   if (total <= 0) {
     return <span className={styles.muted}>n/a</span>;
   }
-  let current = 0;
   const driverColors: Record<string, string> = {
     Churn: theme.colors.error.main,
     Complexity: theme.colors.warning.main,
@@ -104,14 +103,14 @@ const DonutGlyph: React.FC<{ slices: Array<{ label: string; value: number }> }> 
     Review: theme.visualization.getColorByName('blue'),
   };
 
-  const paths = slices.map((slice) => {
+  const paths = slices.map((slice, index) => {
     const value = slice.value;
     if (value <= 0) {
       return null;
     }
+    const current = slices.slice(0, index).reduce((sum, s) => sum + s.value, 0);
     const startAngle = (current / total) * Math.PI * 2;
     const endAngle = ((current + value) / total) * Math.PI * 2;
-    current += value;
     const x1 = size / 2 + radius * Math.cos(startAngle);
     const y1 = size / 2 + radius * Math.sin(startAngle);
     const x2 = size / 2 + radius * Math.cos(endAngle);
@@ -159,13 +158,6 @@ export const HotspotExplorerPanel: React.FC<Props> = ({ data, options }) => {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>(
     hotspotOptions.defaultSortByRisk ? 'desc' : 'asc'
   );
-
-  useEffect(() => {
-    if (hotspotOptions.defaultSortByRisk) {
-      setSortKey('risk_score');
-      setSortDir('desc');
-    }
-  }, [hotspotOptions.defaultSortByRisk]);
 
   const trendMap = useMemo(() => {
     const map = new Map<string, Array<{ day: string; value: number }>>();
